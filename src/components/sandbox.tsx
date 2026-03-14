@@ -18,10 +18,12 @@ interface SandboxProps {
 
 function ShareBar({
   code,
+  openHtml,
   containerRef,
   onReload,
 }: {
   code: string;
+  openHtml: string;
   containerRef: React.RefObject<HTMLDivElement | null>;
   onReload?: () => void;
 }) {
@@ -52,10 +54,10 @@ function ShareBar({
   }, [code, showToast]);
 
   const handleOpen = useCallback(() => {
-    const blob = new Blob([code], { type: "text/html" });
+    const blob = new Blob([openHtml], { type: "text/html" });
     const url = URL.createObjectURL(blob);
     window.open(url, "_blank");
-  }, [code]);
+  }, [openHtml]);
 
   const handleReload = useCallback(() => {
     onReload?.();
@@ -339,7 +341,7 @@ export function Sandbox({ code, audioTracks = [], runtimeEnv = {}, onConsoleMess
 
   return (
     <div ref={containerRef} className="relative h-full w-full bg-black">
-      <ShareBar code={code} containerRef={containerRef} onReload={handleReload} />
+      <ShareBar code={code} openHtml={srcDoc} containerRef={containerRef} onReload={handleReload} />
       <iframe
         ref={iframeRef}
         key={`${code}:${reloadKey}`}
