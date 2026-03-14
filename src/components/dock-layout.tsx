@@ -230,6 +230,23 @@ export function DockLayout() {
     panelApi.api?.setActive?.();
   }, [panelFocusRequest]);
 
+  // Auto-activate code panel when code changes
+  const prevCodeSnapshotRef = useRef<string | null>(null);
+  useEffect(() => {
+    const api = apiRef.current;
+    if (!api || !currentCode) return;
+    if (prevCodeSnapshotRef.current === currentCode) return;
+    const isFirstRender = prevCodeSnapshotRef.current === null;
+    prevCodeSnapshotRef.current = currentCode;
+    if (isFirstRender) return;
+
+    const codePanel = api.panels.find((p) => p.id === "code");
+    if (codePanel) {
+      const panelApi = codePanel as unknown as { api?: { setActive?: () => void } };
+      panelApi.api?.setActive?.();
+    }
+  }, [currentCode]);
+
   // Load project from ?project= URL param (e.g. after forking)
   useEffect(() => {
     const url = new URL(window.location.href);

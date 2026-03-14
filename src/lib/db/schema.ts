@@ -139,7 +139,7 @@ const PersistedChatMessageSchema = z
 
 export const SaveProjectSnapshotRequestSchema = z.object({
   title: z.string().max(200).optional(),
-  engine: z.enum(["canvas2d", "threejs"]),
+  engine: z.enum(["canvas2d", "threejs", "phaser"]),
   currentCode: z.string().nullable().optional(),
   projectFiles: z.array(ProjectFileSchema).max(500),
   controls: z.array(GameControlSchema).max(50).default([]),

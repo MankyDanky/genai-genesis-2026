@@ -85,7 +85,6 @@ function EditPopup({
   }, [onClose, loading]);
 
   const imageId = image.url.split("/api/images/")[1];
-
   const doSubmit = async () => {
     const text = input.trim();
     if (!text || loading || !imageId) return;
@@ -141,6 +140,22 @@ function EditPopup({
       <div className="flex flex-col items-center gap-4 max-w-[520px] w-full mx-4">
         <div className="relative border border-[var(--color-border-light)] bg-black">
           <button
+            onClick={() => {
+              const a = document.createElement("a");
+              a.href = image.url;
+              a.download = `${image.prompt.slice(0, 40).replace(/[^a-zA-Z0-9]+/g, "-")}.png`;
+              a.click();
+            }}
+            className="absolute -top-3 -right-12 w-6 h-6 flex items-center justify-center bg-[var(--color-surface)] border border-[var(--color-border-light)] text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] hover:bg-[var(--color-accent-glow)] text-xs z-10 transition-all duration-150"
+            title="Download image"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+          </button>
+          <button
             onClick={() => !loading && onClose()}
             className="absolute -top-3 -right-3 w-6 h-6 flex items-center justify-center bg-[var(--color-surface)] border border-[var(--color-border-light)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] text-xs z-10 transition-colors"
           >
@@ -156,7 +171,6 @@ function EditPopup({
         <p className="text-[10px] text-[var(--color-text-muted)] text-center max-w-[400px] leading-relaxed">
           {image.prompt}
         </p>
-
         <form onSubmit={handleSubmit} className="flex gap-2 w-full">
           <textarea
             ref={textareaRef}
@@ -249,12 +263,30 @@ export function ImagesPanel({ images, onAddImage }: ImagesPanelProps) {
               onClick={() => setSelectedImage(image)}
               style={{ animation: "fadeIn 0.2s ease-out" }}
             >
-              <div className="aspect-square overflow-hidden bg-black">
+              <div className="group/img relative aspect-square overflow-hidden bg-black">
                 <img
                   src={image.url}
                   alt={image.prompt}
                   className="w-full h-full object-cover"
                 />
+                <button
+                  type="button"
+                  title="Download image"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const a = document.createElement("a");
+                    a.href = image.url;
+                    a.download = `${image.prompt.slice(0, 40).replace(/[^a-zA-Z0-9]+/g, "-")}.png`;
+                    a.click();
+                  }}
+                  className="absolute top-1.5 right-1.5 w-6 h-6 flex items-center justify-center bg-black/70 border border-[var(--color-border-light)] text-[var(--color-text-muted)] opacity-0 group-hover/img:opacity-100 hover:!border-[var(--color-accent)] hover:!text-[var(--color-accent)] hover:!bg-[var(--color-accent-glow)] transition-all duration-150"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                </button>
               </div>
               <div className="px-2 py-1.5">
                 <p className="text-[9px] text-[var(--color-text-secondary)] leading-tight line-clamp-2">

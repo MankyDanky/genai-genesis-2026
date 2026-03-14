@@ -174,7 +174,7 @@ function extractErrorDetails(error: unknown) {
 }
 
 function isGameEngine(value: unknown): value is GameEngine {
-  return value === "canvas2d" || value === "threejs";
+  return value === "canvas2d" || value === "threejs" || value === "phaser";
 }
 
 function sanitizeMessagesForModel(messages: unknown[]): Array<{ role: "user" | "assistant"; parts: Array<{ type: "text"; text: string }> }> {
@@ -537,6 +537,7 @@ export async function POST(req: Request) {
       composerMode?: unknown;
       planningMode?: unknown;
       gameEngine?: unknown;
+      templateSkills?: unknown;
     };
 
     const messages = parsed.messages;
@@ -585,6 +586,7 @@ export async function POST(req: Request) {
             const candidate = v as Partial<GeneratedImagePayload>;
             return typeof candidate.url === "string" && typeof candidate.prompt === "string";
           })
+          .map((v) => ({ url: v.url, prompt: v.prompt }))
           .slice(-120)
       : [];
     const audioTracks: AudioTrackPayload[] = Array.isArray(parsed.audioTracks)
@@ -610,6 +612,8 @@ export async function POST(req: Request) {
         : "agent";
     const planningMode = composerMode === "plan";
     const gameEngine: GameEngine = isGameEngine(parsed.gameEngine) ? parsed.gameEngine : "canvas2d";
+    const templateSkills = typeof parsed.templateSkills === "string"
+      ? parsed.templateSkills.slice(0, 4000) : null;
 
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return new Response(JSON.stringify({ error: "Messages array is required" }), {
@@ -651,6 +655,7 @@ export async function POST(req: Request) {
         composerMode,
         gameEngine,
         planningMode,
+        templateSkills,
       }),
       messages: modelMessages,
       activeTools: (
@@ -675,6 +680,7 @@ export async function POST(req: Request) {
             "read_lints",
             "edit_file",
             "todo_write",
+            "set_engine",
           ] as const;
 
           const mutatingTools = new Set<string>([
@@ -996,6 +1002,20 @@ export async function POST(req: Request) {
             ).min(1),
           }),
           execute: async ({ merge, todos }) => ({ success: true, merge, count: todos.length }),
+        }),
+        set_engine: tool({
+          description:
+            "Switch the rendering engine. Call once before generating code on the first message if the best engine differs from the current one.",
+          inputSchema: z.object({
+            engine: z.enum(["canvas2d", "phaser", "threejs"]),
+            reason: z.string().optional(),
+          }),
+          execute: async ({ engine, reason }) => ({
+            success: true,
+            engine,
+            label: engine === "threejs" ? "Three.js / WebGL" : engine === "phaser" ? "Phaser.js" : "HTML5 Canvas",
+            reason: reason ?? null,
+          }),
         }),
       },
       providerOptions: {

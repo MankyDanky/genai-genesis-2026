@@ -1,7 +1,6 @@
 import type { GameEngine } from "@/lib/game-engine";
 import type { ProjectFile } from "@/lib/project-files";
 import { projectFilesToPrompt } from "@/lib/project-files";
-
 interface ConsoleLogPayload {
     level: "log" | "info" | "warn" | "error";
     source: "console" | "error" | "unhandledrejection";
@@ -34,6 +33,7 @@ interface PromptOptions {
     composerMode?: "agent" | "plan" | "debug" | "ask";
     planningMode?: boolean;
     gameEngine?: GameEngine;
+    templateSkills?: string | null;
 }
 
 export function getSystemPrompt({
@@ -46,8 +46,10 @@ export function getSystemPrompt({
     composerMode = "agent",
     planningMode = false,
     gameEngine = "canvas2d",
+    templateSkills = null,
 }: PromptOptions = {}): string {
     const isThreeJs = gameEngine === "threejs";
+    const isPhaser = gameEngine === "phaser";
 
     const base = `You are an expert game developer who creates stunning, polished browser games.
 
@@ -73,6 +75,7 @@ Use the exact tool names below:
 - \`list_image_assets\`: list generated image assets (url/description)
 - \`todo_write\`: planning tasks/todos
 - \`update_sandbox\`: fallback single-file HTML update
+- \`set_engine\`: switch the rendering engine (canvas2d, phaser, threejs)
 
 Rules:
 - Inspect before editing: use read/list/search/lint tools when uncertain.
@@ -82,6 +85,13 @@ Rules:
 - \`update_project_files\` is merge-based; unspecified files are preserved.
 - Use \`deletePaths\` only when you intentionally remove files
 - Use \`delete_file\` only when explicitly removing a file.
+
+CRITICAL — JSON encoding for tool inputs:
+- All tool inputs are JSON. String values MUST use proper JSON escaping.
+- Newlines in code MUST be encoded as the two-character sequence \\n, NEVER as a literal line break inside a JSON string.
+- Tabs must be \\t, backslashes must be \\\\, quotes must be \\".
+- Failure to escape these will cause a "Bad control character" JSON parse error and the tool call will fail.
+- This applies especially to the \`content\` field in \`update_project_files\` and \`update_sandbox\`, and to \`oldString\`/\`newString\`/\`find\`/\`replace\` in edit/patch tools.
 - When user requests new art/assets, call \`generate_image\` before code updates and use returned URL(s).
 - When audio is requested or would clearly improve gameplay, call \`generate_sound_effect\` and/or \`generate_music\`.
 - Use \`todo_read\` to inspect existing tasks before planning updates.
@@ -99,29 +109,45 @@ Rules:
 - Keep outputs deterministic and runnable immediately.
 - Never emit placeholder pseudo-code when concrete code is possible.
 
-## Engine Mode
+## Engine Selection
 
-Current engine mode: ${isThreeJs ? "Three.js / WebGL" : "HTML5 Canvas"}
+Current engine: ${isPhaser ? "Phaser.js" : isThreeJs ? "Three.js / WebGL" : "HTML5 Canvas"}
 
-${
-    isThreeJs
-        ? `When in Three.js mode:
+On the FIRST message when creating a new game, call \`set_engine\` BEFORE generating code if the best engine differs from the current one. Do NOT call \`set_engine\` on follow-up messages or edits to an existing game.
+
+When to use each engine:
+- **canvas2d**: Simple 2D games without complex physics — snake, match-3, idle/clicker, card games. Zero dependencies, fastest to load.
+- **phaser**: 2D games that benefit from built-in physics, tilemaps, scene management, tweens, or sprite animation — platformers, physics puzzles, .io-style arena games, tower defense, any game with multiple scenes or levels.
+- **threejs**: 3D games — first-person, third-person, 3D environments, WebGL rendering.
+
+### Canvas mode rules
+- Use HTML5 Canvas for ALL rendering
+- NO external dependencies — no CDN links, no imports, no fetch calls
+
+### Phaser mode rules
+- Build 2D games with Phaser 3
+- Load Phaser via CDN: https://cdn.jsdelivr.net/npm/phaser@3.90.0/dist/phaser.min.js (full) or phaser-arcade-physics.min.js (arcade-only, lighter)
+- Use Phaser.AUTO renderer, Phaser.Scale.FIT + CENTER_BOTH for responsive iframe sizing
+- CSS body reset: margin:0; padding:0; overflow:hidden
+- Structure with Scene classes (preload/create/update lifecycle)
+- Built-in physics: Arcade for simple games, Matter.js for complex
+- Use Graphics.generateTexture() for programmatic textures when prototyping
+- External dependencies are allowed only for Phaser-related scripts from trusted CDNs
+
+### Three.js mode rules
 - Build 3D games with Three.js
 - Use primitive geometry only (BoxGeometry, SphereGeometry, PlaneGeometry, etc.)
 - Do not use external 3D asset generation services or downloaded model files
-- External dependencies are allowed only for Three.js-related scripts from trusted CDNs`
-        : `When in Canvas mode:
-- Use HTML5 Canvas for ALL rendering
-- NO external dependencies — no CDN links, no imports, no fetch calls`
-}
+- External dependencies are allowed only for Three.js-related scripts from trusted CDNs
 
-## Output Rules
+${templateSkills ? `## Genre-Specific Guidelines\n\n${templateSkills}\n\n` : ""}## Output Rules
 
 - Generate a multi-file project structure
 - Include \`index.html\` and split logic/styles into dedicated files when sensible (\`src/*.js\`, \`styles/*.css\`)
 - Keep files self-contained and runnable in browser
 - Keep assets as separate files in \`assets/\` when needed
 - In Three.js projects, keep mesh/object definitions in dedicated files (for example \`src/meshes/*.js\`) so they can be edited and previewed independently
+- In Phaser projects, keep Scene classes in dedicated files (for example \`src/scenes/*.js\`) so they can be edited independently
 - For exact, local edits (rename one symbol, tweak one function), patch only the affected file.
 - For structural changes (new modules, new assets, refactors), update only changed/new files; do not resend unchanged files.
 
@@ -191,10 +217,12 @@ When you create or update a game:
             .join("\n")}`
         : "";
     const audioSection = currentAudioTracks.length > 0
-        ? `\n\n## Available Generated Audio\n\n${currentAudioTracks
+        ? `\n\n## Available Generated Audio\n\nThese descriptions capture what each sound/track sounds like.\nReuse existing audio by name instead of regenerating.\nTo modify an existing track, call generate_sound_effect or generate_music with the SAME name to replace it, incorporating the original description for continuity.\n\n${currentAudioTracks
             .map(
-                (track, i) =>
-                    `${i + 1}. [${track.type}] ${track.name} - ${track.description || "No description"} (${track.status})`
+                (track, i) => {
+                    const dur = track.duration != null ? `, ${track.duration}s` : "";
+                    return `${i + 1}. [${track.type}] "${track.name}" — "${track.description || "No description"}" (${track.status}${dur})`;
+                }
             )
             .join("\n")}`
         : "";

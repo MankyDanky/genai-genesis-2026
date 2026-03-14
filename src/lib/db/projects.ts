@@ -457,7 +457,7 @@ export async function forkPublishedGame(gameId: string | ObjectId) {
 
 export async function createStandalonePublishedGame(snapshot: {
   title?: string | null;
-  engine?: "canvas2d" | "threejs";
+  engine?: "canvas2d" | "threejs" | "phaser";
   code: string;
 }) {
   await ensureDbSetup();

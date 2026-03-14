@@ -5,7 +5,7 @@ import { createStandalonePublishedGame } from "@/lib/db/projects";
 const SaveGameRequestSchema = z.object({
   code: z.string().min(1).max(2 * 1024 * 1024),
   title: z.string().max(200).optional(),
-  engine: z.enum(["canvas2d", "threejs"]).optional(),
+  engine: z.enum(["canvas2d", "threejs", "phaser"]).optional(),
 });
 
 export async function POST(request: Request) {
