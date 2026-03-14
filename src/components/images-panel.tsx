@@ -8,6 +8,48 @@ interface ImagesPanelProps {
   onAddImage: (image: GeneratedImage) => void;
 }
 
+function ImportButton({ onAddImage }: { onAddImage: (image: GeneratedImage) => void }) {
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      const res = await fetch("/api/images/upload", { method: "POST", body: formData });
+      const data = await res.json();
+      if (data.success) {
+        onAddImage({ url: data.url, prompt: file.name });
+      }
+    } catch {
+      console.error("Upload failed");
+    }
+    e.target.value = "";
+  };
+
+  return (
+    <>
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleFile}
+      />
+      <button
+        onClick={() => fileRef.current?.click()}
+        className="gf-btn-chip w-6 h-6 flex items-center justify-center border border-[var(--color-border-light)] bg-[var(--color-surface)] text-[var(--color-text-muted)] text-sm font-bold"
+        title="Import image"
+      >
+        +
+      </button>
+    </>
+  );
+}
+
 function EditPopup({
   image,
   onClose,
@@ -167,7 +209,10 @@ export function ImagesPanel({ images, onAddImage }: ImagesPanelProps) {
 
   if (images.length === 0) {
     return (
-      <div className="flex h-full flex-col bg-[var(--color-bg)]">
+      <div className="relative flex h-full flex-col bg-[var(--color-bg)]">
+        <div className="absolute top-2 right-2 z-10">
+          <ImportButton onAddImage={onAddImage} />
+        </div>
         <div className="flex-1 flex flex-col items-center justify-center gap-4">
           <div className="w-12 h-12 border border-dashed border-[var(--color-border-light)] flex items-center justify-center">
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="var(--color-text-muted)" strokeWidth="1.2" opacity="0.6">
@@ -191,13 +236,11 @@ export function ImagesPanel({ images, onAddImage }: ImagesPanelProps) {
 
   return (
     <div className="h-full w-full bg-[var(--color-bg)] flex flex-col overflow-hidden">
-      <div className="shrink-0 px-3 py-2 border-b border-[var(--color-border)] flex items-center justify-between">
-        <span className="text-[10px] text-[var(--color-text-muted)] uppercase tracking-[0.15em] font-bold">
-          {images.length} {images.length === 1 ? "image" : "images"}
-        </span>
+      <div className="shrink-0 px-2 py-2 flex justify-end">
+        <ImportButton onAddImage={onAddImage} />
       </div>
 
-      <div className="flex-1 overflow-y-auto p-2">
+      <div className="flex-1 overflow-y-auto px-2 pb-2">
         <div className="grid grid-cols-2 gap-2">
           {images.map((image, i) => (
             <div
