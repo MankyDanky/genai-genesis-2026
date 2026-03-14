@@ -13,6 +13,14 @@ export interface PlanningTodo {
   status: "pending" | "in_progress" | "completed" | "cancelled";
 }
 
+export interface ConsoleLogEntry {
+  id: string;
+  timestamp: number;
+  level: "log" | "info" | "warn" | "error";
+  source: "console" | "error" | "unhandledrejection";
+  text: string;
+}
+
 export interface Asset {
   id: string;
   name: string;
@@ -39,6 +47,7 @@ interface GameForgeContextValue {
   currentEngine: GameEngine;
   projectFiles: ProjectFile[];
   planningTodos: PlanningTodo[];
+  consoleLogs: ConsoleLogEntry[];
   onCodeUpdate: (code: string, engine?: GameEngine) => void;
   onProjectFilesUpdate: (files: ProjectFile[], engine?: GameEngine, deletePaths?: string[]) => void;
   patchProjectFiles: (files: ProjectFile[], engine?: GameEngine) => void;
@@ -55,6 +64,12 @@ interface GameForgeContextValue {
   }) => boolean;
   deleteProjectFile: (path: string) => void;
   writePlanningTodos: (merge: boolean, todos: PlanningTodo[]) => void;
+  addConsoleLog: (entry: {
+    level: "log" | "info" | "warn" | "error";
+    source: "console" | "error" | "unhandledrejection";
+    args: string[];
+  }) => void;
+  clearConsoleLogs: () => void;
   updateProjectFile: (path: string, content: string) => void;
   onEngineUpdate: (engine: GameEngine) => void;
   assets: Asset[];
@@ -113,6 +128,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
   const [currentCode, setCurrentCode] = useState<string | null>(null);
   const [currentEngine, setCurrentEngine] = useState<GameEngine>("canvas2d");
   const [projectFiles, setProjectFiles] = useState<ProjectFile[]>([]);
+  const [consoleLogs, setConsoleLogs] = useState<ConsoleLogEntry[]>([]);
   const [planningTodos, setPlanningTodos] = useState<PlanningTodo[]>(() => {
     if (typeof window === "undefined") return [];
     try {
@@ -144,6 +160,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
   const onCodeUpdate = useCallback((code: string, engine?: GameEngine) => {
     setCurrentCode(code);
     setProjectFiles([{ path: "index.html", content: code, kind: "html" }]);
+    setConsoleLogs([]);
     if (engine) setCurrentEngine(engine);
   }, []);
 
@@ -163,6 +180,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       setCurrentCode((current) => (current === compiled ? current : compiled));
       return next;
     });
+    setConsoleLogs([]);
     if (engine) setCurrentEngine(engine);
   }, []);
 
@@ -181,6 +199,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       setCurrentCode((current) => (current === compiled ? current : compiled));
       return next;
     });
+    setConsoleLogs([]);
     if (engine) setCurrentEngine(engine);
   }, []);
 
@@ -300,6 +319,32 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     setPlanningTodos((prev) => (merge ? mergeTodos(prev, normalized) : normalized));
   }, []);
 
+  const addConsoleLog = useCallback((entry: {
+    level: "log" | "info" | "warn" | "error";
+    source: "console" | "error" | "unhandledrejection";
+    args: string[];
+  }) => {
+    const text = entry.args.join(" ").trim();
+    if (!text) return;
+
+    const nextEntry: ConsoleLogEntry = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      timestamp: Date.now(),
+      level: entry.level,
+      source: entry.source,
+      text,
+    };
+
+    setConsoleLogs((prev) => {
+      const next = [...prev, nextEntry];
+      return next.length > 400 ? next.slice(next.length - 400) : next;
+    });
+  }, []);
+
+  const clearConsoleLogs = useCallback(() => {
+    setConsoleLogs([]);
+  }, []);
+
   const onEngineUpdate = useCallback((engine: GameEngine) => {
     setCurrentEngine(engine);
   }, []);
@@ -326,6 +371,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       currentEngine,
       projectFiles,
       planningTodos,
+      consoleLogs,
       onCodeUpdate,
       onProjectFilesUpdate,
       patchProjectFiles,
@@ -333,6 +379,8 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       editProjectFile,
       deleteProjectFile,
       writePlanningTodos,
+      addConsoleLog,
+      clearConsoleLogs,
       updateProjectFile,
       onEngineUpdate,
       assets,
@@ -347,6 +395,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       currentEngine,
       projectFiles,
       planningTodos,
+      consoleLogs,
       onCodeUpdate,
       onProjectFilesUpdate,
       patchProjectFiles,
@@ -354,6 +403,8 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       editProjectFile,
       deleteProjectFile,
       writePlanningTodos,
+      addConsoleLog,
+      clearConsoleLogs,
       updateProjectFile,
       onEngineUpdate,
       assets,

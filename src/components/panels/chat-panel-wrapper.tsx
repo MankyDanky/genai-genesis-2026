@@ -9,6 +9,7 @@ export function ChatPanelWrapper() {
     currentEngine,
     projectFiles,
     planningTodos,
+    consoleLogs,
     onCodeUpdate,
     onProjectFilesUpdate,
     patchProjectFiles,
@@ -24,6 +25,7 @@ export function ChatPanelWrapper() {
       currentEngine={currentEngine}
       projectFiles={projectFiles}
       planningTodos={planningTodos}
+      consoleLogs={consoleLogs}
       onCodeUpdate={onCodeUpdate}
       onProjectFilesUpdate={onProjectFilesUpdate}
       patchProjectFiles={patchProjectFiles}

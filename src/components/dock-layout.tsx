@@ -10,6 +10,7 @@ import { gameForgeTheme } from "@/lib/dock-theme";
 import { SandboxPanel } from "@/components/panels/sandbox-panel";
 import { ChatPanelWrapper } from "@/components/panels/chat-panel-wrapper";
 import { CodePanel } from "@/components/panels/code-panel";
+import { ConsolePanel } from "@/components/panels/console-panel";
 import { InspectorPanel } from "@/components/panels/inspector-panel";
 import { Toolbar } from "@/components/toolbar";
 
@@ -19,6 +20,7 @@ const components = {
   sandbox: SandboxPanel,
   composer: ChatPanelWrapper,
   code: CodePanel,
+  console: ConsolePanel,
   inspector: InspectorPanel,
 };
 
@@ -33,6 +35,7 @@ const ALL_PANELS: PanelDef[] = [
   { id: "composer", component: "composer", title: "Composer" },
   { id: "inspector", component: "inspector", title: "Inspector" },
   { id: "code", component: "code", title: "Code" },
+  { id: "console", component: "console", title: "Console" },
 ];
 
 function buildDefaultLayout(api: DockviewApi) {
@@ -67,6 +70,13 @@ function buildDefaultLayout(api: DockviewApi) {
     title: "Code",
     position: { referencePanel: "sandbox", direction: "below" },
     initialHeight: h * 0.28,
+  });
+
+  api.addPanel({
+    id: "console",
+    component: "console",
+    title: "Console",
+    position: { referencePanel: "code", direction: "within" },
   });
 }
 

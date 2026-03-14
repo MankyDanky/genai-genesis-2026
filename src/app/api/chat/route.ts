@@ -8,6 +8,13 @@ import { normalizeProjectFiles } from "@/lib/project-files";
 
 export const maxDuration = 60;
 
+interface ConsoleLogPayload {
+  level: "log" | "info" | "warn" | "error";
+  source: "console" | "error" | "unhandledrejection";
+  text: string;
+  timestamp: number;
+}
+
 function isGameEngine(value: unknown): value is GameEngine {
   return value === "canvas2d" || value === "threejs";
 }
@@ -234,6 +241,7 @@ export async function POST(req: Request) {
       currentCode?: unknown;
       currentProjectFiles?: unknown;
       mentionedFiles?: unknown;
+      consoleLogs?: unknown;
       planningMode?: unknown;
       gameEngine?: unknown;
     };
@@ -246,6 +254,20 @@ export async function POST(req: Request) {
     const fileMap = toFileMap(currentProjectFiles);
     const mentionedFiles = Array.isArray(parsed.mentionedFiles)
       ? parsed.mentionedFiles.filter((v): v is string => typeof v === "string" && v.length > 0)
+      : [];
+    const consoleLogs: ConsoleLogPayload[] = Array.isArray(parsed.consoleLogs)
+      ? parsed.consoleLogs
+          .filter((v): v is ConsoleLogPayload => {
+            if (!v || typeof v !== "object") return false;
+            const candidate = v as Partial<ConsoleLogPayload>;
+            return (
+              (candidate.level === "log" || candidate.level === "info" || candidate.level === "warn" || candidate.level === "error") &&
+              (candidate.source === "console" || candidate.source === "error" || candidate.source === "unhandledrejection") &&
+              typeof candidate.text === "string" &&
+              typeof candidate.timestamp === "number"
+            );
+          })
+          .slice(-120)
       : [];
     const planningMode = parsed.planningMode === true;
     const gameEngine: GameEngine = isGameEngine(parsed.gameEngine) ? parsed.gameEngine : "canvas2d";
@@ -262,7 +284,14 @@ export async function POST(req: Request) {
 
     const result = streamText({
       model: anthropic("claude-sonnet-4-6"),
-      system: getSystemPrompt({ currentCode, currentProjectFiles, mentionedFiles, gameEngine, planningMode }),
+      system: getSystemPrompt({
+        currentCode,
+        currentProjectFiles,
+        mentionedFiles,
+        consoleLogs,
+        gameEngine,
+        planningMode,
+      }),
       messages: modelMessages,
       tools: {
         update_project_files: tool({

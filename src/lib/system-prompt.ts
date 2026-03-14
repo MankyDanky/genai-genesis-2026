@@ -2,10 +2,18 @@ import type { GameEngine } from "@/lib/game-engine";
 import type { ProjectFile } from "@/lib/project-files";
 import { projectFilesToPrompt } from "@/lib/project-files";
 
+interface ConsoleLogPayload {
+    level: "log" | "info" | "warn" | "error";
+    source: "console" | "error" | "unhandledrejection";
+    text: string;
+    timestamp: number;
+}
+
 interface PromptOptions {
     currentCode?: string | null;
     currentProjectFiles?: ProjectFile[];
     mentionedFiles?: string[];
+    consoleLogs?: ConsoleLogPayload[];
     planningMode?: boolean;
     gameEngine?: GameEngine;
 }
@@ -14,6 +22,7 @@ export function getSystemPrompt({
     currentCode,
     currentProjectFiles = [],
     mentionedFiles = [],
+    consoleLogs = [],
     planningMode = false,
     gameEngine = "canvas2d",
 }: PromptOptions = {}): string {
@@ -100,6 +109,14 @@ When you create or update a game:
     if (currentProjectFiles.length > 0) {
         const mentionedSet = new Set(mentionedFiles);
         const focusedFiles = currentProjectFiles.filter((file) => mentionedSet.has(file.path));
+        const includeConsole = mentionedSet.has("console");
+        const consoleSection = includeConsole && consoleLogs.length > 0
+            ? `\n\n## Runtime Console Logs (User Mentioned @console)\n\nUse these logs to debug before editing:\n\n${consoleLogs
+                .map((entry) => `- [${new Date(entry.timestamp).toISOString()}] ${entry.level.toUpperCase()} ${entry.source}: ${entry.text}`)
+                .join("\n")}`
+            : includeConsole
+              ? `\n\n## Runtime Console Logs (User Mentioned @console)\n\nNo logs captured yet.`
+              : "";
         const focusedSection =
             focusedFiles.length > 0
                 ? `\n\n## Focused Files (User Mentioned)\n\nPrioritize these files for this request:\n\n${projectFilesToPrompt(focusedFiles)}`
@@ -111,7 +128,7 @@ When you create or update a game:
 
 The project currently has these files. Modify existing files when possible instead of replacing everything.
 
-${projectFilesToPrompt(currentProjectFiles)}${focusedSection}`;
+${projectFilesToPrompt(currentProjectFiles)}${focusedSection}${consoleSection}`;
     }
 
     if (currentCode) {

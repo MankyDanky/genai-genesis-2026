@@ -6,13 +6,14 @@ import { useState, useEffect, useRef, useMemo, useCallback, type FormEvent, type
 import Markdown from "react-markdown";
 import type { GameEngine } from "@/lib/game-engine";
 import type { ProjectFile } from "@/lib/project-files";
-import type { PlanningTodo } from "@/lib/game-forge-context";
+import type { PlanningTodo, ConsoleLogEntry } from "@/lib/game-forge-context";
 
 interface ChatPanelProps {
   currentCode: string | null;
   currentEngine: GameEngine;
   projectFiles: ProjectFile[];
   planningTodos: PlanningTodo[];
+  consoleLogs: ConsoleLogEntry[];
   onCodeUpdate: (code: string, engine?: GameEngine) => void;
   onProjectFilesUpdate: (files: ProjectFile[], engine?: GameEngine, deletePaths?: string[]) => void;
   patchProjectFiles: (files: ProjectFile[], engine?: GameEngine) => void;
@@ -188,12 +189,57 @@ function StreamingIndicator({ phase, timer, message }: {
 }
 
 function ToolCallCard({ part }: {
-  part: { type: string; state?: string; input?: { code?: string; files?: ProjectFile[] } };
+  part: { type: string; state?: string; input?: Record<string, unknown> };
 }) {
-  const toolName = part.type.replace("tool-", "").toUpperCase().replace(/_/g, "_");
+  const rawToolName = part.type.replace("tool-", "");
+  const toolName = rawToolName.toUpperCase().replace(/_/g, "_");
   const state = part.state;
-  const codeLength = part.input?.code?.length;
-  const fileCount = Array.isArray(part.input?.files) ? part.input.files.length : null;
+  const input = part.input ?? {};
+
+  const summarizeToolChange = () => {
+    if (rawToolName === "patch_project_file") {
+      const path = typeof input.path === "string" ? input.path : null;
+      const edits = Array.isArray(input.edits) ? input.edits.length : 0;
+      return path ? `${path} (${edits} edit${edits === 1 ? "" : "s"})` : `${edits} patch edits`;
+    }
+
+    if (rawToolName === "update_project_files") {
+      const files = Array.isArray(input.files) ? input.files : [];
+      const deletePaths = Array.isArray(input.deletePaths) ? input.deletePaths : [];
+      const labels = files
+        .map((file) => (file && typeof file === "object" ? (file as { path?: unknown }).path : null))
+        .filter((path): path is string => typeof path === "string" && path.length > 0)
+        .slice(0, 3);
+      const addMore = files.length > labels.length ? ` +${files.length - labels.length} more` : "";
+      const deleteText = deletePaths.length > 0 ? `, ${deletePaths.length} deleted` : "";
+      return labels.length > 0 ? `${labels.join(", ")}${addMore}${deleteText}` : `${files.length} files${deleteText}`;
+    }
+
+    if (rawToolName === "edit_file") {
+      const targetFile = typeof input.targetFile === "string" ? input.targetFile : null;
+      const replaceAll = input.replaceAll === true ? " (replace all)" : "";
+      return targetFile ? `${targetFile}${replaceAll}` : "single file edit";
+    }
+
+    if (rawToolName === "delete_file") {
+      const targetFile = typeof input.targetFile === "string" ? input.targetFile : null;
+      return targetFile ? `Deleted ${targetFile}` : "Deleted file";
+    }
+
+    if (rawToolName === "todo_write") {
+      const todos = Array.isArray(input.todos) ? input.todos.length : 0;
+      return `${todos} planning todo${todos === 1 ? "" : "s"} updated`;
+    }
+
+    if (rawToolName === "update_sandbox") {
+      const code = typeof input.code === "string" ? input.code : "";
+      return `Sandbox HTML (${code.length.toLocaleString()} chars)`;
+    }
+
+    return null;
+  };
+
+  const changeSummary = summarizeToolChange();
 
   let statusText: string;
   let statusColor: string;
@@ -202,13 +248,7 @@ function ToolCallCard({ part }: {
     statusText = "Preparing tool payload...";
     statusColor = "var(--color-accent)";
   } else if (state === "input-available" || state === "output-available") {
-    if (typeof codeLength === "number") {
-      statusText = `Code ready (${codeLength.toLocaleString()} chars)`;
-    } else if (typeof fileCount === "number") {
-      statusText = `Files ready (${fileCount})`;
-    } else {
-      statusText = "Tool output ready";
-    }
+    statusText = changeSummary ?? "Tool update complete";
     statusColor = "var(--color-success)";
   } else {
     statusText = "Preparing...";
@@ -294,6 +334,7 @@ export function ChatPanel({
   currentEngine,
   projectFiles,
   planningTodos,
+  consoleLogs,
   onCodeUpdate,
   onProjectFilesUpdate,
   patchProjectFiles,
@@ -317,10 +358,14 @@ export function ChatPanel({
   const mentionSuggestions = useMemo(() => {
     if (mentionStart === null) return [];
     const query = mentionQuery.toLowerCase();
-    return projectFiles
+    const fileSuggestions = projectFiles
       .map((file) => file.path)
       .filter((path) => path.toLowerCase().includes(query))
-      .slice(0, 8);
+      .slice(0, 7);
+
+    const includesConsole = "console".includes(query);
+    if (includesConsole) fileSuggestions.unshift("console");
+    return fileSuggestions.slice(0, 8);
   }, [mentionQuery, mentionStart, projectFiles]);
 
   useEffect(() => {
@@ -519,13 +564,23 @@ export function ChatPanel({
   const doSubmit = () => {
     const text = input.trim();
     if (!text || isLoading) return;
+    const mentions = [...text.matchAll(/@([^\s]+)/g)]
+      .map((match) => (match[1] ?? "").trim())
+      .filter((token) => token.length > 0);
     const mentionedFiles = Array.from(
       new Set(
-        [...text.matchAll(/@([^\s]+)/g)]
-          .map((match) => match[1] ?? "")
-          .filter((token) => projectFiles.some((file) => file.path === token))
+        mentions.filter((token) => projectFiles.some((file) => file.path === token))
       )
     );
+    const mentionedConsole = mentions.some((token) => token.toLowerCase() === "console");
+    const consoleContext = mentionedConsole
+      ? consoleLogs.slice(-120).map((entry) => ({
+          level: entry.level,
+          source: entry.source,
+          text: entry.text,
+          timestamp: entry.timestamp,
+        }))
+      : [];
     setInput("");
     setMentionQuery("");
     setMentionStart(null);
@@ -537,6 +592,7 @@ export function ChatPanel({
         currentCode,
         currentProjectFiles: projectFiles,
         mentionedFiles,
+        consoleLogs: consoleContext,
         planningMode,
         gameEngine: selectedEngine,
       },
@@ -709,7 +765,7 @@ export function ChatPanel({
                         {toolParts.map((part, i) => (
                           <ToolCallCard
                             key={i}
-                            part={part as { type: string; state?: string; input?: { code?: string; files?: ProjectFile[] } }}
+                            part={part as { type: string; state?: string; input?: Record<string, unknown> }}
                           />
                         ))}
                       </div>
@@ -834,7 +890,7 @@ export function ChatPanel({
 
         <div className="flex items-center justify-between px-1 pt-1">
           <span className="text-[9px] text-[var(--color-text-muted)]">
-            Enter to send, Shift+Enter newline, @file mention
+            Enter to send, Shift+Enter newline, @file / @console mention
           </span>
           {currentCode && (
             <span className="text-[9px] text-[var(--color-success)] flex items-center gap-1">

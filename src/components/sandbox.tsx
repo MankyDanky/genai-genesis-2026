@@ -1,9 +1,14 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useMemo, useEffect } from "react";
 
 interface SandboxProps {
   code: string | null;
+  onConsoleMessage?: (event: {
+    level: "log" | "info" | "warn" | "error";
+    args: string[];
+    source: "console" | "error" | "unhandledrejection";
+  }) => void;
 }
 
 function ShareBar({ code, containerRef }: { code: string; containerRef: React.RefObject<HTMLDivElement | null> }) {
@@ -122,10 +127,45 @@ function ShareBar({ code, containerRef }: { code: string; containerRef: React.Re
   );
 }
 
-export function Sandbox({ code }: SandboxProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
+function buildInstrumentedSrcDoc(code: string): string {
+  const bridge = `<script>(function(){\n  var SESSION = "${Date.now()}-${Math.random().toString(36).slice(2)}";\n  function safe(v){\n    if (typeof v === "string") return v;\n    try { return JSON.stringify(v); } catch (_e) { return String(v); }\n  }\n  function send(level,args,source){\n    try{\n      parent.postMessage({\n        __gameForgeConsole: true,\n        session: SESSION,\n        level: level,\n        source: source || "console",\n        args: Array.isArray(args) ? args.map(safe) : [safe(args)]\n      }, "*");\n    }catch(_err){}\n  }\n  ["log","info","warn","error"].forEach(function(level){\n    var orig = console[level];\n    console[level] = function(){\n      var args = Array.prototype.slice.call(arguments);\n      send(level,args,"console");\n      return orig.apply(console,args);\n    };\n  });\n  window.addEventListener("error", function(e){\n    send("error", [e.message || "Unknown error", e.filename || "", String(e.lineno || 0) + ":" + String(e.colno || 0)], "error");\n  });\n  window.addEventListener("unhandledrejection", function(e){\n    var reason = e.reason && e.reason.message ? e.reason.message : e.reason;\n    send("error", ["Unhandled promise rejection", safe(reason)], "unhandledrejection");\n  });\n})();<\/script>`;
 
-  if (!code) {
+  if (/<head[^>]*>/i.test(code)) {
+    return code.replace(/<head([^>]*)>/i, `<head$1>${bridge}`);
+  }
+  if (/<body[^>]*>/i.test(code)) {
+    return code.replace(/<body([^>]*)>/i, `<body$1>${bridge}`);
+  }
+  return `${bridge}${code}`;
+}
+
+export function Sandbox({ code, onConsoleMessage }: SandboxProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const srcDoc = useMemo(() => (code ? buildInstrumentedSrcDoc(code) : null), [code]);
+
+  useEffect(() => {
+    if (!onConsoleMessage) return;
+
+    const handler = (event: MessageEvent) => {
+      const data = event.data as {
+        __gameForgeConsole?: boolean;
+        level?: "log" | "info" | "warn" | "error";
+        args?: string[];
+        source?: "console" | "error" | "unhandledrejection";
+      };
+      if (!data || data.__gameForgeConsole !== true) return;
+      onConsoleMessage({
+        level: data.level ?? "log",
+        args: Array.isArray(data.args) ? data.args : [],
+        source: data.source ?? "console",
+      });
+    };
+
+    window.addEventListener("message", handler);
+    return () => window.removeEventListener("message", handler);
+  }, [onConsoleMessage]);
+
+  if (!code || !srcDoc) {
     return (
       <div className="relative flex h-full w-full items-center justify-center bg-[var(--color-bg)] overflow-hidden">
         <div className="relative text-center animate-[fadeIn_0.4s_ease-out] space-y-3">
@@ -151,7 +191,7 @@ export function Sandbox({ code }: SandboxProps) {
       <ShareBar code={code} containerRef={containerRef} />
       <iframe
         key={code}
-        srcDoc={code}
+        srcDoc={srcDoc}
         sandbox="allow-scripts"
         title="Game Preview"
         className="h-full w-full border-none"
