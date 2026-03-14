@@ -83,11 +83,11 @@ export function InspectorPanel() {
                   <div className="mb-1 text-[10px] text-[var(--color-text-muted)] uppercase tracking-[0.1em]">
                     {key}
                   </div>
-                  <div className="flex items-center gap-1.5">
+                  <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5">
                     <input
                       value={value}
                       onChange={(event) => setRuntimeEnvVar(key, event.target.value)}
-                      className="h-7 w-full bg-[var(--color-bg)] border border-[var(--color-border)] px-2 text-[11px] text-[var(--color-text-secondary)]"
+                      className="h-7 min-w-0 w-full bg-[var(--color-bg)] border border-[var(--color-border)] px-2 text-[11px] text-[var(--color-text-secondary)]"
                     />
                     <button
                       type="button"
@@ -102,18 +102,18 @@ export function InspectorPanel() {
             )}
             <div className="border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
               <div className="mb-1 text-[10px] text-[var(--color-text-muted)] uppercase tracking-[0.1em]">Add Variable</div>
-              <div className="grid grid-cols-[1fr_1fr_auto] gap-1.5">
+              <div className="grid grid-cols-1 gap-1.5">
                 <input
                   placeholder="__ENV_KEY__"
                   value={newKey}
                   onChange={(event) => setNewKey(event.target.value)}
-                  className="h-7 bg-[var(--color-bg)] border border-[var(--color-border)] px-2 text-[11px] text-[var(--color-text-secondary)]"
+                  className="h-7 min-w-0 bg-[var(--color-bg)] border border-[var(--color-border)] px-2 text-[11px] text-[var(--color-text-secondary)]"
                 />
                 <input
                   placeholder="value"
                   value={newValue}
                   onChange={(event) => setNewValue(event.target.value)}
-                  className="h-7 bg-[var(--color-bg)] border border-[var(--color-border)] px-2 text-[11px] text-[var(--color-text-secondary)]"
+                  className="h-7 min-w-0 bg-[var(--color-bg)] border border-[var(--color-border)] px-2 text-[11px] text-[var(--color-text-secondary)]"
                 />
                 <button
                   type="button"
