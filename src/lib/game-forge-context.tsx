@@ -31,8 +31,12 @@ interface GameForgeContextValue {
   currentEngine: GameEngine;
   projectFiles: ProjectFile[];
   onCodeUpdate: (code: string, engine?: GameEngine) => void;
-  onProjectFilesUpdate: (files: ProjectFile[], engine?: GameEngine) => void;
+  onProjectFilesUpdate: (files: ProjectFile[], engine?: GameEngine, deletePaths?: string[]) => void;
   patchProjectFiles: (files: ProjectFile[], engine?: GameEngine) => void;
+  patchProjectFileContent: (
+    path: string,
+    edits: Array<{ find: string; replace: string; replaceAll?: boolean }>
+  ) => void;
   updateProjectFile: (path: string, content: string) => void;
   onEngineUpdate: (engine: GameEngine) => void;
   assets: Asset[];
@@ -69,14 +73,22 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     if (engine) setCurrentEngine(engine);
   }, []);
 
-  const onProjectFilesUpdate = useCallback((files: ProjectFile[], engine?: GameEngine) => {
+  const onProjectFilesUpdate = useCallback((files: ProjectFile[], engine?: GameEngine, deletePaths: string[] = []) => {
     const normalized = normalizeProjectFiles(files);
     setProjectFiles((prev) => {
-      if (areProjectFilesEqual(prev, normalized)) return prev;
-      return normalized;
+      const byPath = new Map(prev.map((file) => [file.path, file]));
+      for (const path of deletePaths) {
+        byPath.delete(path);
+      }
+      for (const file of normalized) {
+        byPath.set(file.path, file);
+      }
+      const next = Array.from(byPath.values());
+      if (areProjectFilesEqual(prev, next)) return prev;
+      const compiled = compileProjectToHtml(next);
+      setCurrentCode((current) => (current === compiled ? current : compiled));
+      return next;
     });
-    const compiled = compileProjectToHtml(normalized);
-    setCurrentCode((prev) => (prev === compiled ? prev : compiled));
     if (engine) setCurrentEngine(engine);
   }, []);
 
@@ -106,6 +118,38 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const patchProjectFileContent = useCallback(
+    (path: string, edits: Array<{ find: string; replace: string; replaceAll?: boolean }>) => {
+      if (edits.length === 0) return;
+
+      setProjectFiles((prev) => {
+        const index = prev.findIndex((file) => file.path === path);
+        if (index < 0) return prev;
+
+        const current = prev[index];
+        let nextContent = current.content;
+
+        for (const edit of edits) {
+          if (!edit.find) continue;
+          if (edit.replaceAll) {
+            nextContent = nextContent.split(edit.find).join(edit.replace);
+          } else if (nextContent.includes(edit.find)) {
+            nextContent = nextContent.replace(edit.find, edit.replace);
+          }
+        }
+
+        if (nextContent === current.content) return prev;
+
+        const next = [...prev];
+        next[index] = { ...current, content: nextContent };
+        const compiled = compileProjectToHtml(next);
+        setCurrentCode((currentCode) => (currentCode === compiled ? currentCode : compiled));
+        return next;
+      });
+    },
+    []
+  );
+
   const onEngineUpdate = useCallback((engine: GameEngine) => {
     setCurrentEngine(engine);
   }, []);
@@ -134,6 +178,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       onCodeUpdate,
       onProjectFilesUpdate,
       patchProjectFiles,
+      patchProjectFileContent,
       updateProjectFile,
       onEngineUpdate,
       assets,
@@ -150,6 +195,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       onCodeUpdate,
       onProjectFilesUpdate,
       patchProjectFiles,
+      patchProjectFileContent,
       updateProjectFile,
       onEngineUpdate,
       assets,

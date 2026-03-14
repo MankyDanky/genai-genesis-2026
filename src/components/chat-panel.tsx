@@ -12,8 +12,12 @@ interface ChatPanelProps {
   currentEngine: GameEngine;
   projectFiles: ProjectFile[];
   onCodeUpdate: (code: string, engine?: GameEngine) => void;
-  onProjectFilesUpdate: (files: ProjectFile[], engine?: GameEngine) => void;
+  onProjectFilesUpdate: (files: ProjectFile[], engine?: GameEngine, deletePaths?: string[]) => void;
   patchProjectFiles: (files: ProjectFile[], engine?: GameEngine) => void;
+  patchProjectFileContent: (
+    path: string,
+    edits: Array<{ find: string; replace: string; replaceAll?: boolean }>
+  ) => void;
   onEngineUpdate: (engine: GameEngine) => void;
 }
 
@@ -281,6 +285,7 @@ export function ChatPanel({
   onCodeUpdate,
   onProjectFilesUpdate,
   patchProjectFiles,
+  patchProjectFileContent,
   onEngineUpdate,
 }: ChatPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -335,28 +340,54 @@ export function ChatPanel({
         }
 
         if (partType === "tool-update_project_files") {
-          const toolPart = part as { state: string; input?: { files?: ProjectFile[] } };
-          if (Array.isArray(toolPart.input?.files) && toolPart.input.files.length > 0) {
+          const toolPart = part as { state: string; input?: { files?: ProjectFile[]; deletePaths?: string[] } };
+          const files = Array.isArray(toolPart.input?.files) ? toolPart.input.files : [];
+          const deletePaths = Array.isArray(toolPart.input?.deletePaths) ? toolPart.input.deletePaths : [];
+          if (files.length > 0 || deletePaths.length > 0) {
             const signature = JSON.stringify(
-              toolPart.input.files.map((f) => ({
-                path: f.path,
-                kind: f.kind,
-                content: f.content,
-              }))
+              {
+                files: files.map((f) => ({
+                  path: f.path,
+                  kind: f.kind,
+                  content: f.content,
+                })),
+                deletePaths,
+              }
             );
             const key = `${message.id}:${partType}:${toolPart.state}`;
             if (processedToolPayloadRef.current.get(key) === signature) continue;
             processedToolPayloadRef.current.set(key, signature);
             if (toolPart.state === "output-available") {
-              onProjectFilesUpdate(toolPart.input.files, selectedEngine);
+              onProjectFilesUpdate(files, selectedEngine, deletePaths);
             } else if (toolPart.state === "input-streaming" || toolPart.state === "input-available") {
-              patchProjectFiles(toolPart.input.files, selectedEngine);
+              if (files.length > 0) patchProjectFiles(files, selectedEngine);
             }
           }
         }
+
+        if (partType === "tool-patch_project_file") {
+          const toolPart = part as {
+            state: string;
+            input?: {
+              path?: string;
+              edits?: Array<{ find: string; replace: string; replaceAll?: boolean }>;
+            };
+          };
+          if (!toolPart.input?.path || !Array.isArray(toolPart.input.edits) || toolPart.input.edits.length === 0) continue;
+          if (toolPart.state !== "input-available" && toolPart.state !== "output-available") continue;
+
+          const signature = JSON.stringify({
+            path: toolPart.input.path,
+            edits: toolPart.input.edits,
+          });
+          const key = `${message.id}:${partType}:${toolPart.state}`;
+          if (processedToolPayloadRef.current.get(key) === signature) continue;
+          processedToolPayloadRef.current.set(key, signature);
+          patchProjectFileContent(toolPart.input.path, toolPart.input.edits);
+        }
       }
     }
-  }, [messages, currentCode, onCodeUpdate, onProjectFilesUpdate, patchProjectFiles, selectedEngine]);
+  }, [messages, currentCode, onCodeUpdate, onProjectFilesUpdate, patchProjectFiles, patchProjectFileContent, selectedEngine]);
 
   useEffect(() => {
     if (scrollRef.current) {

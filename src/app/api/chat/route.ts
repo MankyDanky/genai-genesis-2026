@@ -53,7 +53,7 @@ export async function POST(req: Request) {
       tools: {
         update_project_files: tool({
           description:
-            "Create or update the virtual project files (index.html, src/*.js, styles/*.css, assets/*). Use this for all game updates whenever possible.",
+            "Create or update virtual project files. This is merge-based: unspecified files are preserved. Use deletePaths to remove files explicitly.",
           inputSchema: z.object({
             files: z.array(
               z.object({
@@ -61,12 +61,31 @@ export async function POST(req: Request) {
                 content: z.string().describe("Complete file contents"),
                 kind: z.enum(["html", "style", "script", "asset", "config", "other"]).optional(),
               })
-            ),
+            ).default([]),
+            deletePaths: z.array(z.string().min(1)).optional().describe("Optional list of file paths to delete"),
           }),
-          execute: async ({ files }) => {
+          execute: async ({ files, deletePaths }) => {
             const normalized = normalizeProjectFiles(files);
-            console.log("[API] Tool update_project_files executed, file count:", normalized.length);
-            return { success: true, fileCount: normalized.length };
+            console.log("[API] Tool update_project_files executed, file count:", normalized.length, "delete count:", deletePaths?.length ?? 0);
+            return { success: true, fileCount: normalized.length, deleteCount: deletePaths?.length ?? 0 };
+          },
+        }),
+        patch_project_file: tool({
+          description:
+            "Patch an existing text file with targeted replacements. Prefer this for small edits to avoid rewriting whole files.",
+          inputSchema: z.object({
+            path: z.string().min(1).describe("Existing file path to patch"),
+            edits: z.array(
+              z.object({
+                find: z.string().min(1).describe("Exact text to find"),
+                replace: z.string().describe("Replacement text"),
+                replaceAll: z.boolean().optional().describe("Replace all occurrences if true"),
+              })
+            ).min(1),
+          }),
+          execute: async ({ path, edits }) => {
+            console.log("[API] Tool patch_project_file executed:", path, "edits:", edits.length);
+            return { success: true, path, editCount: edits.length };
           },
         }),
         update_sandbox: tool({
