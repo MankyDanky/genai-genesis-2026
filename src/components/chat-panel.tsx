@@ -223,6 +223,15 @@ function getMentionAtCursor(text: string, cursor: number) {
   return `@${token}`;
 }
 
+function normalizeMentionToken(raw: string) {
+  const token = raw.replace(/^@/, "").trim();
+  if (!token) return null;
+  if (token.toLowerCase() === "console") return { kind: "console" as const, value: "console" };
+  const normalized = token.toLowerCase().startsWith("file:") ? token.slice(5) : token;
+  if (!normalized) return null;
+  return { kind: "file" as const, value: normalized };
+}
+
 function StreamingIndicator({ phase, timer, message }: {
   phase: "connecting" | "coding" | "executing";
   timer: string;
@@ -278,6 +287,7 @@ function ToolCallCard({ part }: {
     output?: Record<string, unknown>;
   };
 }) {
+  const [isExpanded, setIsExpanded] = useState(false);
   const rawToolName = part.type.replace("tool-", "");
   const toolName = rawToolName.toUpperCase().replace(/_/g, "_");
   const state = part.state;
@@ -359,19 +369,40 @@ function ToolCallCard({ part }: {
     statusColor = "var(--color-text-muted)";
   }
 
+  const isToolExpanded = isExpanded || state === "input-streaming";
+
+  const detailText = useMemo(() => {
+    const chunks: string[] = [];
+    if (part.input && Object.keys(part.input).length > 0) {
+      chunks.push(`INPUT\n${JSON.stringify(part.input, null, 2)}`);
+    }
+    if (part.output && Object.keys(part.output).length > 0) {
+      chunks.push(`OUTPUT\n${JSON.stringify(part.output, null, 2)}`);
+    }
+    return chunks.join("\n\n");
+  }, [part.input, part.output]);
+
   return (
     <div
       className="mx-1 my-2 border border-[var(--color-border-light)] bg-[var(--color-surface)] overflow-hidden"
       style={{ animation: "fadeIn 0.2s ease-out" }}
     >
-      <div className="px-3 py-1.5 border-b border-[var(--color-border)] bg-[var(--color-surface-light)] flex items-center gap-2">
+      <button
+        type="button"
+        onClick={() => setIsExpanded((prev) => !prev)}
+        className="w-full px-3 py-1.5 border-b border-[var(--color-border)] bg-[var(--color-surface-light)] flex items-center gap-2 text-left"
+        aria-label={isToolExpanded ? "Collapse tool details" : "Expand tool details"}
+      >
+        <span className="tool-chevron text-[10px] text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
+          <span className={isToolExpanded ? "is-open" : ""}>▸</span>
+        </span>
         <span className="text-[9px] text-[var(--color-text-muted)] uppercase tracking-[0.15em] font-bold">
           Tool
         </span>
         <span className="text-[10px] text-[var(--color-accent)] uppercase tracking-[0.1em] font-bold">
           {toolName}
         </span>
-      </div>
+      </button>
       <div className="px-3 py-2 flex items-center gap-2">
         <span style={{ color: statusColor }}>
           {state === "input-streaming" ? (
@@ -386,18 +417,33 @@ function ToolCallCard({ part }: {
           {statusText}
         </span>
       </div>
+      <div className={`tool-collapsible ${isToolExpanded ? "is-expanded" : "is-collapsed"}`}>
+        <div className="tool-collapsible-inner">
+          <div className="mx-3 mb-2 max-h-[100px] overflow-auto border border-[var(--color-border)] bg-[var(--color-bg)]">
+            <pre className="px-2 py-1.5 text-[10px] text-[var(--color-text-muted)] whitespace-pre-wrap break-words">
+              {detailText || "No detailed payload."}
+            </pre>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
 
 function ReasoningBlock({ text, isStreaming }: { text: string; isStreaming: boolean }) {
+  const [isOpen, setIsOpen] = useState(isStreaming);
+
   return (
-    <details
-      open={isStreaming}
-      className="mx-1 my-2 border border-[var(--color-border-light)] bg-[var(--color-surface)] overflow-hidden group"
+    <div
+      className="reasoning-block mx-1 my-2 border border-[var(--color-border-light)] bg-[var(--color-surface)] overflow-hidden group"
       style={{ animation: "fadeIn 0.2s ease-out" }}
     >
-      <summary className="px-3 py-1.5 cursor-pointer select-none flex items-center gap-2 bg-[var(--color-surface-light)] border-b border-[var(--color-border)]">
+      <button
+        type="button"
+        onClick={() => setIsOpen((prev) => !prev)}
+        className="w-full px-3 py-1.5 cursor-pointer select-none flex items-center gap-2 bg-[var(--color-surface-light)] text-left"
+      >
+        <span className={`reasoning-chevron text-[10px] text-[var(--color-text-muted)] ${isOpen ? "is-open" : ""}`}>▸</span>
         <span className="text-[9px] text-[var(--color-text-muted)] uppercase tracking-[0.15em] font-bold">
           Reasoning
         </span>
@@ -414,13 +460,15 @@ function ReasoningBlock({ text, isStreaming }: { text: string; isStreaming: bool
             ))}
           </div>
         )}
-      </summary>
-      <div className="px-3 py-2 max-h-[200px] overflow-y-auto">
-        <p className="text-[11px] text-[var(--color-text-muted)] italic whitespace-pre-wrap leading-relaxed">
-          {text}
-        </p>
+      </button>
+      <div className={`reasoning-content ${isOpen ? "is-open" : "is-closed"}`}>
+        <div className="reasoning-content-inner max-h-[200px] overflow-y-auto border-t border-[var(--color-border)]">
+          <p className="text-[11px] text-[var(--color-text-muted)] italic whitespace-pre-wrap leading-relaxed">
+            {text}
+          </p>
+        </div>
       </div>
-    </details>
+    </div>
   );
 }
 
@@ -483,18 +531,46 @@ export function ChatPanel({
 
   const handleMentionChipClick = useCallback(
     (label: string) => {
-      const token = label.replace(/^@/, "").trim();
-      if (!token) return;
-      if (token.toLowerCase() === "console") {
+      const mention = normalizeMentionToken(label);
+      if (!mention) return;
+      if (mention.kind === "console") {
         focusConsolePanel();
         return;
       }
-      const normalized = token.toLowerCase().startsWith("file:") ? token.slice(5) : token;
-      if (!projectFiles.some((file) => file.path === normalized)) return;
-      focusCodeFile(normalized);
+      if (!projectFiles.some((file) => file.path === mention.value)) return;
+      focusCodeFile(mention.value);
     },
     [focusCodeFile, focusConsolePanel, projectFiles]
   );
+
+  const renderMessageTextWithMentions = useCallback((text: string) => {
+    const segments = text.split(/(@[^\s]+)/g);
+    return segments.map((segment, index) => {
+      if (!segment.startsWith("@")) {
+        return <span key={`txt-${index}`}>{segment}</span>;
+      }
+      const mention = normalizeMentionToken(segment);
+      const isClickable = mention
+        ? mention.kind === "console" || projectFiles.some((file) => file.path === mention.value)
+        : false;
+      if (!isClickable) return <span key={`txt-${index}`}>{segment}</span>;
+      return (
+        <button
+          key={`mention-${index}`}
+          type="button"
+          className="composer-log-mention"
+          onClick={() => handleMentionChipClick(segment)}
+          title={
+            mention?.kind === "console"
+              ? "Open Console panel"
+              : `Open ${mention?.value ?? ""} in Code panel`
+          }
+        >
+          {segment}
+        </button>
+      );
+    });
+  }, [handleMentionChipClick, projectFiles]);
 
   useEffect(() => {
     setSelectedEngine(currentEngine);
@@ -1056,7 +1132,7 @@ export function ChatPanel({
                         <span className="text-[9px] text-[var(--color-bg)] font-bold">U</span>
                       </div>
                       <div className="text-[12px] text-[var(--color-text)] whitespace-pre-wrap leading-relaxed pt-0.5">
-                        {textContent}
+                        {renderMessageTextWithMentions(textContent)}
                       </div>
                     </div>
                   ) : (
@@ -1135,7 +1211,7 @@ export function ChatPanel({
                   aria-label={isPlanCollapsed ? "Expand plan" : "Collapse plan"}
                   title={isPlanCollapsed ? "Expand plan" : "Collapse plan"}
                 >
-                  {isPlanCollapsed ? "▸" : "▾"}
+                  <span className={`plan-chevron ${isPlanCollapsed ? "" : "is-open"}`}>▸</span>
                 </button>
                 <span className="text-[9px] uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Plan</span>
                 <span className="text-[9px] text-[var(--color-text-muted)]">
@@ -1167,8 +1243,8 @@ export function ChatPanel({
               </div>
             </div>
 
-            {!isPlanCollapsed && (
-              <>
+            <div className={`plan-collapsible ${isPlanCollapsed ? "is-collapsed" : "is-expanded"}`}>
+              <div className="plan-collapsible-inner">
                 {planningTodos.length === 0 ? (
                   <div className="px-2.5 py-2 text-[10px] text-[var(--color-text-muted)] uppercase tracking-[0.08em]">
                     No tasks yet. Add one to start planning.
@@ -1251,8 +1327,8 @@ export function ChatPanel({
                     ))}
                   </div>
                 )}
-              </>
-            )}
+              </div>
+            </div>
           </div>
         </div>
       )}
