@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState, useCallback, type ReactNode, useMemo } from "react";
+import { createContext, useContext, useState, useCallback, useRef, useEffect, type ReactNode, useMemo } from "react";
 import type { GameEngine } from "@/lib/game-engine";
 import type { ProjectFile, ProjectFileKind } from "@/lib/project-files";
 import { compileProjectToHtml, normalizeProjectFiles } from "@/lib/project-files";
@@ -92,8 +92,11 @@ const DEFAULT_CONTROLS: GameControl[] = [
 
 interface GameForgeContextValue {
   currentCode: string | null;
+  previousCode: string | null;
+  streamingCode: string | null;
   currentEngine: GameEngine;
   projectFiles: ProjectFile[];
+  previousProjectFiles: ProjectFile[];
   pendingFileWrites: PendingFileWrite[];
   planningTodos: PlanningTodo[];
   consoleLogs: ConsoleLogEntry[];
@@ -113,6 +116,13 @@ interface GameForgeContextValue {
   chatSessionId: string;
   chatTabs: ChatTab[];
   activeChatTabId: string;
+  currentFps: number | null;
+  fpsHistory: number[];
+  isPaused: boolean;
+  sandboxReloadTrigger: number;
+  screenshotRequest: number;
+  pauseRequest: number;
+  setStreamingCode: (code: string | null) => void;
   onCodeUpdate: (code: string, engine?: GameEngine) => void;
   onProjectFilesUpdate: (files: ProjectFile[], engine?: GameEngine, deletePaths?: string[]) => void;
   patchProjectFiles: (files: ProjectFile[], engine?: GameEngine) => void;
@@ -159,6 +169,14 @@ interface GameForgeContextValue {
     entries: Array<{ path: string; status: "streaming" | "finalizing"; content?: string }>
   ) => void;
   clearPendingFileWrites: (paths?: string[]) => void;
+  updateFps: (fps: number) => void;
+  triggerSandboxReload: () => void;
+  triggerScreenshot: () => void;
+  togglePause: () => void;
+  setIsPaused: (paused: boolean) => void;
+  onScreenshotReady: (dataUrl: string) => void;
+  onRepromptAudio: (message: string) => void;
+  setRepromptAudioHandler: (handler: ((message: string) => void) | null) => void;
   setChatMessages: (messages: PersistedChatMessage[]) => void;
   createChatTab: () => string;
   deleteChatTab: (id: string) => void;
@@ -332,11 +350,52 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
   const activeTab = chatTabs.find((tab) => tab.id === activeChatTabId) ?? chatTabs[0];
   const chatMessages = activeTab.messages;
   const chatSessionId = activeTab.sessionId;
+  const [currentFps, setCurrentFps] = useState<number | null>(null);
+  const [fpsHistory, setFpsHistory] = useState<number[]>([]);
+  const [isPaused, setIsPaused] = useState(false);
+  const [sandboxReloadTrigger, setSandboxReloadTrigger] = useState(0);
+  const [screenshotRequest, setScreenshotRequest] = useState(0);
+  const [pauseRequest, setPauseRequest] = useState(0);
+  const [previousCode, setPreviousCode] = useState<string | null>(null);
+  const [previousProjectFiles, setPreviousProjectFiles] = useState<ProjectFile[]>([]);
+  const [streamingCode, setStreamingCodeState] = useState<string | null>(null);
+  const previousCodeRef = useRef<string | null>(null);
+  const previousProjectFilesRef = useRef<ProjectFile[]>([]);
+  const repromptAudioHandlerRef = useRef<((message: string) => void) | null>(null);
+
+  const setStreamingCode = useCallback((code: string | null) => {
+    setStreamingCodeState(code);
+  }, []);
+
+  useEffect(() => {
+    const prev = previousCodeRef.current;
+    if (currentCode !== null && prev !== null && prev !== currentCode) {
+      setPreviousCode(prev);
+    }
+    if (currentCode === null) {
+      setPreviousCode(null);
+    }
+    previousCodeRef.current = currentCode;
+  }, [currentCode]);
+
+  useEffect(() => {
+    const prev = previousProjectFilesRef.current;
+    if (projectFiles.length > 0 && prev.length > 0 && !areProjectFilesEqual(prev, projectFiles)) {
+      setPreviousProjectFiles(prev);
+    }
+    if (projectFiles.length === 0) {
+      setPreviousProjectFiles([]);
+    }
+    previousProjectFilesRef.current = projectFiles;
+  }, [projectFiles]);
 
   const onCodeUpdate = useCallback((code: string, engine?: GameEngine) => {
     setCurrentCode(code);
     setProjectFiles([{ path: "index.html", content: code, kind: "html" }]);
     setConsoleLogs([]);
+    setCurrentFps(null);
+    setFpsHistory([]);
+    setIsPaused(false);
     if (engine) setCurrentEngine(engine);
   }, []);
 
@@ -525,6 +584,38 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     setConsoleLogs([]);
   }, []);
 
+  const updateFps = useCallback((fps: number) => {
+    setCurrentFps(fps);
+    setFpsHistory((prev) => {
+      const next = [...prev, fps];
+      return next.length > 60 ? next.slice(next.length - 60) : next;
+    });
+  }, []);
+
+  const triggerSandboxReload = useCallback(() => {
+    setSandboxReloadTrigger((prev) => prev + 1);
+    setCurrentFps(null);
+    setFpsHistory([]);
+    setConsoleLogs([]);
+    setIsPaused(false);
+  }, []);
+
+  const triggerScreenshot = useCallback(() => {
+    setScreenshotRequest((prev) => prev + 1);
+  }, []);
+
+  const togglePause = useCallback(() => {
+    setIsPaused((prev) => !prev);
+    setPauseRequest((prev) => prev + 1);
+  }, []);
+
+  const onScreenshotReady = useCallback((dataUrl: string) => {
+    const a = document.createElement("a");
+    a.href = dataUrl;
+    a.download = `screenshot-${Date.now()}.png`;
+    a.click();
+  }, []);
+
   const onEngineUpdate = useCallback((engine: GameEngine) => {
     setCurrentEngine(engine);
   }, []);
@@ -645,6 +736,14 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     setPendingFileWritesState((prev) => prev.filter((entry) => !remove.has(entry.path)));
   }, []);
 
+  const setRepromptAudioHandler = useCallback((handler: ((message: string) => void) | null) => {
+    repromptAudioHandlerRef.current = handler;
+  }, []);
+
+  const onRepromptAudio = useCallback((message: string) => {
+    repromptAudioHandlerRef.current?.(message);
+  }, []);
+
   const setChatMessages = useCallback((messages: PersistedChatMessage[]) => {
     const normalized = normalizeChatMessages(messages);
     setChatTabs((prev) =>
@@ -698,6 +797,11 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
 
   const resetWorkspace = useCallback(() => {
     setCurrentCode(null);
+    setPreviousCode(null);
+    setPreviousProjectFiles([]);
+    setStreamingCodeState(null);
+    previousCodeRef.current = null;
+    previousProjectFilesRef.current = [];
     setCurrentEngine("canvas2d");
     setProjectFiles([]);
     setPendingFileWritesState([]);
@@ -721,6 +825,9 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     const freshSessionId = createChatSessionId();
     setChatTabs([{ id: freshSessionId, name: "Chat 1", sessionId: freshSessionId, messages: [] }]);
     setActiveChatTabId(freshSessionId);
+    setCurrentFps(null);
+    setFpsHistory([]);
+    setIsPaused(false);
   }, []);
 
   const clearProjectFeedback = useCallback(() => {
@@ -743,6 +850,10 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     chatMessages: PersistedChatMessage[];
   }) => {
     const normalizedFiles = normalizeProjectFiles(snapshot.projectFiles);
+    setPreviousCode(null);
+    setPreviousProjectFiles([]);
+    previousCodeRef.current = null;
+    previousProjectFilesRef.current = [];
     setCurrentCode(snapshot.currentCode || compileProjectToHtml(normalizedFiles));
     setCurrentEngine(snapshot.engine);
     setProjectFiles(normalizedFiles);
@@ -928,8 +1039,11 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
   const value = useMemo(
     () => ({
       currentCode,
+      previousCode,
+      streamingCode,
       currentEngine,
       projectFiles,
+      previousProjectFiles,
       pendingFileWrites,
       planningTodos,
       consoleLogs,
@@ -949,6 +1063,13 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       chatSessionId,
       chatTabs,
       activeChatTabId,
+      currentFps,
+      fpsHistory,
+      isPaused,
+      sandboxReloadTrigger,
+      screenshotRequest,
+      pauseRequest,
+      setStreamingCode,
       onCodeUpdate,
       onProjectFilesUpdate,
       patchProjectFiles,
@@ -980,6 +1101,14 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       focusMeshesPanel,
       setPendingFileWrites,
       clearPendingFileWrites,
+      updateFps,
+      triggerSandboxReload,
+      triggerScreenshot,
+      togglePause,
+      setIsPaused,
+      onScreenshotReady,
+      onRepromptAudio: onRepromptAudio,
+      setRepromptAudioHandler,
       setChatMessages,
       createChatTab,
       deleteChatTab,
@@ -993,8 +1122,11 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     }),
     [
       currentCode,
+      previousCode,
+      streamingCode,
       currentEngine,
       projectFiles,
+      previousProjectFiles,
       pendingFileWrites,
       planningTodos,
       consoleLogs,
@@ -1014,6 +1146,13 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       chatSessionId,
       chatTabs,
       activeChatTabId,
+      currentFps,
+      fpsHistory,
+      isPaused,
+      sandboxReloadTrigger,
+      screenshotRequest,
+      pauseRequest,
+      setStreamingCode,
       onCodeUpdate,
       onProjectFilesUpdate,
       patchProjectFiles,
@@ -1045,6 +1184,14 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       focusAudioPanel,
       setPendingFileWrites,
       clearPendingFileWrites,
+      updateFps,
+      triggerSandboxReload,
+      triggerScreenshot,
+      togglePause,
+      setIsPaused,
+      onScreenshotReady,
+      onRepromptAudio,
+      setRepromptAudioHandler,
       setChatMessages,
       createChatTab,
       deleteChatTab,

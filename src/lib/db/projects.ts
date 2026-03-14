@@ -24,7 +24,7 @@ import { getMesh } from "@/lib/mesh-store";
 interface FallbackPublishedGame {
   id: string;
   title: string;
-  engine: "canvas2d" | "threejs";
+  engine: "canvas2d" | "phaser" | "threejs";
   code: string;
   createdAt: Date;
 }
@@ -545,7 +545,7 @@ export async function forkPublishedGame(gameId: string | ObjectId) {
 
 export async function createStandalonePublishedGame(snapshot: {
   title?: string | null;
-  engine?: "canvas2d" | "threejs";
+  engine?: "canvas2d" | "threejs" | "phaser";
   code: string;
 }) {
   const title =

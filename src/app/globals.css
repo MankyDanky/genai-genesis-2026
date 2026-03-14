@@ -548,7 +548,43 @@ body {
     pointer-events: none;
 }
 
+/* ── Scroll-to-bottom button ── */
+.scroll-to-bottom-btn {
+    animation: fadeIn 0.15s ease-out;
+    box-shadow:
+        0 2px 8px rgba(0, 0, 0, 0.3),
+        0 0 0 1px var(--color-border);
+    transition:
+        border-color 0.15s,
+        color 0.15s,
+        box-shadow 0.15s;
+}
+
+.scroll-to-bottom-btn:hover {
+    box-shadow:
+        0 2px 12px rgba(0, 0, 0, 0.4),
+        0 0 0 1px var(--color-accent);
+}
+
+/* ── Streaming text cursor ── */
+.streaming-cursor::after {
+    content: "";
+    display: inline-block;
+    width: 2px;
+    height: 1em;
+    margin-left: 1px;
+    vertical-align: text-bottom;
+    background: var(--color-accent);
+    animation: cursorBlink 0.8s steps(2) infinite;
+}
+
 /* ── Animations ── */
+@keyframes cursorBlink {
+    0% { opacity: 1; }
+    50% { opacity: 0; }
+    100% { opacity: 1; }
+}
+
 @keyframes fadeIn {
     from {
         opacity: 0;
@@ -630,4 +666,43 @@ body {
         transform: scaleY(1);
         opacity: 0.5;
     }
+}
+
+@keyframes cardFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(6px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* ── Template gallery ── */
+.gf-template-card {
+    transition:
+        border-color 0.15s,
+        background-color 0.15s,
+        box-shadow 0.15s,
+        transform 0.1s;
+}
+
+.gf-template-card:hover {
+    border-color: var(--color-accent);
+    background-color: var(--color-surface-light);
+    box-shadow: 0 0 12px var(--color-accent-glow);
+}
+
+.gf-template-card:active {
+    transform: scale(0.98);
+}
+
+.gf-hide-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+}
+
+.gf-hide-scrollbar::-webkit-scrollbar {
+    display: none;
 }

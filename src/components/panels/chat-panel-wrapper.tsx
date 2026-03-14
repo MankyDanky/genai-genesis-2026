@@ -43,6 +43,8 @@ export function ChatPanelWrapper() {
     focusMeshesPanel,
     setPendingFileWrites,
     clearPendingFileWrites,
+    setRepromptAudioHandler,
+    setStreamingCode,
   } = useGameForge();
   return (
     <ChatPanel
@@ -84,6 +86,8 @@ export function ChatPanelWrapper() {
       focusMeshesPanel={focusMeshesPanel}
       setPendingFileWrites={setPendingFileWrites}
       clearPendingFileWrites={clearPendingFileWrites}
+      setRepromptAudioHandler={setRepromptAudioHandler}
+      setStreamingCode={setStreamingCode}
     />
   );
 }

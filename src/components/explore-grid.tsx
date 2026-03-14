@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 export interface ExploreGameItem {
   id: string;
   title: string;
-  engine: "canvas2d" | "threejs";
+  engine: "canvas2d" | "phaser" | "threejs";
   createdAt: string;
 }
 
