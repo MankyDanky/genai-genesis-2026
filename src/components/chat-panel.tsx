@@ -9,8 +9,10 @@ import remarkGfm from "remark-gfm";
 import { Mention, MentionsInput } from "react-mentions";
 import type { GameEngine } from "@/lib/game-engine";
 import type { ProjectFile } from "@/lib/project-files";
+import { useGameForge } from "@/lib/game-forge-context";
 import type { PlanningTodo, ConsoleLogEntry, GeneratedImage, PendingFileWrite, GameControl, AudioTrack } from "@/lib/game-forge-context";
 import { getGeneratedAudioId } from "@/lib/generated-audio";
+import { audioPoller } from "@/lib/audio-poller";
 
 interface ChatPanelProps {
   currentCode: string | null;
@@ -151,19 +153,34 @@ function getGenerationPhase(
 
 function useElapsedTimer(isActive: boolean) {
   const startRef = useRef(0);
+  const isActiveRef = useRef(isActive);
+  const didResetRef = useRef(false);
   const [display, setDisplay] = useState("0:00");
 
+  // Keep ref in sync without re-creating the interval
   useEffect(() => {
-    if (!isActive) return;
-    startRef.current = Date.now();
+    isActiveRef.current = isActive;
+    if (isActive) {
+      startRef.current = Date.now();
+      didResetRef.current = true; // let interval handle the setState
+    }
+  }, [isActive]);
+
+  // Single stable interval — reads isActiveRef so it never needs to re-run
+  useEffect(() => {
     const interval = setInterval(() => {
+      if (didResetRef.current) {
+        didResetRef.current = false;
+        setDisplay("0:00");
+      }
+      if (!isActiveRef.current) return;
       const elapsed = Date.now() - startRef.current;
       const m = Math.floor(elapsed / 60000);
       const s = Math.floor((elapsed % 60000) / 1000);
       setDisplay(`${m}:${String(s).padStart(2, "0")}`);
-    }, 100);
+    }, 1000);
     return () => clearInterval(interval);
-  }, [isActive]);
+  }, []);
 
   return display;
 }
@@ -205,7 +222,7 @@ function useComposerAutoHeight(
     if (highlighter) {
       highlighter.style.height = `${nextHeight}px`;
     }
-  }, [inputRef, value]);
+  }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
 }
 
 function isMentionQueryActive(value: string, cursor: number) {
@@ -281,123 +298,43 @@ function StreamingIndicator({ phase, timer, message }: {
   );
 }
 
-function GeneratedAudioPlayer({
-  audioId,
-  audioName,
-  audioKind,
-  onStatusChange,
-}: {
+/// Purely presentational — reads from context, no polling
+function GeneratedAudioPlayer({ audioId, audioName, audioKind }: {
   audioId: string;
   audioName: string;
   audioKind: "sfx" | "music";
-  onStatusChange?: (data: {
-    status: "ready" | "error";
-    dataUrl?: string;
-    duration?: number;
-    error?: string | null;
-  }) => void;
 }) {
-  const [status, setStatus] = useState<"pending" | "ready" | "error">("pending");
-  const [dataUrl, setDataUrl] = useState<string | null>(null);
-  const [errorText, setErrorText] = useState<string | null>(null);
-  const [duration, setDuration] = useState<number | null>(null);
+  const { audioTracks } = useGameForge();
+  const track = audioTracks.find((t) => t.id === audioId);
+  const status = track?.status ?? "pending";
+  const dataUrl = track?.dataUrl ?? null;
+  const duration = track?.duration ?? null;
+  const errorText = track?.error ?? null;
+
   const [isPlaying, setIsPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  const stopPlayback = useCallback(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    audio.pause();
-    audio.onplay = null;
-    audio.onpause = null;
-    audio.onended = null;
-    audioRef.current = null;
-    setIsPlaying(false);
-  }, []);
-
   useEffect(() => {
-    return () => stopPlayback();
-  }, [stopPlayback]);
-
-  useEffect(() => {
-    let cancelled = false;
-    let timerId: ReturnType<typeof setTimeout> | null = null;
-
-    const poll = async () => {
-      try {
-        const res = await fetch(`/api/sounds/${encodeURIComponent(audioId)}`);
-        if (!res.ok) {
-          throw new Error(`Audio status request failed (${res.status})`);
-        }
-        const payload = (await res.json()) as {
-          status?: "pending" | "ready" | "error";
-          dataUrl?: string | null;
-          duration?: number | null;
-          error?: string | null;
-        };
-        if (cancelled) return;
-
-        const nextStatus = payload.status ?? "pending";
-        setStatus(nextStatus);
-        setDataUrl(typeof payload.dataUrl === "string" ? payload.dataUrl : null);
-        setDuration(typeof payload.duration === "number" ? payload.duration : null);
-        setErrorText(typeof payload.error === "string" ? payload.error : null);
-
-        if (nextStatus === "ready" && payload.dataUrl) {
-          onStatusChange?.({
-            status: "ready",
-            dataUrl: payload.dataUrl,
-            duration: typeof payload.duration === "number" ? payload.duration : undefined,
-          });
-          return;
-        }
-
-        if (nextStatus === "error") {
-          onStatusChange?.({
-            status: "error",
-            error: typeof payload.error === "string" ? payload.error : "Audio generation failed",
-          });
-          return;
-        }
-
-        timerId = setTimeout(poll, 2200);
-      } catch (error) {
-        if (cancelled) return;
-        const message = error instanceof Error ? error.message : "Audio generation failed";
-        setStatus("error");
-        setErrorText(message);
-        onStatusChange?.({ status: "error", error: message });
-      }
-    };
-
-    void poll();
-
     return () => {
-      cancelled = true;
-      if (timerId) clearTimeout(timerId);
+      const audio = audioRef.current;
+      if (!audio) return;
+      audio.pause();
+      audioRef.current = null;
     };
-  }, [audioId, onStatusChange]);
+  }, []);
 
   const togglePlayback = useCallback(() => {
     if (status !== "ready" || !dataUrl) return;
     const current = audioRef.current;
     if (current) {
-      if (current.paused) {
-        current.play().then(() => setIsPlaying(true)).catch(() => {});
-      } else {
-        current.pause();
-        setIsPlaying(false);
-      }
+      if (current.paused) { current.play().then(() => setIsPlaying(true)).catch(() => {}); }
+      else { current.pause(); setIsPlaying(false); }
       return;
     }
-
     const next = new Audio(dataUrl);
     next.onplay = () => setIsPlaying(true);
     next.onpause = () => setIsPlaying(false);
-    next.onended = () => {
-      setIsPlaying(false);
-      audioRef.current = null;
-    };
+    next.onended = () => { setIsPlaying(false); audioRef.current = null; };
     audioRef.current = next;
     next.play().then(() => setIsPlaying(true)).catch(() => {});
   }, [dataUrl, status]);
@@ -416,44 +353,26 @@ function GeneratedAudioPlayer({
             Generating
           </span>
         ) : status === "ready" ? (
-          <button
-            type="button"
-            onClick={togglePlayback}
-            className="gf-btn-chip text-[10px] px-2 py-1 border border-[var(--color-border-light)] bg-[var(--color-surface-light)] text-[var(--color-accent)]"
-          >
+          <button type="button" onClick={togglePlayback} className="gf-btn-chip text-[10px] px-2 py-1 border border-[var(--color-border-light)] bg-[var(--color-surface-light)] text-[var(--color-accent)]">
             {isPlaying ? "Pause preview" : "Preview"}
           </button>
         ) : (
           <span className="text-[10px] text-[var(--color-danger)]">Error</span>
         )}
       </div>
-      {status === "error" && errorText ? (
-        <p className="mt-1 text-[10px] text-[var(--color-danger)]">{errorText}</p>
-      ) : null}
-      {status === "ready" && duration ? (
-        <p className="mt-1 text-[10px] text-[var(--color-text-muted)]">Duration: {Math.round(duration * 10) / 10}s</p>
-      ) : null}
+      {status === "error" && errorText && <p className="mt-1 text-[10px] text-[var(--color-danger)]">{errorText}</p>}
+      {status === "ready" && duration && <p className="mt-1 text-[10px] text-[var(--color-text-muted)]">Duration: {Math.round(duration * 10) / 10}s</p>}
     </div>
   );
 }
 
-function ToolCallCard({ part, onAudioStatusChange }: {
+function ToolCallCard({ part }: {
   part: {
     type: string;
     state?: string;
     input?: Record<string, unknown>;
     output?: Record<string, unknown>;
   };
-  onAudioStatusChange?: (
-    name: string,
-    kind: "sfx" | "music",
-    data: {
-      status: "ready" | "error";
-      dataUrl?: string;
-      duration?: number;
-      error?: string | null;
-    }
-  ) => void;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const rawToolName = part.type.replace("tool-", "");
@@ -603,7 +522,6 @@ function ToolCallCard({ part, onAudioStatusChange }: {
           audioId={audioId}
           audioName={audioName}
           audioKind={audioKind}
-          onStatusChange={(data) => onAudioStatusChange?.(audioName, audioKind, data)}
         />
       ) : null}
     </div>
@@ -684,6 +602,10 @@ export function ChatPanel({
   const planListRef = useRef<HTMLDivElement>(null);
   const lastPlanAutoScrollRef = useRef(0);
   const processedToolPayloadRef = useRef<Map<string, string>>(new Map());
+  const projectFilesRef = useRef(projectFiles);
+  const planningTodosRef = useRef(planningTodos);
+  useEffect(() => { projectFilesRef.current = projectFiles; }, [projectFiles]);
+  useEffect(() => { planningTodosRef.current = planningTodos; }, [planningTodos]);
   const [input, setInput] = useState("");
   const [selectedEngine, setSelectedEngine] = useState<GameEngine>(currentEngine);
   const [composerMode, setComposerMode] = useState<ComposerMode>("agent");
@@ -753,27 +675,22 @@ export function ChatPanel({
     });
   }, [handleMentionChipClick, projectFiles]);
 
-  const handleAudioStatusChange = useCallback(
-    (
-      name: string,
-      kind: "sfx" | "music",
-      data: { status: "ready" | "error"; dataUrl?: string; duration?: number; error?: string | null }
-    ) => {
-      const id = getGeneratedAudioId(kind, name);
+  // Wire poller callback once — runs outside React, no render on each poll tick
+  useEffect(() => {
+    audioPoller.setCallback(({ id, status, dataUrl, duration, error }) => {
       addAudioTrack({
         id,
-        name,
-        type: kind === "music" ? "music" : "sfx",
+        name: id.split(":")[1] ?? id,
+        type: id.startsWith("music:") ? "music" : "sfx",
         description: "",
-        dataUrl: data.dataUrl ?? null,
-        status: data.status,
-        error: data.error ?? null,
-        duration: typeof data.duration === "number" ? data.duration : null,
+        dataUrl: dataUrl ?? null,
+        status,
+        error: error ?? null,
+        duration: duration ?? null,
         createdAt: Date.now(),
       });
-    },
-    [addAudioTrack]
-  );
+    });
+  }, [addAudioTrack]);
 
   useEffect(() => {
     setSelectedEngine(currentEngine);
@@ -856,7 +773,7 @@ export function ChatPanel({
     console.error("[Chat] useChat error:", error);
   }, []);
 
-  const { messages, sendMessage, status, error } = useChat({
+  const { messages, sendMessage, stop, status, error } = useChat({
     transport,
     onError,
     onFinish,
@@ -887,7 +804,7 @@ export function ChatPanel({
         if (partType === "tool-update_project_files") {
           const toolPart = part as { state: string; input?: { files?: ProjectFile[]; deletePaths?: string[] } };
           const rawFiles = Array.isArray(toolPart.input?.files) ? toolPart.input.files : [];
-          const existingPaths = new Set(projectFiles.map((file) => file.path));
+          const existingPaths = new Set(projectFilesRef.current.map((file) => file.path));
           const files = rawFiles.filter((file) => {
             if (!isStableProjectPath(file?.path)) return false;
             if (existingPaths.has(file.path)) return true;
@@ -1028,7 +945,7 @@ export function ChatPanel({
             continue;
           }
 
-          const existingById = new Map(planningTodos.map((todo) => [todo.id, todo]));
+          const existingById = new Map(planningTodosRef.current.map((todo) => [todo.id, todo]));
           const statusOnlyUpdates: PlanningTodo[] = [];
           for (const incoming of toolPart.input.todos) {
             const existing = existingById.get(incoming.id);
@@ -1103,12 +1020,12 @@ export function ChatPanel({
             duration: typeof toolPart.input?.duration === "number" ? toolPart.input.duration : null,
             createdAt: Date.now(),
           });
+          audioPoller.register(id);
         }
       }
     }
   }, [
     messages,
-    currentCode,
     onCodeUpdate,
     onProjectFilesUpdate,
     patchProjectFiles,
@@ -1116,7 +1033,6 @@ export function ChatPanel({
     editProjectFile,
     deleteProjectFile,
     writePlanningTodos,
-    planningTodos,
     composerMode,
     addImage,
     addAudioTrack,
@@ -1124,7 +1040,6 @@ export function ChatPanel({
     setPendingFileWrites,
     clearPendingFileWrites,
     selectedEngine,
-    projectFiles,
   ]);
 
   useEffect(() => {
@@ -1392,7 +1307,6 @@ export function ChatPanel({
                               input?: Record<string, unknown>;
                               output?: Record<string, unknown>;
                             }}
-                            onAudioStatusChange={handleAudioStatusChange}
                           />
                         ))}
                       </div>
@@ -1684,16 +1598,30 @@ export function ChatPanel({
               />
             </MentionsInput>
           </div>
-          <button
-            type="submit"
-            disabled={!canSend}
-            className="gf-btn-chip shrink-0 w-[34px] self-stretch flex items-center justify-center border border-[var(--color-border-light)] bg-[var(--color-surface)] text-[var(--color-text-muted)] disabled:opacity-20 disabled:cursor-default"
-            aria-label="Send"
-          >
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
-              <path d="M1 1l10 5-10 5z" />
-            </svg>
-          </button>
+          {isLoading ? (
+            <button
+              type="button"
+              onClick={() => stop()}
+              className="gf-btn-chip shrink-0 w-[34px] self-stretch flex items-center justify-center border border-[var(--color-danger)]/60 bg-[var(--color-danger)]/10 text-[var(--color-danger)] hover:bg-[var(--color-danger)]/20"
+              aria-label="Stop generation"
+              title="Stop generation"
+            >
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
+                <rect x="1" y="1" width="8" height="8" />
+              </svg>
+            </button>
+          ) : (
+            <button
+              type="submit"
+              disabled={!canSend}
+              className="gf-btn-chip shrink-0 w-[34px] self-stretch flex items-center justify-center border border-[var(--color-border-light)] bg-[var(--color-surface)] text-[var(--color-text-muted)] disabled:opacity-20 disabled:cursor-default"
+              aria-label="Send"
+            >
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+                <path d="M1 1l10 5-10 5z" />
+              </svg>
+            </button>
+          )}
         </form>
 
         <div className="flex items-center justify-between px-1 pt-1">

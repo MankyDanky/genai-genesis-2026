@@ -212,11 +212,17 @@ export function Sandbox({ code, audioTracks = [], onConsoleMessage, onReload }: 
   const containerRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  // Keep a ref so the srcDoc memo can snapshot ready tracks at code-change time
+  // without adding audioTracks to its deps (which would restart the game on every audio update)
+  const audioTracksRef = useRef(audioTracks);
+  audioTracksRef.current = audioTracks;
+
   const srcDoc = useMemo(() => {
     if (!code) return null;
     const withConsole = buildInstrumentedSrcDoc(code);
-    return injectSoundBridge(withConsole, audioTracks);
-  }, [audioTracks, code]);
+    return injectSoundBridge(withConsole, audioTracksRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [code, reloadKey]);
 
   const handleReload = useCallback(() => {
     setReloadKey((prev) => prev + 1);
@@ -245,10 +251,8 @@ export function Sandbox({ code, audioTracks = [], onConsoleMessage, onReload }: 
     return () => window.removeEventListener("message", handler);
   }, [onConsoleMessage]);
 
+  // Push ready audio to the running iframe whenever tracks update
   useEffect(() => {
-    const iframe = iframeRef.current;
-    if (!iframe?.contentWindow) return;
-
     const readyTracks = audioTracks.filter((track) => track.status === "ready" && !!track.dataUrl);
     if (readyTracks.length === 0) return;
 
@@ -262,8 +266,22 @@ export function Sandbox({ code, audioTracks = [], onConsoleMessage, onReload }: 
       }
     }
 
-    iframe.contentWindow.postMessage({ type: "gameforge-sounds-update", sounds, music }, "*");
+    iframeRef.current?.contentWindow?.postMessage({ type: "gameforge-sounds-update", sounds, music }, "*");
   }, [audioTracks]);
+
+  // Also push ready audio every time the iframe (re)loads — covers the case where
+  // audio was already ready when a new game loaded (e.g. on code iteration)
+  const sendAudioToIframe = useCallback(() => {
+    const readyTracks = audioTracksRef.current.filter((t) => t.status === "ready" && !!t.dataUrl);
+    if (readyTracks.length === 0) return;
+    const sounds: Record<string, string> = {};
+    const music: Record<string, string> = {};
+    for (const track of readyTracks) {
+      if (track.type === "music") music[track.name] = track.dataUrl!;
+      else sounds[track.name] = track.dataUrl!;
+    }
+    iframeRef.current?.contentWindow?.postMessage({ type: "gameforge-sounds-update", sounds, music }, "*");
+  }, []);
 
   if (!code || !srcDoc) {
     return (
@@ -293,6 +311,7 @@ export function Sandbox({ code, audioTracks = [], onConsoleMessage, onReload }: 
         ref={iframeRef}
         key={`${code}:${reloadKey}`}
         srcDoc={srcDoc}
+        onLoad={sendAudioToIframe}
         sandbox="allow-scripts"
         title="Game Preview"
         className="h-full w-full border-none"

@@ -7,7 +7,8 @@ import type { ProjectFile } from "@/lib/project-files";
 import { normalizeProjectFiles } from "@/lib/project-files";
 import { getGeneratedAudioId, type GeneratedAudioKind } from "@/lib/generated-audio";
 import { storeImage } from "@/lib/image-store";
-import { soundStore } from "@/lib/sound-store";
+import { soundStore, soundGenerationInflight, soundPromptCache, promptCacheKey } from "@/lib/sound-store";
+import { startAudioGeneration } from "@/lib/audio-generation";
 
 export const maxDuration = 60;
 
@@ -23,15 +24,41 @@ function scheduleGeneratedAudio({
   duration: number;
 }) {
   const audioId = getGeneratedAudioId(kind, name);
-  soundStore.set(audioId, {
+
+  // Skip if this exact ID is already ready or still generating
+  const existing = soundStore.get(audioId);
+  if (existing?.status === "ready" && existing.dataUrl) {
+    console.log(`[Audio] already ready, skipping: ${audioId}`);
+    return audioId;
+  }
+  if (existing?.status === "pending" || soundGenerationInflight.has(audioId)) {
+    console.log(`[Audio] already in-flight, skipping: ${audioId}`);
+    return audioId;
+  }
+
+  // Reuse a ready result from a different ID with the same prompt
+  const cacheKey = promptCacheKey(kind, prompt, duration);
+  const cachedId = soundPromptCache.get(cacheKey);
+  if (cachedId) {
+    const cached = soundStore.get(cachedId);
+    if (cached?.status === "ready" && cached.dataUrl) {
+      console.log(`[Audio] prompt cache hit for ${audioId}, reusing ${cachedId}`);
+      soundStore.set(audioId, { ...cached, name });
+      return audioId;
+    }
+  }
+
+  const sound = {
     dataUrl: null,
     name,
     prompt,
     kind,
     duration,
-    status: "pending",
+    status: "pending" as const,
     createdAt: Date.now(),
-  });
+  };
+  soundStore.set(audioId, sound);
+  startAudioGeneration(audioId, sound); // fire immediately, don't wait
   return audioId;
 }
 
@@ -710,8 +737,7 @@ export async function POST(req: Request) {
           },
         }),
         generate_sound_effect: tool({
-          description:
-            "Generate an AI sound effect from text. Returns a sound id/name and schedules async generation.",
+          description: "Schedule SFX generation. Use descriptive name (e.g. 'jump'). Async — proceed immediately.",
           inputSchema: z.object({
             prompt: z.string().min(1),
             name: z.string().min(1),
@@ -737,8 +763,7 @@ export async function POST(req: Request) {
           },
         }),
         generate_music: tool({
-          description:
-            "Generate instrumental background music from text. Returns a music id/name and schedules async generation.",
+          description: "Schedule BGM generation. Instrumental only. Async — proceed immediately.",
           inputSchema: z.object({
             prompt: z.string().min(1),
             name: z.string().min(1),

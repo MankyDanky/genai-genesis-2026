@@ -110,6 +110,60 @@ export async function generateSoundEffectDataUrl(
   });
 }
 
+// Map flagged/copyrighted terms to safe musical descriptors
+const MUSIC_TERM_MAP: Array<[RegExp, string]> = [
+  // Copyrighted IPs & characters
+  [/\bmario\b/gi, "cheerful platformer"],
+  [/\bzelda\b/gi, "adventurous fantasy"],
+  [/\blink\b/gi, "heroic"],
+  [/\bpokemon\b/gi, "whimsical adventure"],
+  [/\bpikachu\b/gi, "energetic cute"],
+  [/\bsonic\b/gi, "fast upbeat"],
+  [/\bmetroid\b/gi, "atmospheric sci-fi"],
+  [/\bdoom\b/gi, "intense heavy"],
+  [/\bhalo\b/gi, "epic orchestral sci-fi"],
+  [/\bfortnite\b/gi, "upbeat action"],
+  [/\bminecraft\b/gi, "ambient calm"],
+  [/\bnintendo\b/gi, "playful"],
+  [/\bsega\b/gi, "retro upbeat"],
+  [/\bactivision\b/gi, "action"],
+  [/\beats\b/gi, "dynamic"],
+  // Violence / flagged content
+  [/\bbattle\b/gi, "intense dramatic"],
+  [/\bwar\b/gi, "epic powerful"],
+  [/\bfight(ing)?\b/gi, "high-energy urgent"],
+  [/\bcombat\b/gi, "tense driving"],
+  [/\bshoot(ing)?\b/gi, "fast-paced action"],
+  [/\bgun(s|fire)?\b/gi, "percussive rhythmic"],
+  [/\bkill(ing)?\b/gi, "dark intense"],
+  [/\bdeath\b/gi, "somber dark"],
+  [/\bblood\b/gi, "heavy brooding"],
+  [/\bgore\b/gi, "dark heavy"],
+  [/\bweapon(s)?\b/gi, "sharp staccato"],
+  [/\bexplosion(s)?\b/gi, "powerful impactful"],
+  [/\bviolence\b/gi, "aggressive intense"],
+  [/\benemy|enemies\b/gi, "ominous threatening"],
+  [/\battack(ing)?\b/gi, "aggressive driving"],
+  [/\bdanger(ous)?\b/gi, "tense suspenseful"],
+  [/\bhorror\b/gi, "eerie unsettling"],
+  [/\bscary\b/gi, "eerie atmospheric"],
+  [/\bmonster(s)?\b/gi, "dark menacing"],
+  [/\bzombie(s)?\b/gi, "dark lurching"],
+  [/\bdead\b/gi, "somber hollow"],
+  [/\bterror\b/gi, "tense ominous"],
+];
+
+function sanitizeMusicPrompt(prompt: string): string {
+  let safe = prompt;
+  for (const [re, replacement] of MUSIC_TERM_MAP) {
+    safe = safe.replace(re, replacement);
+  }
+  safe = safe.replace(/\s{2,}/g, " ").trim();
+  const sanitized = `Instrumental background music — ${safe}`;
+  console.log("[ElevenLabs] music prompt:", sanitized);
+  return sanitized;
+}
+
 export async function generateMusicTrackDataUrl(
   prompt: string,
   duration: number,
@@ -119,7 +173,7 @@ export async function generateMusicTrackDataUrl(
     label: "music",
     timeoutMs: ELEVENLABS_MUSIC_TIMEOUT_MS,
     body: {
-      prompt,
+      prompt: sanitizeMusicPrompt(prompt),
       music_length_ms: Math.round(duration * 1000),
       model_id: ELEVENLABS_MUSIC_MODEL,
       force_instrumental: true,

@@ -1,63 +1,6 @@
 import { NextResponse } from "next/server";
-import {
-  soundGenerationInflight,
-  soundStore,
-  type StoredSound,
-} from "@/lib/sound-store";
-import {
-  generateMusicTrackDataUrl,
-  generateSoundEffectDataUrl,
-} from "@/lib/elevenlabs";
-
-async function startSoundGeneration(id: string, sound: StoredSound) {
-  if (soundGenerationInflight.has(id)) {
-    return;
-  }
-
-  const generationCreatedAt = sound.createdAt;
-  const generation = (async () => {
-    try {
-      const dataUrl =
-        sound.kind === "music"
-          ? await generateMusicTrackDataUrl(sound.prompt, sound.duration)
-          : await generateSoundEffectDataUrl(sound.prompt, sound.duration);
-      const latestSound = soundStore.get(id);
-
-      if (!latestSound || latestSound.createdAt !== generationCreatedAt) {
-        return;
-      }
-
-      soundStore.set(id, {
-        ...latestSound,
-        dataUrl,
-        status: "ready",
-        error: undefined,
-      });
-
-      console.log("[Audio API] Audio completed and cached:", id);
-    } catch (error) {
-      const latestSound = soundStore.get(id);
-
-      if (!latestSound || latestSound.createdAt !== generationCreatedAt) {
-        return;
-      }
-
-      const message =
-        error instanceof Error ? error.message : "Audio generation failed";
-
-      console.error("[Audio API] Audio generation failed:", id, error);
-      soundStore.set(id, {
-        ...latestSound,
-        status: "error",
-        error: message,
-      });
-    } finally {
-      soundGenerationInflight.delete(id);
-    }
-  })();
-
-  soundGenerationInflight.set(id, generation);
-}
+import { soundStore } from "@/lib/sound-store";
+import { startAudioGeneration } from "@/lib/audio-generation";
 
 export async function GET(
   _request: Request,
@@ -83,7 +26,7 @@ export async function GET(
   }
 
   try {
-    await startSoundGeneration(id, sound);
+    startAudioGeneration(id, sound); // no-op if already running (started eagerly from chat route)
     const latestSound = soundStore.get(id);
 
     if (!latestSound || latestSound.status === "pending") {

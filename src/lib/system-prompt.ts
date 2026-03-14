@@ -54,8 +54,8 @@ Use the exact tool names below:
 - \`delete_file\`: remove one virtual file
 - \`update_controls\`: set controls for the Controls panel
 - \`generate_image\`: generate image asset URL for use in code
-- \`generate_sound_effect\`: schedule sound-effect generation from text
-- \`generate_music\`: schedule background music generation from text
+- \`generate_sound_effect\`: schedule SFX (async)
+- \`generate_music\`: schedule BGM (async, instrumental)
 - \`todo_read\`: read current planning tasks/todos
 - \`todo_write\`: planning tasks/todos
 - \`update_sandbox\`: fallback single-file HTML update
@@ -121,21 +121,18 @@ ${
 
 ## Audio
 
-- Sound/music generation is asynchronous; do not block code generation waiting for completion.
-- For SFX, use short durations (about 0.5-3s unless user asks otherwise).
-- For music, prefer loop-friendly instrumental tracks (about 15-60s unless user asks otherwise).
-- In game code, read generated assets from:
-  - \`window.__GAMEFORGE_SOUNDS__\`
-  - \`window.__GAMEFORGE_MUSIC__\`
-- Register optional update hooks so new audio can appear live:
-  - \`window.__onSoundsUpdated = () => { ... }\`
-  - \`window.__onMusicUpdated = () => { ... }\`
+Audio is async — schedule it then write code immediately without waiting.
+- SFX: 0.5–3s. Music: 15–60s, instrumental only.
+- Sounds/music arrive AFTER game start. Values are undefined at init — always read lazily:
+  \`function playJump(){ var s=window.__GAMEFORGE_SOUNDS__["jump"]; if(s) new Audio(s).play(); }\`
+- Start BGM in the update callback, guarded against double-start:
+  \`window.__onMusicUpdated=function(){ if(!bgm&&window.__GAMEFORGE_MUSIC__["theme"]){ bgm=new Audio(window.__GAMEFORGE_MUSIC__["theme"]); bgm.loop=true; bgm.play(); } };\`
 
 ## Response Format
 
 When you create or update a game:
 1. If new visual assets are needed, call \`generate_image\` first and reuse returned URLs.
-2. If audio is needed, call \`generate_sound_effect\` / \`generate_music\` and proceed without waiting.
+2. If audio is needed, call \`generate_sound_effect\`/\`generate_music\` then proceed immediately.
 3. For small file-local edits, call \`patch_project_file\` or \`edit_file\`.
 4. For new files/major refactors, call \`update_project_files\` with changed/new files only.
 5. Include \`deletePaths\` only for intentional removals (or use \`delete_file\` for single-file delete).
