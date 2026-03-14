@@ -85,6 +85,10 @@ function isStableProjectPath(path: unknown): path is string {
   return true;
 }
 
+function hasMeaningfulContent(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
 type GenerationPhase = "connecting" | "thinking" | "coding" | "executing" | "done";
 
 const PHASE_MESSAGES: Record<"connecting" | "coding" | "executing", readonly string[]> = {
@@ -590,13 +594,18 @@ export function ChatPanel({
         if (partType === "tool-update_project_files") {
           const toolPart = part as { state: string; input?: { files?: ProjectFile[]; deletePaths?: string[] } };
           const rawFiles = Array.isArray(toolPart.input?.files) ? toolPart.input.files : [];
-          const files = rawFiles.filter((file) => isStableProjectPath(file?.path));
+          const existingPaths = new Set(projectFiles.map((file) => file.path));
+          const files = rawFiles.filter((file) => {
+            if (!isStableProjectPath(file?.path)) return false;
+            if (existingPaths.has(file.path)) return true;
+            return hasMeaningfulContent(file?.content);
+          });
           const deletePaths = Array.isArray(toolPart.input?.deletePaths) ? toolPart.input.deletePaths : [];
           const filePaths = files.map((file) => file.path);
           const pendingEntries = files.map((file) => ({
             path: file.path,
             status: toolPart.state === "input-streaming" ? "streaming" as const : "finalizing" as const,
-            content: typeof file.content === "string" ? file.content : undefined,
+            content: hasMeaningfulContent(file.content) ? file.content : undefined,
           }));
 
           if (filePaths.length > 0) {
@@ -774,6 +783,7 @@ export function ChatPanel({
     setPendingFileWrites,
     clearPendingFileWrites,
     selectedEngine,
+    projectFiles,
   ]);
 
   useEffect(() => {

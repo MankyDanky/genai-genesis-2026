@@ -407,9 +407,12 @@ export function CodePanel() {
         }
         continue;
       }
+      if (typeof entry.content !== "string" || entry.content.length === 0) {
+        continue;
+      }
       byPath.set(entry.path, {
         path: entry.path,
-        content: typeof entry.content === "string" ? entry.content : "",
+        content: entry.content,
         kind: "other",
       });
     }
