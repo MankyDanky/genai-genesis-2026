@@ -39,7 +39,8 @@ You have one tool: \`update_sandbox\`. Use it to create or modify games and inte
 When you create or update a game:
 1. Call \`update_sandbox\` with the complete HTML code
 2. Then write 1-2 SHORT sentences about what you made and how to play it
-3. Keep your text response BRIEF — the game speaks for itself`;
+3. Keep your text response BRIEF — the game speaks for itself
+4. NEVER use emojis in your text responses — plain text only`;
 
   if (currentCode) {
     return `${base}
