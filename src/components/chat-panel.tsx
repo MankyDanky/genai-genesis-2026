@@ -24,6 +24,38 @@ const ENGINE_OPTIONS: Array<{ id: GameEngine; label: string }> = [
   { id: "threejs", label: "Three.js" },
 ];
 
+function ToolStreamCard({
+  part,
+}: {
+  part: { type: string; state?: string; input?: { code?: string } };
+}) {
+  const toolName = part.type.replace("tool-", "");
+  const state = part.state ?? "pending";
+  const codeLength = part.input?.code?.length;
+
+  let statusText = "Preparing tool...";
+  if (state === "input-streaming") statusText = "Streaming tool input...";
+  if (state === "input-available") statusText = "Tool input ready";
+  if (state === "output-available") statusText = "Tool output ready";
+
+  return (
+    <div className="px-3 py-2 border border-[var(--color-border)] bg-[var(--color-surface)]">
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] uppercase tracking-[0.12em] text-[var(--color-accent)] font-semibold">
+          {toolName}
+        </span>
+        <span className="text-[9px] uppercase tracking-[0.12em] text-[var(--color-text-muted)]">
+          {state}
+        </span>
+      </div>
+      <p className="text-[11px] text-[var(--color-text-secondary)] mt-1">{statusText}</p>
+      {typeof codeLength === "number" ? (
+        <p className="text-[10px] text-[var(--color-text-muted)] mt-0.5">{codeLength} chars</p>
+      ) : null}
+    </div>
+  );
+}
+
 export function ChatPanel({
   currentCode,
   currentEngine,
@@ -202,8 +234,11 @@ export function ChatPanel({
             (p): p is Extract<typeof p, { type: "text" }> => p.type === "text"
           );
           const textContent = textParts.map((p) => p.text).join("");
+          const toolParts = message.role === "assistant"
+            ? message.parts.filter((p) => (p as { type: string }).type.startsWith("tool-"))
+            : [];
 
-          if (!textContent) return null;
+          if (!textContent && toolParts.length === 0) return null;
 
           const isUser = message.role === "user";
 
@@ -216,8 +251,18 @@ export function ChatPanel({
                   </div>
                 </div>
               ) : (
-                <div className="px-3 py-2 text-[12px] text-[var(--color-text)] whitespace-pre-wrap leading-relaxed border-l-2 border-[var(--color-accent-glow-strong)] bg-[var(--color-accent-glow)] bg-opacity-30">
-                  {textContent}
+                <div className="space-y-2">
+                  {textContent ? (
+                    <div className="px-3 py-2 text-[12px] text-[var(--color-text)] whitespace-pre-wrap leading-relaxed border-l-2 border-[var(--color-accent-glow-strong)] bg-[var(--color-accent-glow)] bg-opacity-30">
+                      {textContent}
+                    </div>
+                  ) : null}
+                  {toolParts.map((part, idx) => (
+                    <ToolStreamCard
+                      key={`${message.id}-tool-${idx}`}
+                      part={part as { type: string; state?: string; input?: { code?: string } }}
+                    />
+                  ))}
                 </div>
               )}
             </div>

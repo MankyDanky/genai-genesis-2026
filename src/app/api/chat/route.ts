@@ -56,6 +56,11 @@ export async function POST(req: Request) {
           },
         }),
       },
+      providerOptions: {
+        anthropic: {
+          thinking: { type: "enabled", budgetTokens: 10000 },
+        },
+      },
       stopWhen: stepCountIs(2),
       onError: ({ error }) => {
         console.error("[API] streamText error:", error);
@@ -63,7 +68,7 @@ export async function POST(req: Request) {
     });
 
     console.log("[API] Streaming response...");
-    return result.toUIMessageStreamResponse();
+    return result.toUIMessageStreamResponse({ sendReasoning: true });
   } catch (error) {
     console.error("[API] Unhandled error:", error);
     return new Response(

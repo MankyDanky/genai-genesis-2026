@@ -183,6 +183,75 @@ body {
   background: var(--color-bg);
 }
 
+/* ── Chat markdown ── */
+.chat-markdown p {
+  margin: 0.25em 0;
+}
+
+.chat-markdown p:first-child {
+  margin-top: 0;
+}
+
+.chat-markdown p:last-child {
+  margin-bottom: 0;
+}
+
+.chat-markdown strong {
+  color: var(--color-text);
+  font-weight: 700;
+}
+
+.chat-markdown em {
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+.chat-markdown code {
+  background: var(--color-surface-light);
+  padding: 0.1em 0.35em;
+  border-radius: 2px;
+  font-size: 0.9em;
+}
+
+.chat-markdown pre {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-light);
+  padding: 0.5em 0.75em;
+  margin: 0.4em 0;
+  overflow-x: auto;
+  font-size: 0.9em;
+}
+
+.chat-markdown pre code {
+  background: none;
+  padding: 0;
+  border-radius: 0;
+}
+
+.chat-markdown ul,
+.chat-markdown ol {
+  margin: 0.25em 0;
+  padding-left: 1.4em;
+}
+
+.chat-markdown li {
+  margin: 0.15em 0;
+}
+
+.chat-markdown h1,
+.chat-markdown h2,
+.chat-markdown h3 {
+  color: var(--color-accent);
+  font-weight: 700;
+  margin: 0.5em 0 0.25em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.chat-markdown h1 { font-size: 1.1em; }
+.chat-markdown h2 { font-size: 1em; }
+.chat-markdown h3 { font-size: 0.95em; }
+
 /* ── Animations ── */
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(4px); }
@@ -202,4 +271,16 @@ body {
 @keyframes slideDown {
   from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
+}
+
+@keyframes messageFade {
+  0% { opacity: 0; transform: translateY(4px); }
+  15% { opacity: 1; transform: translateY(0); }
+  85% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(-4px); }
 }
