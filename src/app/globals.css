@@ -1,0 +1,205 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-bg: #0a0b10;
+  --color-surface: #10121a;
+  --color-surface-light: #181b24;
+  --color-surface-elevated: #1f2230;
+  --color-text: #e2e4ea;
+  --color-text-secondary: #b0b4c0;
+  --color-text-muted: #6b7084;
+  --color-accent: #58a6ff;
+  --color-accent-dim: #3d7bbf;
+  --color-accent-glow: rgba(88, 166, 255, 0.12);
+  --color-accent-glow-strong: rgba(88, 166, 255, 0.25);
+  --color-border: #1e2030;
+  --color-border-light: #282b3a;
+  --color-border-accent: #58a6ff;
+  --color-success: #3fb950;
+  --color-warning: #d29922;
+  --color-danger: #f85149;
+
+  --font-mono: "JetBrains Mono", monospace;
+}
+
+* {
+  border-color: var(--color-border);
+  box-sizing: border-box;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-light);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+/* ── Shared micro-interaction classes ── */
+
+/* Focus glow ring for inputs */
+.gf-input {
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.gf-input:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-glow),
+              inset 0 0 0 1px var(--color-accent-glow);
+}
+
+/* Primary button */
+.gf-btn-primary {
+  transition: background-color 0.15s, box-shadow 0.15s, transform 0.1s;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.gf-btn-primary:hover:not(:disabled) {
+  background-color: var(--color-accent-dim);
+  box-shadow: 0 2px 8px var(--color-accent-glow),
+              0 0 20px var(--color-accent-glow);
+}
+
+.gf-btn-primary:active:not(:disabled) {
+  transform: scale(0.98);
+  box-shadow: 0 0 4px var(--color-accent-glow);
+}
+
+/* Ghost/chip button */
+.gf-btn-chip {
+  transition: border-color 0.15s, color 0.15s, background-color 0.15s, transform 0.1s;
+}
+
+.gf-btn-chip:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  background-color: var(--color-accent-glow);
+}
+
+.gf-btn-chip:active {
+  transform: scale(0.96);
+}
+
+/* Hoverable list row */
+.gf-list-row {
+  transition: background-color 0.12s;
+}
+
+.gf-list-row:hover {
+  background-color: var(--color-surface-light);
+}
+
+/* Section header with accent tint */
+.gf-section-header {
+  background: linear-gradient(
+    90deg,
+    rgba(88, 166, 255, 0.06) 0%,
+    transparent 100%
+  );
+  border-left: 2px solid var(--color-accent);
+}
+
+/* ── Dockview theme ── */
+.game-forge-theme {
+  --dv-background-color: var(--color-bg);
+  --dv-group-view-background-color: var(--color-bg);
+
+  --dv-tabs-and-actions-container-background-color: var(--color-surface);
+  --dv-tabs-and-actions-container-height: 32px;
+  --dv-tab-font-size: 11px;
+
+  --dv-activegroup-visiblepanel-tab-background-color: transparent;
+  --dv-activegroup-visiblepanel-tab-color: var(--color-accent);
+  --dv-activegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-activegroup-hiddenpanel-tab-color: var(--color-text-muted);
+  --dv-inactivegroup-visiblepanel-tab-background-color: transparent;
+  --dv-inactivegroup-visiblepanel-tab-color: var(--color-text-muted);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--color-text-muted);
+
+  --dv-tab-divider-color: transparent;
+  --dv-separator-border: var(--color-border);
+  --dv-drag-over-background-color: var(--color-accent-glow);
+  --dv-drag-over-border-color: var(--color-accent);
+  --dv-floating-box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6), 0 0 1px rgba(88, 166, 255, 0.2);
+  --dv-icon-hover-background-color: var(--color-surface-light);
+  --dv-tabs-container-scrollbar-color: var(--color-border);
+  --dv-sash-color: transparent;
+  --dv-active-sash-color: var(--color-accent);
+  --dv-border-radius: 0px;
+  --dv-tab-margin: 0;
+
+  font-family: var(--font-mono);
+}
+
+.game-forge-theme .dv-tab {
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 700;
+  padding: 0 12px;
+  border-radius: 0;
+  border-left: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.game-forge-theme .dv-tab:hover:not(.dv-active-tab) {
+  color: var(--color-text-secondary) !important;
+}
+
+.game-forge-theme .dv-tab.dv-active-tab {
+  border-left: 2px solid var(--color-accent) !important;
+  border-bottom: none !important;
+  box-shadow: none !important;
+}
+
+.game-forge-theme .dv-default-tab-action {
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.game-forge-theme .dv-tab:hover .dv-default-tab-action {
+  opacity: 0.6;
+}
+
+.game-forge-theme .dv-content-container {
+  background: var(--color-bg);
+}
+
+/* ── Animations ── */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulseGlow {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+@keyframes statusPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(63, 185, 80, 0.4); }
+  50% { box-shadow: 0 0 6px 2px rgba(63, 185, 80, 0.2); }
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
