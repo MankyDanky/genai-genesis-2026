@@ -6,7 +6,11 @@ interface StoredImage {
   createdAt: number;
 }
 
-const store = new Map<string, StoredImage>();
+const globalStore = globalThis as unknown as { __imageStore?: Map<string, StoredImage> };
+if (!globalStore.__imageStore) {
+  globalStore.__imageStore = new Map();
+}
+const store = globalStore.__imageStore;
 
 const MAX_AGE_MS = 30 * 60 * 1000; // 30 minutes
 

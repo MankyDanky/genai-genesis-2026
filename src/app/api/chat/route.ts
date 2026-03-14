@@ -3,17 +3,28 @@ import { streamText, tool, stepCountIs, convertToModelMessages } from "ai";
 import { z } from "zod";
 import { getSystemPrompt } from "@/lib/system-prompt";
 import { storeImage } from "@/lib/image-store";
+import { removeBackground } from "@imgly/background-removal-node";
 
 export const maxDuration = 120;
 
 const GEMINI_MODEL = "gemini-2.5-flash-image";
 const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
-async function generateImage(prompt: string, origin: string): Promise<{ url: string }> {
+async function removeBg(imageBuffer: Buffer, mimeType: string): Promise<{ data: string; mimeType: string }> {
+  console.log("[BG-REMOVE] Starting background removal...");
+  const blob = new Blob([imageBuffer], { type: mimeType });
+  const resultBlob = await removeBackground(blob, { model: "small", output: { format: "image/png" } });
+  const arrayBuffer = await resultBlob.arrayBuffer();
+  const b64 = Buffer.from(arrayBuffer).toString("base64");
+  console.log("[BG-REMOVE] Done, output size:", b64.length, "chars base64");
+  return { data: b64, mimeType: "image/png" };
+}
+
+async function generateImage(prompt: string, origin: string, shouldRemoveBg: boolean): Promise<{ url: string }> {
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new Error("GEMINI_API_KEY is not set");
 
-  console.log("[GEMINI] Generating image with", GEMINI_MODEL);
+  console.log("[GEMINI] Generating image with", GEMINI_MODEL, "removeBg:", shouldRemoveBg);
 
   const res = await fetch(`${GEMINI_API_URL}?key=${key}`, {
     method: "POST",
@@ -37,7 +48,15 @@ async function generateImage(prompt: string, origin: string): Promise<{ url: str
 
   for (const part of parts) {
     if (part.inlineData) {
-      const { mimeType, data: b64 } = part.inlineData;
+      let { mimeType, data: b64 } = part.inlineData;
+
+      if (shouldRemoveBg) {
+        const imageBuffer = Buffer.from(b64, "base64");
+        const result = await removeBg(imageBuffer, mimeType);
+        b64 = result.data;
+        mimeType = result.mimeType;
+      }
+
       const id = storeImage(mimeType, b64);
       const url = `${origin}/api/images/${id}`;
       console.log("[GEMINI] Image stored, id:", id, "size:", b64.length, "chars base64");
@@ -91,19 +110,25 @@ export async function POST(req: Request) {
         }),
         generate_image: tool({
           description:
-            "Generate an image using AI. Returns a URL you can use in game HTML via <img> tags or new Image() in JS. Call this BEFORE update_sandbox so you can embed the returned URL in your game code.",
+            "Generate an image using AI. Returns a URL you can use in game HTML via <img> tags or new Image() in JS. Call this BEFORE update_sandbox so you can embed the returned URL in your game code. Set removeBackground to true for sprites, characters, items, and any asset that needs to be composited on top of other graphics.",
           inputSchema: z.object({
             prompt: z
               .string()
               .describe(
                 "Detailed description of the image to generate. Be specific about style, colors, perspective, and content."
               ),
+            removeBackground: z
+              .boolean()
+              .default(false)
+              .describe(
+                "Whether to remove the background and make it transparent. Use true for sprites, characters, objects, items, UI elements. Use false for backgrounds, textures, full scenes."
+              ),
           }),
-          execute: async ({ prompt }) => {
-            console.log("[API] Tool generate_image called, prompt:", prompt);
+          execute: async ({ prompt, removeBackground: shouldRemoveBg }) => {
+            console.log("[API] Tool generate_image called, prompt:", prompt, "removeBg:", shouldRemoveBg);
             try {
               const origin = new URL(req.url).origin;
-              const { url } = await generateImage(prompt, origin);
+              const { url } = await generateImage(prompt, origin, shouldRemoveBg);
               console.log("[API] Image generated:", url);
               return { success: true, url, prompt };
             } catch (err) {

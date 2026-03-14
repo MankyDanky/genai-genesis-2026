@@ -13,7 +13,7 @@ export function getSystemPrompt(
 
 You have two tools:
 
-1. \`generate_image\` — Generate an image with AI. Returns a URL. Call this BEFORE \`update_sandbox\` so you can embed the URL in your game code. Use detailed prompts describing style, colors, perspective, and content. Good for sprites, backgrounds, UI elements, etc.
+1. \`generate_image\` — Generate an image with AI. Returns a URL. Call this BEFORE \`update_sandbox\` so you can embed the URL in your game code. Use detailed prompts describing style, colors, perspective, and content. Good for sprites, backgrounds, UI elements, etc. Set \`removeBackground: true\` for sprites, characters, items, and anything that needs to be composited over other graphics — this will produce a transparent PNG. Use \`removeBackground: false\` for full-scene backgrounds and textures.
 
 2. \`update_sandbox\` — Write or update the HTML/CSS/JS code running in the sandbox. The \`code\` parameter must be a complete, self-contained HTML document.
 
