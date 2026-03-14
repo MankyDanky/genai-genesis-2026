@@ -207,8 +207,8 @@ function buildInstrumentedSrcDoc(code: string): string {
   var trackedAudio=[];
   var OrigAudio=window.Audio;
   window.__gameForgePaused=false;
-  window.Audio=function(){
-    var a=new OrigAudio();
+  window.Audio=function(src){
+    var a=arguments.length?new OrigAudio(src):new OrigAudio();
     trackedAudio.push(a);
     return a;
   };
