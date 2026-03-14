@@ -519,7 +519,7 @@ export function ChatPanel({
             processedToolPayloadRef.current.set(key, signature);
             if (toolPart.state === "output-available") {
               onProjectFilesUpdate(files, selectedEngine, deletePaths);
-            } else if (toolPart.state === "input-streaming" || toolPart.state === "input-available") {
+            } else if (toolPart.state === "input-available") {
               if (files.length > 0) patchProjectFiles(files, selectedEngine);
             }
           }
