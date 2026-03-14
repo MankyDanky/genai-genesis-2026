@@ -21,6 +21,7 @@ export function ChatPanelWrapper() {
     writePlanningTodos,
     onEngineUpdate,
     addImage,
+    setControls,
     setPendingFileWrites,
     clearPendingFileWrites,
   } = useGameForge();
@@ -42,6 +43,7 @@ export function ChatPanelWrapper() {
       writePlanningTodos={writePlanningTodos}
       onEngineUpdate={onEngineUpdate}
       addImage={addImage}
+      setControls={setControls}
       setPendingFileWrites={setPendingFileWrites}
       clearPendingFileWrites={clearPendingFileWrites}
     />

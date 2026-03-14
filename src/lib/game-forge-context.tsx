@@ -47,6 +47,11 @@ export interface GeneratedImage {
   prompt: string;
 }
 
+export interface GameControl {
+  action: string;
+  keys: string;
+}
+
 export interface PendingFileWrite {
   path: string;
   status: "streaming" | "finalizing";
@@ -61,6 +66,7 @@ interface GameForgeContextValue {
   planningTodos: PlanningTodo[];
   consoleLogs: ConsoleLogEntry[];
   generatedImages: GeneratedImage[];
+  controls: GameControl[];
   onCodeUpdate: (code: string, engine?: GameEngine) => void;
   onProjectFilesUpdate: (files: ProjectFile[], engine?: GameEngine, deletePaths?: string[]) => void;
   patchProjectFiles: (files: ProjectFile[], engine?: GameEngine) => void;
@@ -92,6 +98,7 @@ interface GameForgeContextValue {
   addAudioTrack: (track: AudioTrack) => void;
   removeAudioTrack: (id: string) => void;
   addImage: (image: GeneratedImage) => void;
+  setControls: (controls: GameControl[]) => void;
   setPendingFileWrites: (
     entries: Array<{ path: string; status: "streaming" | "finalizing"; content?: string }>
   ) => void;
@@ -172,6 +179,11 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [audioTracks, setAudioTracks] = useState<AudioTrack[]>([]);
   const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>([]);
+  const [controls, setControlsState] = useState<GameControl[]>([
+    { action: "Move", keys: "Arrow Keys / WASD" },
+    { action: "Action", keys: "Space" },
+    { action: "Pause", keys: "P / Esc" },
+  ]);
 
   useEffect(() => {
     window.localStorage.setItem(TODOS_STORAGE_KEY, JSON.stringify(planningTodos));
@@ -396,6 +408,19 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const setControls = useCallback((next: GameControl[]) => {
+    const normalized = next
+      .filter((item) => item.action && item.keys)
+      .map((item) => ({
+        action: item.action.trim(),
+        keys: item.keys.trim(),
+      }))
+      .filter((item) => item.action.length > 0 && item.keys.length > 0)
+      .slice(0, 12);
+    if (normalized.length === 0) return;
+    setControlsState(normalized);
+  }, []);
+
   const setPendingFileWrites = useCallback((
     entries: Array<{ path: string; status: "streaming" | "finalizing"; content?: string }>
   ) => {
@@ -434,6 +459,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       planningTodos,
       consoleLogs,
       generatedImages,
+      controls,
       onCodeUpdate,
       onProjectFilesUpdate,
       patchProjectFiles,
@@ -452,6 +478,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       addAudioTrack,
       removeAudioTrack,
       addImage,
+      setControls,
       setPendingFileWrites,
       clearPendingFileWrites,
     }),
@@ -463,6 +490,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       planningTodos,
       consoleLogs,
       generatedImages,
+      controls,
       onCodeUpdate,
       onProjectFilesUpdate,
       patchProjectFiles,
@@ -481,6 +509,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       addAudioTrack,
       removeAudioTrack,
       addImage,
+      setControls,
       setPendingFileWrites,
       clearPendingFileWrites,
     ]

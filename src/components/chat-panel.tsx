@@ -8,7 +8,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { GameEngine } from "@/lib/game-engine";
 import type { ProjectFile } from "@/lib/project-files";
-import type { PlanningTodo, ConsoleLogEntry, GeneratedImage, PendingFileWrite } from "@/lib/game-forge-context";
+import type { PlanningTodo, ConsoleLogEntry, GeneratedImage, PendingFileWrite, GameControl } from "@/lib/game-forge-context";
 
 interface ChatPanelProps {
   currentCode: string | null;
@@ -36,6 +36,7 @@ interface ChatPanelProps {
   writePlanningTodos: (merge: boolean, todos: PlanningTodo[]) => void;
   onEngineUpdate: (engine: GameEngine) => void;
   addImage: (image: GeneratedImage) => void;
+  setControls: (controls: GameControl[]) => void;
   setPendingFileWrites: (
     entries: Array<{ path: string; status: "streaming" | "finalizing"; content?: string }>
   ) => void;
@@ -297,6 +298,11 @@ function ToolCallCard({ part }: {
       return `Image generation requested: ${prompt || "asset"}`;
     }
 
+    if (rawToolName === "update_controls") {
+      const controls = Array.isArray(input.controls) ? input.controls.length : 0;
+      return `${controls} control${controls === 1 ? "" : "s"} updated`;
+    }
+
     return null;
   };
 
@@ -407,6 +413,7 @@ export function ChatPanel({
   writePlanningTodos,
   onEngineUpdate,
   addImage,
+  setControls,
   setPendingFileWrites,
   clearPendingFileWrites,
 }: ChatPanelProps) {
@@ -765,6 +772,26 @@ export function ChatPanel({
             prompt: toolPart.output.prompt ?? "Generated image",
           });
         }
+
+        if (partType === "tool-update_controls") {
+          const toolPart = part as {
+            state: string;
+            input?: { controls?: Array<{ action?: string; keys?: string }> };
+          };
+          if (toolPart.state !== "output-available") continue;
+          if (!Array.isArray(toolPart.input?.controls) || toolPart.input.controls.length === 0) continue;
+          const normalized = toolPart.input.controls
+            .filter((item): item is { action: string; keys: string } =>
+              typeof item?.action === "string" && typeof item?.keys === "string"
+            )
+            .map((item) => ({ action: item.action, keys: item.keys }));
+          if (normalized.length === 0) continue;
+          const signature = JSON.stringify(normalized);
+          const key = `${message.id}:${partType}`;
+          if (processedToolPayloadRef.current.get(key) === signature) continue;
+          processedToolPayloadRef.current.set(key, signature);
+          setControls(normalized);
+        }
       }
     }
   }, [
@@ -780,6 +807,7 @@ export function ChatPanel({
     planningTodos,
     composerMode,
     addImage,
+    setControls,
     setPendingFileWrites,
     clearPendingFileWrites,
     selectedEngine,

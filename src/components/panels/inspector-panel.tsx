@@ -32,7 +32,7 @@ function InfoRow({ label, value, accent }: { label: string; value: string; accen
 }
 
 export function InspectorPanel() {
-  const { currentCode, currentEngine, projectFiles, assets, audioTracks } = useGameForge();
+  const { currentCode, currentEngine, projectFiles, assets, audioTracks, controls } = useGameForge();
 
   if (!currentCode) {
     return (
@@ -80,9 +80,13 @@ export function InspectorPanel() {
         </Section>
 
         <Section title="Controls">
-          <InfoRow label="Move" value="Arrow Keys / WASD" />
-          <InfoRow label="Action" value="Space" />
-          <InfoRow label="Pause" value="P / Esc" />
+          {controls.length > 0 ? (
+            controls.map((control) => (
+              <InfoRow key={`${control.action}:${control.keys}`} label={control.action} value={control.keys} />
+            ))
+          ) : (
+            <InfoRow label="Controls" value="Not provided" />
+          )}
         </Section>
       </div>
     </div>

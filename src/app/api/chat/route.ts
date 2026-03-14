@@ -574,6 +574,7 @@ export async function POST(req: Request) {
             "update_project_files",
             "patch_project_file",
             "update_sandbox",
+            "update_controls",
             "generate_image",
             "todo_read",
             "read_file",
@@ -643,6 +644,18 @@ export async function POST(req: Request) {
           description: "Fallback single-file HTML update.",
           inputSchema: z.object({ code: z.string() }),
           execute: async ({ code }) => ({ success: true, codeLength: code.length }),
+        }),
+        update_controls: tool({
+          description: "Publish game controls for the Controls panel.",
+          inputSchema: z.object({
+            controls: z.array(
+              z.object({
+                action: z.string().min(1),
+                keys: z.string().min(1),
+              })
+            ).min(1).max(12),
+          }),
+          execute: async ({ controls }) => ({ success: true, count: controls.length }),
         }),
         generate_image: tool({
           description:

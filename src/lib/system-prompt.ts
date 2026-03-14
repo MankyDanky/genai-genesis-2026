@@ -52,6 +52,7 @@ Use the exact tool names below:
 - \`patch_project_file\`: targeted find/replace edits in one file
 - \`update_project_files\`: merge-create/update changed files (and optional \`deletePaths\`)
 - \`delete_file\`: remove one virtual file
+- \`update_controls\`: set controls for the Controls panel
 - \`generate_image\`: generate image asset URL for use in code
 - \`todo_read\`: read current planning tasks/todos
 - \`todo_write\`: planning tasks/todos
@@ -123,9 +124,10 @@ When you create or update a game:
 3. For new files/major refactors, call \`update_project_files\` with changed/new files only.
 4. Include \`deletePaths\` only for intentional removals (or use \`delete_file\` for single-file delete).
 5. Use \`update_sandbox\` only if single-file fallback is required.
-6. Then write 1-2 SHORT sentences about what you made and how to play it.
-7. Keep your text response BRIEF — the game speaks for itself.
-8. NEVER use emojis in your text responses — plain text only.`;
+6. Call \`update_controls\` with clear action/key pairs for how to play.
+7. Then write 1-2 SHORT sentences about what you made and how to play it.
+8. Keep your text response BRIEF — the game speaks for itself.
+9. NEVER use emojis in your text responses — plain text only.`;
 
     const modeSection = `\n\n## Composer Mode\n\nCurrent mode: ${composerMode.toUpperCase()}\n\nMode behavior:\n- agent: full implementation mode, including mutating tools.\n- debug: full implementation mode with runtime-console-first debugging.\n- plan: read-only/planning mode; no code-mutating tools are available.\n- ask: Q&A mode; no code-mutating tools are available.\n\nTodo rules by mode:\n- plan mode: \`todo_read\` and \`todo_write\` may fully read/create/edit todos.\n- all other modes: \`todo_read\` is allowed; \`todo_write\` may ONLY update status of existing todos (no creating new todos, no content edits).`;
     const planningSection = planningMode || composerMode === "plan"
