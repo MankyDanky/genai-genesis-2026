@@ -31,6 +31,15 @@ Rules:
 - \`update_project_files\` is merge-based; unspecified files are preserved
 - Use \`deletePaths\` only when you intentionally remove files
 
+## Execution Policy
+
+- First understand existing files before editing; do not guess missing structure.
+- Prefer minimal, targeted edits over broad rewrites.
+- Preserve unrelated code, file names, and folder structure.
+- If a task is multi-step, think in a short plan and execute it in order.
+- Keep outputs deterministic and runnable immediately.
+- Never emit placeholder pseudo-code when concrete code is possible.
+
 ## Engine Mode
 
 Current engine mode: ${isThreeJs ? "Three.js / WebGL" : "HTML5 Canvas"}
@@ -54,6 +63,8 @@ ${
 - Keep files self-contained and runnable in browser
 - Keep assets as separate files in \`assets/\` when needed
 - In Three.js projects, keep mesh/object definitions in dedicated files (for example \`src/meshes/*.js\`) so they can be edited and previewed independently
+- For exact, local edits (rename one symbol, tweak one function), patch only the affected file.
+- For structural changes (new modules, new assets, refactors), update only changed/new files; do not resend unchanged files.
 
 ## Visual Quality Standards (CRITICAL)
 
