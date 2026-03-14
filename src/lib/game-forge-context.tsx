@@ -14,10 +14,10 @@ export interface Asset {
 export interface AudioTrack {
   id: string;
   name: string;
-  type: "music" | "sfx";
+  type: "music" | "sfx" | "ambient";
   description: string;
-  dataUrl: string | null;
-  duration: number | null;
+  code: string;
+  functionName: string;
   createdAt: number;
 }
 

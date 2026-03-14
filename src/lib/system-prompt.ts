@@ -1,4 +1,14 @@
-export function getSystemPrompt(currentCode?: string | null): string {
+interface AudioTrackRef {
+  name: string;
+  type: "music" | "sfx" | "ambient";
+  code: string;
+  functionName: string;
+}
+
+export function getSystemPrompt(
+  currentCode?: string | null,
+  audioTracks?: AudioTrackRef[]
+): string {
   const base = `You are an expert game developer who creates stunning, polished HTML5 Canvas games. You generate complete, self-contained HTML documents that run in a sandboxed iframe.
 
 ## Your Tool
@@ -41,8 +51,42 @@ When you create or update a game:
 2. Then write 1-2 SHORT sentences about what you made and how to play it
 3. Keep your text response BRIEF — the game speaks for itself`;
 
+  let prompt = base;
+
+  if (audioTracks && audioTracks.length > 0) {
+    const sfxTracks = audioTracks.filter((t) => t.type === "sfx");
+    const loopTracks = audioTracks.filter(
+      (t) => t.type === "music" || t.type === "ambient"
+    );
+
+    const sfxNote =
+      sfxTracks.length > 0
+        ? `- SFX functions (call on game events): ${sfxTracks.map((t) => `\`${t.functionName}(audioCtx)\` — "${t.name}"`).join(", ")}`
+        : "";
+    const loopNote =
+      loopTracks.length > 0
+        ? `- Loop functions (call once at game start, store the returned stop fn): ${loopTracks.map((t) => `\`${t.functionName}(audioCtx)\` — "${t.name}"`).join(", ")}`
+        : "";
+
+    prompt += `
+
+## Audio Functions (MUST INCLUDE)
+
+The following pre-built Web Audio API functions MUST be copied verbatim into your game's <script> tag:
+
+\`\`\`javascript
+${audioTracks.map((t) => t.code).join("\n\n")}
+\`\`\`
+
+**Integration rules (follow exactly):**
+- At the top of your script declare: \`let audioCtx = null; let stopBgAudio = null;\`
+- On the FIRST user interaction (keydown, mousedown, or touchstart) initialize: \`audioCtx = new (window.AudioContext || window.webkitAudioContext)(); audioCtx.resume();\`
+${sfxNote}
+${loopNote}${loopTracks.length > 0 ? `\n- On game over / restart, call: \`if (stopBgAudio) { stopBgAudio(); stopBgAudio = null; }\`` : ""}`;
+  }
+
   if (currentCode) {
-    return `${base}
+    prompt += `
 
 ## Current Sandbox Code
 
@@ -53,5 +97,5 @@ ${currentCode}
 \`\`\``;
   }
 
-  return base;
+  return prompt;
 }

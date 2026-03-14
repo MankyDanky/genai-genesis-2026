@@ -8,11 +8,12 @@ export const maxDuration = 60;
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { messages, currentCode } = body;
+    const { messages, currentCode, audioTracks } = body;
 
     console.log("[API] Received request:", {
       messageCount: messages?.length ?? 0,
       hasCurrentCode: !!currentCode,
+      audioTrackCount: audioTracks?.length ?? 0,
     });
 
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
@@ -28,7 +29,7 @@ export async function POST(req: Request) {
 
     const result = streamText({
       model: anthropic("claude-sonnet-4-6"),
-      system: getSystemPrompt(currentCode),
+      system: getSystemPrompt(currentCode, audioTracks),
       messages: modelMessages,
       tools: {
         update_sandbox: tool({

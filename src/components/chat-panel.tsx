@@ -4,9 +4,17 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { useState, useEffect, useRef, useMemo, useCallback, type FormEvent, type KeyboardEvent } from "react";
 
+interface AudioTrackRef {
+  name: string;
+  type: "music" | "sfx" | "ambient";
+  code: string;
+  functionName: string;
+}
+
 interface ChatPanelProps {
   currentCode: string | null;
   onCodeUpdate: (code: string) => void;
+  audioTracks: AudioTrackRef[];
 }
 
 const EXAMPLE_PROMPTS = [
@@ -16,7 +24,7 @@ const EXAMPLE_PROMPTS = [
   "Breakout",
 ];
 
-export function ChatPanel({ currentCode, onCodeUpdate }: ChatPanelProps) {
+export function ChatPanel({ currentCode, onCodeUpdate, audioTracks }: ChatPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [input, setInput] = useState("");
@@ -85,7 +93,7 @@ export function ChatPanel({ currentCode, onCodeUpdate }: ChatPanelProps) {
     if (!text || isLoading) return;
     console.log("[Chat] Submitting:", text);
     setInput("");
-    sendMessage({ text }, { body: { currentCode } })
+    sendMessage({ text }, { body: { currentCode, audioTracks } })
       .then(() => console.log("[Chat] sendMessage resolved"))
       .catch((err) => console.error("[Chat] sendMessage rejected:", err));
   };
