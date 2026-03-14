@@ -501,7 +501,7 @@ export function ChatPanel({ currentCode, onCodeUpdate }: ChatPanelProps) {
 
       {/* ── Input bar (pinned to bottom) ── */}
       <div className="shrink-0 border-t border-[var(--color-border)] p-2">
-        <form onSubmit={handleSubmit} className="flex items-center gap-2">
+        <form onSubmit={handleSubmit} className="flex gap-2">
           <textarea
             ref={textareaRef}
             value={input}
@@ -510,16 +510,16 @@ export function ChatPanel({ currentCode, onCodeUpdate }: ChatPanelProps) {
             placeholder={isEmpty ? "Describe your game..." : "Ask for changes..."}
             disabled={isLoading}
             rows={1}
-            className="gf-input flex-1 bg-[var(--color-surface)] text-[var(--color-text)] text-[12px] leading-relaxed px-3 py-2 border border-[var(--color-border-light)] outline-none placeholder:text-[var(--color-text-muted)] disabled:opacity-50 resize-none overflow-hidden"
+            className="gf-input flex-1 min-w-0 bg-[var(--color-surface)] text-[var(--color-text)] text-[12px] leading-relaxed px-3 py-2 border border-[var(--color-border-light)] outline-none placeholder:text-[var(--color-text-muted)] disabled:opacity-50 resize-none overflow-hidden"
           />
           <button
             type="submit"
             disabled={!canSend}
-            className="shrink-0 self-stretch px-2.5 flex items-center justify-center bg-[var(--color-accent)] text-[var(--color-bg)] border border-[var(--color-accent)] disabled:opacity-20 disabled:cursor-default hover:brightness-110 transition-all"
+            className="gf-btn-chip shrink-0 w-[34px] self-stretch flex items-center justify-center border border-[var(--color-border-light)] bg-[var(--color-surface)] text-[var(--color-text-muted)] disabled:opacity-20 disabled:cursor-default"
             aria-label="Send"
           >
-            <svg width="10" height="12" viewBox="0 0 10 12" fill="currentColor">
-              <path d="M0 0l10 6-10 6z" />
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+              <path d="M1 1l10 5-10 5z" />
             </svg>
           </button>
         </form>
