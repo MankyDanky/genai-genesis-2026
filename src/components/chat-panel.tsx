@@ -720,7 +720,24 @@ export function ChatPanel({
           const key = `${message.id}:${partType}`;
           if (processedToolPayloadRef.current.get(key) === signature) continue;
           processedToolPayloadRef.current.set(key, signature);
-          writePlanningTodos(toolPart.input.merge ?? false, toolPart.input.todos);
+          if (composerMode === "plan") {
+            writePlanningTodos(toolPart.input.merge ?? false, toolPart.input.todos);
+            continue;
+          }
+
+          const existingById = new Map(planningTodos.map((todo) => [todo.id, todo]));
+          const statusOnlyUpdates: PlanningTodo[] = [];
+          for (const incoming of toolPart.input.todos) {
+            const existing = existingById.get(incoming.id);
+            if (!existing) continue;
+            statusOnlyUpdates.push({
+              ...existing,
+              status: incoming.status,
+            });
+          }
+          if (statusOnlyUpdates.length > 0) {
+            writePlanningTodos(true, statusOnlyUpdates);
+          }
         }
 
         if (partType === "tool-generate_image") {
@@ -750,6 +767,8 @@ export function ChatPanel({
     editProjectFile,
     deleteProjectFile,
     writePlanningTodos,
+    planningTodos,
+    composerMode,
     addImage,
     setPendingFileWrites,
     clearPendingFileWrites,

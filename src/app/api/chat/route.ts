@@ -603,7 +603,7 @@ export async function POST(req: Request) {
             return allTools.filter((name) => !mutatingTools.has(name));
           }
 
-          return allTools.filter((name) => !mutatingTools.has(name) && name !== "todo_write");
+          return allTools.filter((name) => !mutatingTools.has(name));
         })()
       ),
       tools: {
