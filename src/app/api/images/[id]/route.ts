@@ -5,13 +5,13 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const image = getImage(id);
+  const image = await getImage(id);
 
   if (!image) {
     return new Response("Not found", { status: 404 });
   }
 
-  return new Response(image.data, {
+  return new Response(new Uint8Array(image.data), {
     headers: {
       "Content-Type": image.mimeType,
       "Cache-Control": "public, max-age=1800, immutable",

@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { GameForgeProvider } from "@/lib/game-forge-context";
+import { ToastProvider } from "@/components/toast";
 
 const DockLayout = dynamic(
   () => import("@/components/dock-layout").then((m) => ({ default: m.DockLayout })),
@@ -11,7 +12,9 @@ const DockLayout = dynamic(
 export default function Home() {
   return (
     <GameForgeProvider>
-      <DockLayout />
+      <ToastProvider>
+        <DockLayout />
+      </ToastProvider>
     </GameForgeProvider>
   );
 }

@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db/client";
-import { SaveGameRequestSchema } from "@/lib/db/schema";
-import type { GameDocument } from "@/lib/db/schema";
+import { z } from "zod";
+import { createStandalonePublishedGame } from "@/lib/db/projects";
+
+const SaveGameRequestSchema = z.object({
+  code: z.string().min(1).max(2 * 1024 * 1024),
+  title: z.string().max(200).optional(),
+  engine: z.enum(["canvas2d", "threejs"]).optional(),
+});
 
 export async function POST(request: Request) {
   try {
@@ -15,31 +20,17 @@ export async function POST(request: Request) {
       );
     }
 
-    const { code, title: providedTitle } = parsed.data;
+    const result = await createStandalonePublishedGame({
+      title: parsed.data.title,
+      engine: parsed.data.engine,
+      code: parsed.data.code,
+    });
 
-    const title =
-      providedTitle ??
-      code.match(/<title>(.*?)<\/title>/i)?.[1] ??
-      "Untitled Game";
-
-    const now = new Date();
-    const doc: Omit<GameDocument, "_id"> = {
-      code,
-      title,
-      codeLength: code.length,
-      createdAt: now,
-      expiresAt: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
-    };
-
-    const result = await db.collection("games").insertOne(doc);
-
+    return NextResponse.json({ id: result.id }, { status: 201 });
+  } catch (error) {
+    console.error("[Games] Failed to save game", error);
     return NextResponse.json(
-      { id: result.insertedId.toHexString() },
-      { status: 201 },
-    );
-  } catch {
-    return NextResponse.json(
-      { error: "Failed to save game" },
+      { error: error instanceof Error ? error.message : "Failed to save game" },
       { status: 500 },
     );
   }

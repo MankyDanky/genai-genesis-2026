@@ -1,7 +1,7 @@
 "use client";
 
 import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport } from "ai";
+import { DefaultChatTransport, type UIMessage } from "ai";
 import { createPortal } from "react-dom";
 import { useState, useEffect, useRef, useMemo, useCallback, type FormEvent, type KeyboardEvent } from "react";
 import Markdown from "react-markdown";
@@ -11,6 +11,7 @@ import type { GameEngine } from "@/lib/game-engine";
 import type { ProjectFile } from "@/lib/project-files";
 import type { PlanningTodo, ConsoleLogEntry, GeneratedImage, PendingFileWrite, GameControl, AudioTrack } from "@/lib/game-forge-context";
 import { getGeneratedAudioId } from "@/lib/generated-audio";
+import type { PersistedChatMessage } from "@/lib/db/schema";
 
 interface ChatPanelProps {
   currentCode: string | null;
@@ -41,6 +42,9 @@ interface ChatPanelProps {
   addImage: (image: GeneratedImage) => void;
   addAudioTrack: (track: AudioTrack) => void;
   setControls: (controls: GameControl[]) => void;
+  chatMessages: PersistedChatMessage[];
+  chatSessionId: string;
+  setChatMessages: (messages: PersistedChatMessage[]) => void;
   focusCodeFile: (path: string) => void;
   focusConsolePanel: () => void;
   focusImagesPanel: () => void;
@@ -481,6 +485,9 @@ function ToolCallCard({ part, audioTrack }: {
   if (state === "input-streaming") {
     statusText = "Preparing tool payload...";
     statusColor = "var(--color-accent)";
+  } else if (state === "output-error") {
+    statusText = (part as { errorText?: string }).errorText ?? "Tool execution failed";
+    statusColor = "var(--color-danger)";
   } else if (state === "input-available" || state === "output-available") {
     statusText = changeSummary ?? "Tool update complete";
     statusColor = "var(--color-success)";
@@ -546,7 +553,7 @@ function ToolCallCard({ part, audioTrack }: {
           </div>
         </div>
       </div>
-      {isAudioTool && state === "output-available" && audioId && audioName ? (
+      {isAudioTool && (state === "output-available" || state === "output-error") && audioId && audioName ? (
         <GeneratedAudioPlayer
           audioName={audioName}
           audioKind={audioKind}
@@ -619,6 +626,9 @@ export function ChatPanel({
   addImage,
   addAudioTrack,
   setControls,
+  chatMessages,
+  chatSessionId,
+  setChatMessages,
   focusCodeFile,
   focusConsolePanel,
   focusImagesPanel,
@@ -627,6 +637,7 @@ export function ChatPanel({
   clearPendingFileWrites,
 }: ChatPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const isNearBottomRef = useRef(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const modeMenuRef = useRef<HTMLDivElement>(null);
   const modeMenuPopupRef = useRef<HTMLDivElement>(null);
@@ -636,6 +647,8 @@ export function ChatPanel({
   const processedToolPayloadRef = useRef<Map<string, string>>(new Map());
   const audioPollInFlightRef = useRef(false);
   const audioPollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hydratedMessageIdsRef = useRef<Set<string>>(new Set());
+  const initialChatMessagesRef = useRef(chatMessages);
   const [input, setInput] = useState("");
   const [selectedEngine, setSelectedEngine] = useState<GameEngine>(currentEngine);
   const [composerMode, setComposerMode] = useState<ComposerMode>("agent");
@@ -954,13 +967,32 @@ export function ChatPanel({
   }, []);
 
   const { messages, sendMessage, status, error } = useChat({
+    id: chatSessionId,
+    messages: chatMessages as UIMessage[],
+    experimental_throttle: 50,
     transport,
     onError,
     onFinish,
   });
 
   useEffect(() => {
+    initialChatMessagesRef.current = chatMessages;
+  }, [chatMessages]);
+
+  useEffect(() => {
+    hydratedMessageIdsRef.current = new Set(
+      initialChatMessagesRef.current.map((message) => message.id)
+    );
+    processedToolPayloadRef.current = new Map();
+  }, [chatSessionId]);
+
+  useEffect(() => {
+    setChatMessages(messages as PersistedChatMessage[]);
+  }, [messages, setChatMessages]);
+
+  useEffect(() => {
     for (const message of messages) {
+      if (hydratedMessageIdsRef.current.has(message.id)) continue;
       if (message.role !== "assistant") continue;
       for (const part of message.parts) {
         const partType = (part as { type: string }).type;
@@ -1068,7 +1100,6 @@ export function ChatPanel({
               createIfMissing?: boolean;
             };
           };
-          if (toolPart.state !== "output-available") continue;
           if (toolPart.state === "input-streaming" || toolPart.state === "input-available") {
             if (isStableProjectPath(toolPart.input?.targetFile)) {
               setPendingFileWrites(
@@ -1078,7 +1109,9 @@ export function ChatPanel({
                 }]
               );
             }
+            continue;
           }
+          if (toolPart.state !== "output-available") continue;
           if (!isStableProjectPath(toolPart.input?.targetFile) || typeof toolPart.input.newString !== "string") continue;
 
           const signature = JSON.stringify(toolPart.input);
@@ -1181,7 +1214,7 @@ export function ChatPanel({
             state: string;
             input?: { name?: string; prompt?: string; duration?: number };
           };
-          if (toolPart.state !== "output-available") continue;
+          if (toolPart.state !== "output-available" && toolPart.state !== "output-error") continue;
           const name = toolPart.input?.name;
           if (!name) continue;
           const type = partType === "tool-generate_music" ? "music" as const : "sfx" as const;
@@ -1225,7 +1258,19 @@ export function ChatPanel({
   ]);
 
   useEffect(() => {
-    if (scrollRef.current) {
+    const el = scrollRef.current;
+    if (!el) return;
+    const handleScroll = () => {
+      const threshold = 80;
+      isNearBottomRef.current =
+        el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
+    };
+    el.addEventListener("scroll", handleScroll, { passive: true });
+    return () => el.removeEventListener("scroll", handleScroll);
+  }, []);
+
+  useEffect(() => {
+    if (isNearBottomRef.current && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages, status]);
