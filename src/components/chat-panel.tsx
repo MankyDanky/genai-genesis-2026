@@ -374,13 +374,13 @@ export function ChatPanel({
             };
           };
           if (!toolPart.input?.path || !Array.isArray(toolPart.input.edits) || toolPart.input.edits.length === 0) continue;
-          if (toolPart.state !== "input-available" && toolPart.state !== "output-available") continue;
+          if (toolPart.state !== "output-available") continue;
 
           const signature = JSON.stringify({
             path: toolPart.input.path,
             edits: toolPart.input.edits,
           });
-          const key = `${message.id}:${partType}:${toolPart.state}`;
+          const key = `${message.id}:${partType}:${toolPart.input.path}`;
           if (processedToolPayloadRef.current.get(key) === signature) continue;
           processedToolPayloadRef.current.set(key, signature);
           patchProjectFileContent(toolPart.input.path, toolPart.input.edits);
