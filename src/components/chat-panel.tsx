@@ -926,92 +926,31 @@ export function ChatPanel({
       </div>
 
       <div className="shrink-0 border-t border-[var(--color-border)] p-2">
-        <div className="mb-2 flex flex-wrap gap-1.5 items-center">
-          {(["agent", "plan", "debug", "ask"] as const).map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              onClick={() => setComposerMode(mode)}
-              className={`gf-btn-chip text-[10px] px-2.5 py-1 uppercase tracking-wider font-semibold border ${
-                composerMode === mode
-                  ? "border-[var(--color-accent)] text-[var(--color-accent)] bg-[var(--color-accent-glow)]"
-                  : "border-[var(--color-border)] text-[var(--color-text-muted)]"
-              }`}
-            >
-              {mode}
-            </button>
-          ))}
+        <div className="mb-2 flex items-center gap-2">
+          <span className="text-[9px] uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Mode</span>
+          <select
+            value={composerMode}
+            onChange={(e) => setComposerMode(e.target.value as ComposerMode)}
+            className="bg-[var(--color-surface)] border border-[var(--color-border)] text-[10px] uppercase tracking-wider text-[var(--color-text-secondary)] px-2 py-1 outline-none"
+          >
+            <option value="agent">agent</option>
+            <option value="plan">plan</option>
+            <option value="debug">debug</option>
+            <option value="ask">ask</option>
+          </select>
+          <span className="text-[9px] text-[var(--color-text-muted)]">
+            {composerMode === "debug"
+              ? "Auto-attaches console logs"
+              : composerMode === "plan"
+                ? "Read-only planning"
+                : composerMode === "ask"
+                  ? "Q&A mode"
+                  : "Full edit mode"}
+          </span>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex gap-2">
-          <textarea
-            ref={textareaRef}
-            value={input}
-            onChange={(e) => handleInputChange(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={
-              composerMode === "ask"
-                ? "Ask about the project..."
-                : isEmpty
-                  ? "Describe your game..."
-                  : "Ask for changes..."
-            }
-            rows={1}
-            className="gf-input flex-1 min-w-0 bg-[var(--color-surface)] text-[var(--color-text)] text-[12px] leading-relaxed px-3 py-2 border border-[var(--color-border-light)] outline-none placeholder:text-[var(--color-text-muted)] resize-none overflow-hidden"
-          />
-          <button
-            type="submit"
-            disabled={!canSend}
-            className="gf-btn-chip shrink-0 w-[34px] self-stretch flex items-center justify-center border border-[var(--color-border-light)] bg-[var(--color-surface)] text-[var(--color-text-muted)] disabled:opacity-20 disabled:cursor-default"
-            aria-label="Send"
-          >
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
-              <path d="M1 1l10 5-10 5z" />
-            </svg>
-          </button>
-        </form>
-        {mentionSuggestions.length > 0 && (
-          <div className="mt-1 border border-[var(--color-border)] bg-[var(--color-surface)]">
-            <div className="px-2 py-1 text-[9px] uppercase tracking-[0.12em] text-[var(--color-text-muted)]">
-              Mentions
-            </div>
-            <div className="max-h-28 overflow-y-auto border-t border-[var(--color-border)]">
-              {mentionSuggestions.map((suggestion) => (
-                <button
-                  key={suggestion.id}
-                  ref={(el) => {
-                    mentionItemRefs.current.set(suggestion.id, el);
-                  }}
-                  type="button"
-                  onClick={() => applyMention(suggestion)}
-                  className={`w-full text-left px-2 py-1.5 text-[10px] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-light)] ${
-                    mentionSuggestions[mentionIndex]?.id === suggestion.id ? "bg-[var(--color-surface-light)]" : ""
-                  }`}
-                >
-                  <span className="inline-flex items-center gap-1.5">
-                    {suggestion.kind === "console" ? (
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                        <polyline points="4 17 10 11 4 5" />
-                        <line x1="12" y1="19" x2="20" y2="19" />
-                      </svg>
-                    ) : (
-                      <span className="text-[9px] opacity-70">#</span>
-                    )}
-                    <span>
-                      @{suggestion.insertText}
-                      <span className="ml-1 text-[var(--color-text-muted)]">
-                        {suggestion.kind === "console" ? "(runtime)" : "(file)"}
-                      </span>
-                    </span>
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {planningMode && (
-          <div className="mt-2 border border-[var(--color-border)] bg-[var(--color-surface)]">
+        {(composerMode === "plan" || planningTodos.length > 0) && (
+          <div className="mb-2 border border-[var(--color-border)] bg-[var(--color-surface)]">
             <div className="px-2.5 py-2 border-b border-[var(--color-border)] flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <span className="text-[9px] uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Plan</span>
@@ -1082,6 +1021,73 @@ export function ChatPanel({
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="flex gap-2">
+          <textarea
+            ref={textareaRef}
+            value={input}
+            onChange={(e) => handleInputChange(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={
+              composerMode === "ask"
+                ? "Ask about the project..."
+                : isEmpty
+                  ? "Describe your game..."
+                  : "Ask for changes..."
+            }
+            rows={1}
+            className="gf-input flex-1 min-w-0 bg-[var(--color-surface)] text-[var(--color-text)] text-[12px] leading-relaxed px-3 py-2 border border-[var(--color-border-light)] outline-none placeholder:text-[var(--color-text-muted)] resize-none overflow-hidden"
+          />
+          <button
+            type="submit"
+            disabled={!canSend}
+            className="gf-btn-chip shrink-0 w-[34px] self-stretch flex items-center justify-center border border-[var(--color-border-light)] bg-[var(--color-surface)] text-[var(--color-text-muted)] disabled:opacity-20 disabled:cursor-default"
+            aria-label="Send"
+          >
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+              <path d="M1 1l10 5-10 5z" />
+            </svg>
+          </button>
+        </form>
+        {mentionSuggestions.length > 0 && (
+          <div className="mt-1 border border-[var(--color-border)] bg-[var(--color-surface)]">
+            <div className="px-2 py-1 text-[9px] uppercase tracking-[0.12em] text-[var(--color-text-muted)]">
+              Mentions
+            </div>
+            <div className="max-h-28 overflow-y-auto border-t border-[var(--color-border)]">
+              {mentionSuggestions.map((suggestion) => (
+                <button
+                  key={suggestion.id}
+                  ref={(el) => {
+                    mentionItemRefs.current.set(suggestion.id, el);
+                  }}
+                  type="button"
+                  onClick={() => applyMention(suggestion)}
+                  className={`w-full text-left px-2 py-1.5 text-[10px] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-light)] ${
+                    mentionSuggestions[mentionIndex]?.id === suggestion.id ? "bg-[var(--color-surface-light)]" : ""
+                  }`}
+                >
+                  <span className="inline-flex items-center gap-1.5">
+                    {suggestion.kind === "console" ? (
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <polyline points="4 17 10 11 4 5" />
+                        <line x1="12" y1="19" x2="20" y2="19" />
+                      </svg>
+                    ) : (
+                      <span className="text-[9px] opacity-70">#</span>
+                    )}
+                    <span>
+                      @{suggestion.insertText}
+                      <span className="ml-1 text-[var(--color-text-muted)]">
+                        {suggestion.kind === "console" ? "(runtime)" : "(file)"}
+                      </span>
+                    </span>
+                  </span>
+                </button>
+              ))}
+            </div>
           </div>
         )}
 

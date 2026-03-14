@@ -209,6 +209,62 @@ function listDirEntries(files: ProjectFile[], targetDirectory: string, ignoreGlo
   });
 }
 
+function buildDirTree(files: ProjectFile[], rootDir = "") {
+  const rootPrefix = normalizeDir(rootDir);
+  type TreeNode = { type: "directory"; name: string; path: string; children: TreeNode[] } | { type: "file"; name: string; path: string };
+  const root: { type: "directory"; name: string; path: string; children: TreeNode[] } = {
+    type: "directory",
+    name: rootPrefix || ".",
+    path: rootPrefix,
+    children: [],
+  };
+
+  for (const file of files) {
+    const filePath = normalizePath(file.path);
+    if (rootPrefix && !filePath.startsWith(rootPrefix)) continue;
+    const rel = rootPrefix ? filePath.slice(rootPrefix.length) : filePath;
+    if (!rel) continue;
+
+    const parts = rel.split("/").filter(Boolean);
+    let cursor = root;
+
+    for (let i = 0; i < parts.length; i += 1) {
+      const name = parts[i]!;
+      const isLast = i === parts.length - 1;
+      const currentPath = rootPrefix + parts.slice(0, i + 1).join("/");
+
+      if (isLast) {
+        if (!cursor.children.some((node) => node.type === "file" && node.path === currentPath)) {
+          cursor.children.push({ type: "file", name, path: currentPath });
+        }
+        continue;
+      }
+
+      let nextDir = cursor.children.find(
+        (node): node is Extract<TreeNode, { type: "directory" }> =>
+          node.type === "directory" && node.path === currentPath
+      );
+      if (!nextDir) {
+        nextDir = { type: "directory", name, path: currentPath, children: [] };
+        cursor.children.push(nextDir);
+      }
+      cursor = nextDir;
+    }
+  }
+
+  const sortTree = (node: Extract<TreeNode, { type: "directory" }>) => {
+    node.children.sort((a, b) => {
+      if (a.type !== b.type) return a.type === "directory" ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+    for (const child of node.children) {
+      if (child.type === "directory") sortTree(child);
+    }
+  };
+  sortTree(root);
+  return root;
+}
+
 function grepFiles(files: ProjectFile[], input: {
   pattern: string;
   path?: string;
@@ -498,6 +554,7 @@ export async function POST(req: Request) {
             "generate_image",
             "read_file",
             "list_dir",
+            "dir_tree",
             "glob_file_search",
             "grep",
             "delete_file",
@@ -611,6 +668,16 @@ export async function POST(req: Request) {
           execute: async ({ targetDirectory, ignoreGlobs }) => ({
             targetDirectory,
             entries: listDirEntries(currentProjectFiles, targetDirectory, ignoreGlobs),
+          }),
+        }),
+        dir_tree: tool({
+          description: "Return a nested directory tree for virtual files.",
+          inputSchema: z.object({
+            targetDirectory: z.string().optional(),
+          }),
+          execute: async ({ targetDirectory }) => ({
+            targetDirectory: targetDirectory ?? "",
+            tree: buildDirTree(currentProjectFiles, targetDirectory ?? ""),
           }),
         }),
         glob_file_search: tool({

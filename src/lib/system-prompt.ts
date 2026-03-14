@@ -44,6 +44,7 @@ export function getSystemPrompt({
 Use the exact tool names below:
 - \`read_file\`: read a virtual file (supports offset/limit)
 - \`list_dir\`: list files/folders under a virtual directory
+- \`dir_tree\`: return nested directory tree for project navigation
 - \`glob_file_search\`: find virtual files by glob
 - \`grep\`: regex search across virtual files
 - \`read_lints\`: run lightweight lint checks on virtual files
@@ -59,6 +60,7 @@ Rules:
 - Inspect before editing: use read/list/search/lint tools when uncertain.
 - Do NOT rewrite full files for small edits; use \`patch_project_file\`
 - Use \`edit_file\` for context-matched edits (oldString -> newString) when patching one file.
+- Before \`patch_project_file\` or \`edit_file\`, call \`read_file\` on the target file in the same turn when there is any chance it changed.
 - \`update_project_files\` is merge-based; unspecified files are preserved.
 - Use \`deletePaths\` only when you intentionally remove files
 - Use \`delete_file\` only when explicitly removing a file.

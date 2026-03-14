@@ -147,6 +147,7 @@ export function CodePanel() {
 
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set(["src", "styles", "assets"]));
+  const [newFilePath, setNewFilePath] = useState("");
 
   const effectiveSelectedPath =
     selectedPath && codeFiles.some((file) => file.path === selectedPath)
@@ -164,9 +165,53 @@ export function CodePanel() {
     });
   };
 
+  const handleCreateFile = () => {
+    const path = newFilePath.trim().replace(/^\.\//, "");
+    if (!path) return;
+    updateProjectFile(path, "");
+    setSelectedPath(path);
+    setNewFilePath("");
+
+    const parts = path.split("/");
+    if (parts.length > 1) {
+      setExpanded((prev) => {
+        const next = new Set(prev);
+        let current = "";
+        for (let i = 0; i < parts.length - 1; i += 1) {
+          current = current ? `${current}/${parts[i]}` : parts[i]!;
+          next.add(current);
+        }
+        return next;
+      });
+    }
+  };
+
   return (
     <div className="flex h-full bg-[var(--color-bg)]">
       <div className="w-56 border-r border-[var(--color-border)] overflow-y-auto py-1">
+        <div className="px-2 pb-2 border-b border-[var(--color-border)]">
+          <div className="flex gap-1">
+            <input
+              value={newFilePath}
+              onChange={(e) => setNewFilePath(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleCreateFile();
+                }
+              }}
+              placeholder="new file path"
+              className="flex-1 min-w-0 bg-[var(--color-surface-light)] border border-[var(--color-border)] text-[10px] text-[var(--color-text-secondary)] px-1.5 py-1 outline-none"
+            />
+            <button
+              type="button"
+              onClick={handleCreateFile}
+              className="px-2 text-[10px] uppercase tracking-wider border border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+            >
+              Add
+            </button>
+          </div>
+        </div>
         {tree.length === 0 ? (
           <p className="text-[10px] text-[var(--color-text-muted)] p-3 uppercase">No code files</p>
         ) : (

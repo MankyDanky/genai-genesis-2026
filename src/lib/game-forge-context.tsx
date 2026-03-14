@@ -213,7 +213,11 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
 
   const updateProjectFile = useCallback((path: string, content: string) => {
     setProjectFiles((prev) => {
-      const next = prev.map((file) => (file.path === path ? { ...file, content } : file));
+      const existingIndex = prev.findIndex((file) => file.path === path);
+      const next =
+        existingIndex >= 0
+          ? prev.map((file) => (file.path === path ? { ...file, content } : file))
+          : [...prev, { path, content, kind: inferKindFromPath(path) }];
       const compiled = compileProjectToHtml(next);
       setCurrentCode((current) => (current === compiled ? current : compiled));
       return next;

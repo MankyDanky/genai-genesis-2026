@@ -7,6 +7,8 @@ import {
 } from "dockview";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { gameForgeTheme } from "@/lib/dock-theme";
+import { useGameForge } from "@/lib/game-forge-context";
+import { getEngineLabel } from "@/lib/game-engine";
 import { SandboxPanel } from "@/components/panels/sandbox-panel";
 import { ChatPanelWrapper } from "@/components/panels/chat-panel-wrapper";
 import { CodePanel } from "@/components/panels/code-panel";
@@ -93,6 +95,7 @@ function buildDefaultLayout(api: DockviewApi) {
 
 export function DockLayout() {
   const apiRef = useRef<DockviewApi | null>(null);
+  const { currentEngine } = useGameForge();
   const [openPanels, setOpenPanels] = useState<Set<string>>(
     () => new Set(ALL_PANELS.map((p) => p.id))
   );
@@ -173,6 +176,7 @@ export function DockLayout() {
         panels={panelInfos}
         onTogglePanel={handleTogglePanel}
         onResetLayout={handleResetLayout}
+        engineLabel={getEngineLabel(currentEngine)}
       />
       <div className="flex-1 min-h-0">
         <DockviewReact

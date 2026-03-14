@@ -12,6 +12,7 @@ interface ToolbarProps {
   panels: PanelInfo[];
   onTogglePanel: (id: string) => void;
   onResetLayout: () => void;
+  engineLabel?: string;
 }
 
 function DropdownMenu({
@@ -97,7 +98,7 @@ function MenuDivider() {
   return <div className="border-t border-[var(--color-border)] my-1 mx-2" />;
 }
 
-export function Toolbar({ panels, onTogglePanel, onResetLayout }: ToolbarProps) {
+export function Toolbar({ panels, onTogglePanel, onResetLayout, engineLabel }: ToolbarProps) {
   const [openMenu, setOpenMenu] = useState<string | null>(null);
 
   const toggle = (menu: string) => {
@@ -122,6 +123,11 @@ export function Toolbar({ panels, onTogglePanel, onResetLayout }: ToolbarProps) 
         <span className="text-[11px] text-[var(--color-accent)] font-bold tracking-[0.12em] uppercase">
           Game Forge
         </span>
+        {engineLabel ? (
+          <span className="text-[9px] text-[var(--color-text-muted)] tracking-[0.08em] uppercase border border-[var(--color-border)] px-1.5 py-0.5">
+            {engineLabel}
+          </span>
+        ) : null}
       </div>
 
       {/* Window menu */}
