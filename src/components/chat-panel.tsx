@@ -412,7 +412,7 @@ export function ChatPanel({
         if (partType === "tool-update_sandbox") {
           const toolPart = part as { state: string; input?: { code?: string } };
           if (toolPart.state === "output-available") {
-            if (toolPart.input?.code && toolPart.input.code !== currentCode) {
+            if (toolPart.input?.code) {
               const key = `${message.id}:${partType}:${toolPart.state}`;
               if (processedToolPayloadRef.current.get(key) === toolPart.input.code) continue;
               processedToolPayloadRef.current.set(key, toolPart.input.code);
@@ -569,7 +569,9 @@ export function ChatPanel({
       .filter((token) => token.length > 0);
     const mentionedFiles = Array.from(
       new Set(
-        mentions.filter((token) => projectFiles.some((file) => file.path === token))
+        mentions.filter(
+          (token) => token.toLowerCase() === "console" || projectFiles.some((file) => file.path === token)
+        )
       )
     );
     const mentionedConsole = mentions.some((token) => token.toLowerCase() === "console");

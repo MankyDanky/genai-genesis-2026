@@ -9,9 +9,18 @@ interface SandboxProps {
     args: string[];
     source: "console" | "error" | "unhandledrejection";
   }) => void;
+  onReload?: () => void;
 }
 
-function ShareBar({ code, containerRef }: { code: string; containerRef: React.RefObject<HTMLDivElement | null> }) {
+function ShareBar({
+  code,
+  containerRef,
+  onReload,
+}: {
+  code: string;
+  containerRef: React.RefObject<HTMLDivElement | null>;
+  onReload?: () => void;
+}) {
   const [toast, setToast] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
@@ -44,6 +53,10 @@ function ShareBar({ code, containerRef }: { code: string; containerRef: React.Re
     window.open(url, "_blank");
   }, [code]);
 
+  const handleReload = useCallback(() => {
+    onReload?.();
+  }, [onReload]);
+
   const handleFullscreen = useCallback(async () => {
     const el = containerRef.current;
     if (!el) return;
@@ -67,6 +80,17 @@ function ShareBar({ code, containerRef }: { code: string; containerRef: React.Re
           {toast}
         </span>
       )}
+
+      <button
+        onClick={handleReload}
+        title="Reload game"
+        className="gf-btn-chip p-1.5 border border-[var(--color-border-light)] bg-[var(--color-surface)] text-[var(--color-text-muted)]"
+      >
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <path d="M13.5 8a5.5 5.5 0 1 1-1.12-3.34" />
+          <path d="M10.5 2.5h3v3" />
+        </svg>
+      </button>
 
       <button
         onClick={handleFullscreen}
@@ -139,9 +163,15 @@ function buildInstrumentedSrcDoc(code: string): string {
   return `${bridge}${code}`;
 }
 
-export function Sandbox({ code, onConsoleMessage }: SandboxProps) {
+export function Sandbox({ code, onConsoleMessage, onReload }: SandboxProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [reloadKey, setReloadKey] = useState(0);
   const srcDoc = useMemo(() => (code ? buildInstrumentedSrcDoc(code) : null), [code]);
+
+  const handleReload = useCallback(() => {
+    setReloadKey((prev) => prev + 1);
+    onReload?.();
+  }, [onReload]);
 
   useEffect(() => {
     if (!onConsoleMessage) return;
@@ -188,9 +218,9 @@ export function Sandbox({ code, onConsoleMessage }: SandboxProps) {
 
   return (
     <div ref={containerRef} className="relative h-full w-full bg-black">
-      <ShareBar code={code} containerRef={containerRef} />
+      <ShareBar code={code} containerRef={containerRef} onReload={handleReload} />
       <iframe
-        key={code}
+        key={`${code}:${reloadKey}`}
         srcDoc={srcDoc}
         sandbox="allow-scripts"
         title="Game Preview"

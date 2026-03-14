@@ -106,17 +106,18 @@ When you create or update a game:
       : "";
     const baseWithPlanning = `${base}${planningSection}`;
 
+    const includeConsole = consoleLogs.length > 0 || mentionedFiles.some((value) => value === "console");
+    const consoleSection = includeConsole && consoleLogs.length > 0
+        ? `\n\n## Runtime Console Logs (User Mentioned @console)\n\nUse these logs to debug before editing:\n\n${consoleLogs
+            .map((entry) => `- [${new Date(entry.timestamp).toISOString()}] ${entry.level.toUpperCase()} ${entry.source}: ${entry.text}`)
+            .join("\n")}`
+        : includeConsole
+          ? `\n\n## Runtime Console Logs (User Mentioned @console)\n\nNo logs captured yet.`
+          : "";
+
     if (currentProjectFiles.length > 0) {
         const mentionedSet = new Set(mentionedFiles);
         const focusedFiles = currentProjectFiles.filter((file) => mentionedSet.has(file.path));
-        const includeConsole = mentionedSet.has("console");
-        const consoleSection = includeConsole && consoleLogs.length > 0
-            ? `\n\n## Runtime Console Logs (User Mentioned @console)\n\nUse these logs to debug before editing:\n\n${consoleLogs
-                .map((entry) => `- [${new Date(entry.timestamp).toISOString()}] ${entry.level.toUpperCase()} ${entry.source}: ${entry.text}`)
-                .join("\n")}`
-            : includeConsole
-              ? `\n\n## Runtime Console Logs (User Mentioned @console)\n\nNo logs captured yet.`
-              : "";
         const focusedSection =
             focusedFiles.length > 0
                 ? `\n\n## Focused Files (User Mentioned)\n\nPrioritize these files for this request:\n\n${projectFilesToPrompt(focusedFiles)}`
@@ -140,7 +141,7 @@ The sandbox currently contains the following code. When the user asks for modifi
 
 \`\`\`html
 ${currentCode}
-\`\`\``;
+\`\`\`${consoleSection}`;
     }
 
     return baseWithPlanning;
