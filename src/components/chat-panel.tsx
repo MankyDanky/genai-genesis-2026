@@ -2,6 +2,7 @@
 
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
+import { createPortal } from "react-dom";
 import { useState, useEffect, useRef, useMemo, useCallback, type FormEvent, type KeyboardEvent } from "react";
 import Markdown from "react-markdown";
 import type { GameEngine } from "@/lib/game-engine";
@@ -385,6 +386,8 @@ export function ChatPanel({
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const modeMenuRef = useRef<HTMLDivElement>(null);
+  const modeMenuPopupRef = useRef<HTMLDivElement>(null);
+  const modeMenuButtonRef = useRef<HTMLButtonElement>(null);
   const mentionItemRefs = useRef<Map<string, HTMLButtonElement | null>>(new Map());
   const processedToolPayloadRef = useRef<Map<string, string>>(new Map());
   const [input, setInput] = useState("");
@@ -394,9 +397,11 @@ export function ChatPanel({
   const [selectedEngine, setSelectedEngine] = useState<GameEngine>(currentEngine);
   const [composerMode, setComposerMode] = useState<ComposerMode>("agent");
   const [isModeMenuOpen, setIsModeMenuOpen] = useState(false);
+  const [modeMenuPos, setModeMenuPos] = useState({ x: 0, y: 0 });
   const [isPlanCollapsed, setIsPlanCollapsed] = useState(false);
   const [dragTodoId, setDragTodoId] = useState<string | null>(null);
   const planningMode = composerMode === "plan";
+  const canPortal = typeof document !== "undefined";
 
   const mentionSuggestions = useMemo(() => {
     if (mentionStart === null) return [] as MentionSuggestion[];
@@ -452,12 +457,65 @@ export function ChatPanel({
   useEffect(() => {
     if (!isModeMenuOpen) return;
     const onClick = (e: MouseEvent) => {
-      if (modeMenuRef.current && !modeMenuRef.current.contains(e.target as Node)) {
-        setIsModeMenuOpen(false);
-      }
+      const target = e.target as Node;
+      if (modeMenuRef.current?.contains(target)) return;
+      if (modeMenuPopupRef.current?.contains(target)) return;
+      setIsModeMenuOpen(false);
     };
     document.addEventListener("mousedown", onClick);
     return () => document.removeEventListener("mousedown", onClick);
+  }, [isModeMenuOpen]);
+
+  useEffect(() => {
+    if (!isModeMenuOpen) return;
+    const buttonEl = modeMenuButtonRef.current;
+    const menuEl = modeMenuPopupRef.current;
+    if (!buttonEl || !menuEl) return;
+
+    const updatePosition = () => {
+      const buttonRect = buttonEl.getBoundingClientRect();
+      const menuRect = menuEl.getBoundingClientRect();
+      const pad = 8;
+      const gap = 4;
+      const viewportW = window.innerWidth;
+      const viewportH = window.innerHeight;
+
+      let x = buttonRect.left;
+      let y = buttonRect.bottom + gap;
+
+      if (x + menuRect.width > viewportW - pad) x = viewportW - menuRect.width - pad;
+      if (x < pad) x = pad;
+
+      if (y + menuRect.height > viewportH - pad) {
+        const upY = buttonRect.top - menuRect.height - gap;
+        y = upY >= pad ? upY : viewportH - menuRect.height - pad;
+      }
+      if (y < pad) y = pad;
+
+      setModeMenuPos({ x, y });
+    };
+
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [isModeMenuOpen]);
+
+  const toggleModeMenu = useCallback(() => {
+    if (isModeMenuOpen) {
+      setIsModeMenuOpen(false);
+      return;
+    }
+
+    const buttonEl = modeMenuButtonRef.current;
+    if (buttonEl) {
+      const rect = buttonEl.getBoundingClientRect();
+      setModeMenuPos({ x: rect.left, y: rect.bottom + 4 });
+    }
+    setIsModeMenuOpen(true);
   }, [isModeMenuOpen]);
 
   const transport = useMemo(
@@ -1061,15 +1119,21 @@ export function ChatPanel({
           <span className="text-[9px] uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Mode</span>
           <div ref={modeMenuRef} className="relative">
             <button
+              ref={modeMenuButtonRef}
               type="button"
-              onClick={() => setIsModeMenuOpen((prev) => !prev)}
+              onClick={toggleModeMenu}
               className="inline-flex items-center gap-2 bg-[var(--color-surface)] border border-[var(--color-border)] text-[10px] uppercase tracking-wider text-[var(--color-text-secondary)] px-2 py-1"
             >
               <span>{composerMode}</span>
               <span className="text-[9px]">{isModeMenuOpen ? "▴" : "▾"}</span>
             </button>
-            {isModeMenuOpen && (
-              <div className="absolute top-full left-0 mt-1 min-w-[120px] bg-[var(--color-surface)] border border-[var(--color-border-light)] z-20 shadow-[0_12px_24px_rgba(0,0,0,0.45)]">
+            {canPortal && isModeMenuOpen
+              ? createPortal(
+              <div
+                ref={modeMenuPopupRef}
+                className="fixed min-w-[120px] bg-[var(--color-surface)] border border-[var(--color-border-light)] z-50 shadow-[0_12px_24px_rgba(0,0,0,0.45)]"
+                style={{ left: modeMenuPos.x, top: modeMenuPos.y }}
+              >
                 {(["agent", "plan", "debug", "ask"] as const).map((mode) => (
                   <button
                     key={mode}
@@ -1087,7 +1151,10 @@ export function ChatPanel({
                   </button>
                 ))}
               </div>
-            )}
+                ,
+                document.body
+              )
+              : null}
           </div>
           <span className="text-[9px] text-[var(--color-text-muted)]">
             {composerMode === "debug"
