@@ -958,19 +958,21 @@ export function ChatPanel({
           <div className="border border-[var(--color-border)] bg-[var(--color-surface)]">
             <div className="px-2 py-1.5 border-b border-[var(--color-border)] flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsPlanCollapsed((prev) => !prev)}
+                  className="inline-flex h-4 w-4 items-center justify-center text-[10px] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                  aria-label={isPlanCollapsed ? "Expand plan" : "Collapse plan"}
+                  title={isPlanCollapsed ? "Expand plan" : "Collapse plan"}
+                >
+                  {isPlanCollapsed ? "▸" : "▾"}
+                </button>
                 <span className="text-[9px] uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Plan</span>
                 <span className="text-[9px] text-[var(--color-text-muted)]">
                   {planningTodos.length} task{planningTodos.length === 1 ? "" : "s"}
                 </span>
               </div>
               <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => setIsPlanCollapsed((prev) => !prev)}
-                  className="text-[9px] uppercase tracking-[0.12em] px-1 py-0.5 border border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-                >
-                  {isPlanCollapsed ? "Expand" : "Collapse"}
-                </button>
                 <button
                   type="button"
                   onClick={handleAddTodo}
