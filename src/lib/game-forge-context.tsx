@@ -42,12 +42,18 @@ export interface AudioTrack {
   createdAt: number;
 }
 
+export interface GeneratedImage {
+  url: string;
+  prompt: string;
+}
+
 interface GameForgeContextValue {
   currentCode: string | null;
   currentEngine: GameEngine;
   projectFiles: ProjectFile[];
   planningTodos: PlanningTodo[];
   consoleLogs: ConsoleLogEntry[];
+  generatedImages: GeneratedImage[];
   onCodeUpdate: (code: string, engine?: GameEngine) => void;
   onProjectFilesUpdate: (files: ProjectFile[], engine?: GameEngine, deletePaths?: string[]) => void;
   patchProjectFiles: (files: ProjectFile[], engine?: GameEngine) => void;
@@ -78,6 +84,7 @@ interface GameForgeContextValue {
   audioTracks: AudioTrack[];
   addAudioTrack: (track: AudioTrack) => void;
   removeAudioTrack: (id: string) => void;
+  addImage: (image: GeneratedImage) => void;
 }
 
 const GameForgeContext = createContext<GameForgeContextValue | null>(null);
@@ -152,6 +159,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
   });
   const [assets, setAssets] = useState<Asset[]>([]);
   const [audioTracks, setAudioTracks] = useState<AudioTrack[]>([]);
+  const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>([]);
 
   useEffect(() => {
     window.localStorage.setItem(TODOS_STORAGE_KEY, JSON.stringify(planningTodos));
@@ -365,6 +373,13 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     setAudioTracks((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
+  const addImage = useCallback((image: GeneratedImage) => {
+    setGeneratedImages((prev) => {
+      if (prev.some((img) => img.url === image.url)) return prev;
+      return [...prev, image];
+    });
+  }, []);
+
   const value = useMemo(
     () => ({
       currentCode,
@@ -372,6 +387,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       projectFiles,
       planningTodos,
       consoleLogs,
+      generatedImages,
       onCodeUpdate,
       onProjectFilesUpdate,
       patchProjectFiles,
@@ -389,6 +405,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       audioTracks,
       addAudioTrack,
       removeAudioTrack,
+      addImage,
     }),
     [
       currentCode,
@@ -396,6 +413,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       projectFiles,
       planningTodos,
       consoleLogs,
+      generatedImages,
       onCodeUpdate,
       onProjectFilesUpdate,
       patchProjectFiles,
@@ -413,6 +431,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       audioTracks,
       addAudioTrack,
       removeAudioTrack,
+      addImage,
     ]
   );
 

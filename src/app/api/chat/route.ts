@@ -5,6 +5,8 @@ import { getSystemPrompt } from "@/lib/system-prompt";
 import type { GameEngine } from "@/lib/game-engine";
 import type { ProjectFile } from "@/lib/project-files";
 import { normalizeProjectFiles } from "@/lib/project-files";
+import { storeImage } from "@/lib/image-store";
+import { removeBackground } from "@imgly/background-removal-node";
 
 export const maxDuration = 60;
 
@@ -13,6 +15,11 @@ interface ConsoleLogPayload {
   source: "console" | "error" | "unhandledrejection";
   text: string;
   timestamp: number;
+}
+
+interface GeneratedImagePayload {
+  url: string;
+  prompt: string;
 }
 
 function isGameEngine(value: unknown): value is GameEngine {
@@ -233,6 +240,58 @@ function lintVirtualFiles(files: ProjectFile[], paths?: string[]) {
   return diagnostics;
 }
 
+const GEMINI_MODEL = "gemini-2.5-flash-image";
+const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+
+async function removeBg(imageBuffer: Buffer, mimeType: string): Promise<{ data: string; mimeType: string }> {
+  const blob = new Blob([imageBuffer], { type: mimeType });
+  const resultBlob = await removeBackground(blob, { model: "small", output: { format: "image/png" } });
+  const arrayBuffer = await resultBlob.arrayBuffer();
+  const b64 = Buffer.from(arrayBuffer).toString("base64");
+  return { data: b64, mimeType: "image/png" };
+}
+
+async function generateImage(prompt: string, origin: string, shouldRemoveBg: boolean): Promise<{ url: string }> {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) throw new Error("GEMINI_API_KEY is not set");
+
+  const res = await fetch(`${GEMINI_API_URL}?key=${key}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
+    }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Gemini API failed (${res.status}): ${text}`);
+  }
+
+  const data = await res.json();
+  const parts = data.candidates?.[0]?.content?.parts;
+  if (!parts) throw new Error("Gemini returned no content parts");
+
+  for (const part of parts) {
+    if (part.inlineData) {
+      let { mimeType, data: b64 } = part.inlineData as { mimeType: string; data: string };
+
+      if (shouldRemoveBg) {
+        const imageBuffer = Buffer.from(b64, "base64");
+        const result = await removeBg(imageBuffer, mimeType);
+        b64 = result.data;
+        mimeType = result.mimeType;
+      }
+
+      const id = storeImage(mimeType, b64);
+      return { url: `${origin}/api/images/${id}` };
+    }
+  }
+
+  throw new Error("Gemini response contained no image data");
+}
+
 export async function POST(req: Request) {
   try {
     const body: unknown = await req.json();
@@ -242,6 +301,7 @@ export async function POST(req: Request) {
       currentProjectFiles?: unknown;
       mentionedFiles?: unknown;
       consoleLogs?: unknown;
+      generatedImages?: unknown;
       planningMode?: unknown;
       gameEngine?: unknown;
     };
@@ -269,6 +329,15 @@ export async function POST(req: Request) {
           })
           .slice(-120)
       : [];
+    const generatedImages: GeneratedImagePayload[] = Array.isArray(parsed.generatedImages)
+      ? parsed.generatedImages
+          .filter((v): v is GeneratedImagePayload => {
+            if (!v || typeof v !== "object") return false;
+            const candidate = v as Partial<GeneratedImagePayload>;
+            return typeof candidate.url === "string" && typeof candidate.prompt === "string";
+          })
+          .slice(-120)
+      : [];
     const planningMode = parsed.planningMode === true;
     const gameEngine: GameEngine = isGameEngine(parsed.gameEngine) ? parsed.gameEngine : "canvas2d";
 
@@ -289,6 +358,7 @@ export async function POST(req: Request) {
         currentProjectFiles,
         mentionedFiles,
         consoleLogs,
+        generatedImages,
         gameEngine,
         planningMode,
       }),
@@ -330,6 +400,27 @@ export async function POST(req: Request) {
           description: "Fallback single-file HTML update.",
           inputSchema: z.object({ code: z.string() }),
           execute: async ({ code }) => ({ success: true, codeLength: code.length }),
+        }),
+        generate_image: tool({
+          description:
+            "Generate an image asset and return a URL. Call this before code updates when the game needs new visual assets.",
+          inputSchema: z.object({
+            prompt: z.string().min(1),
+            removeBackground: z.boolean().default(false),
+          }),
+          execute: async ({ prompt, removeBackground: shouldRemoveBg }) => {
+            try {
+              const origin = new URL(req.url).origin;
+              const { url } = await generateImage(prompt, origin, shouldRemoveBg);
+              return { success: true, url, prompt };
+            } catch (error) {
+              return {
+                success: false,
+                error: error instanceof Error ? error.message : "Image generation failed",
+                prompt,
+              };
+            }
+          },
         }),
         read_file: tool({
           description: "Read a virtual file with optional line slicing.",

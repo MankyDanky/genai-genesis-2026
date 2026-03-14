@@ -9,11 +9,17 @@ interface ConsoleLogPayload {
     timestamp: number;
 }
 
+interface GeneratedImagePayload {
+    url: string;
+    prompt: string;
+}
+
 interface PromptOptions {
     currentCode?: string | null;
     currentProjectFiles?: ProjectFile[];
     mentionedFiles?: string[];
     consoleLogs?: ConsoleLogPayload[];
+    generatedImages?: GeneratedImagePayload[];
     planningMode?: boolean;
     gameEngine?: GameEngine;
 }
@@ -23,6 +29,7 @@ export function getSystemPrompt({
     currentProjectFiles = [],
     mentionedFiles = [],
     consoleLogs = [],
+    generatedImages = [],
     planningMode = false,
     gameEngine = "canvas2d",
 }: PromptOptions = {}): string {
@@ -35,6 +42,7 @@ export function getSystemPrompt({
 You have these tools:
 - \`read_file\`, \`list_dir\`, \`glob_file_search\`, \`grep\`, \`read_lints\`
 - \`edit_file\`, \`patch_project_file\`, \`update_project_files\`, \`delete_file\`
+- \`generate_image\` for creating visual assets (returns URL)
 - \`todo_write\` for planning tasks
 - \`update_sandbox\` fallback for single-file output
 
@@ -45,6 +53,7 @@ Rules:
 - \`update_project_files\` is merge-based; unspecified files are preserved.
 - Use \`deletePaths\` only when you intentionally remove files
 - Use \`delete_file\` only when explicitly removing a file.
+- When user requests new art/assets, call \`generate_image\` before code updates and use returned URL(s).
 - Use \`todo_write\` when planning mode is enabled or task is multi-step.
 
 ## Execution Policy
@@ -107,6 +116,11 @@ When you create or update a game:
     const baseWithPlanning = `${base}${planningSection}`;
 
     const includeConsole = consoleLogs.length > 0 || mentionedFiles.some((value) => value === "console");
+    const imagesSection = generatedImages.length > 0
+        ? `\n\n## Available Generated Images\n\nReuse these URLs when relevant instead of regenerating:\n\n${generatedImages
+            .map((img, i) => `${i + 1}. "${img.prompt}" -> ${img.url}`)
+            .join("\n")}`
+        : "";
     const consoleSection = includeConsole && consoleLogs.length > 0
         ? `\n\n## Runtime Console Logs (User Mentioned @console)\n\nUse these logs to debug before editing:\n\n${consoleLogs
             .map((entry) => `- [${new Date(entry.timestamp).toISOString()}] ${entry.level.toUpperCase()} ${entry.source}: ${entry.text}`)
@@ -129,7 +143,7 @@ When you create or update a game:
 
 The project currently has these files. Modify existing files when possible instead of replacing everything.
 
-${projectFilesToPrompt(currentProjectFiles)}${focusedSection}${consoleSection}`;
+${projectFilesToPrompt(currentProjectFiles)}${focusedSection}${consoleSection}${imagesSection}`;
     }
 
     if (currentCode) {
@@ -141,7 +155,7 @@ The sandbox currently contains the following code. When the user asks for modifi
 
 \`\`\`html
 ${currentCode}
-\`\`\`${consoleSection}`;
+\`\`\`${consoleSection}${imagesSection}`;
     }
 
     return baseWithPlanning;

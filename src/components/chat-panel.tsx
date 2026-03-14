@@ -6,7 +6,7 @@ import { useState, useEffect, useRef, useMemo, useCallback, type FormEvent, type
 import Markdown from "react-markdown";
 import type { GameEngine } from "@/lib/game-engine";
 import type { ProjectFile } from "@/lib/project-files";
-import type { PlanningTodo, ConsoleLogEntry } from "@/lib/game-forge-context";
+import type { PlanningTodo, ConsoleLogEntry, GeneratedImage } from "@/lib/game-forge-context";
 
 interface ChatPanelProps {
   currentCode: string | null;
@@ -14,6 +14,7 @@ interface ChatPanelProps {
   projectFiles: ProjectFile[];
   planningTodos: PlanningTodo[];
   consoleLogs: ConsoleLogEntry[];
+  generatedImages: GeneratedImage[];
   onCodeUpdate: (code: string, engine?: GameEngine) => void;
   onProjectFilesUpdate: (files: ProjectFile[], engine?: GameEngine, deletePaths?: string[]) => void;
   patchProjectFiles: (files: ProjectFile[], engine?: GameEngine) => void;
@@ -31,6 +32,7 @@ interface ChatPanelProps {
   deleteProjectFile: (path: string) => void;
   writePlanningTodos: (merge: boolean, todos: PlanningTodo[]) => void;
   onEngineUpdate: (engine: GameEngine) => void;
+  addImage: (image: GeneratedImage) => void;
 }
 
 const EXAMPLE_PROMPTS = [
@@ -189,7 +191,12 @@ function StreamingIndicator({ phase, timer, message }: {
 }
 
 function ToolCallCard({ part }: {
-  part: { type: string; state?: string; input?: Record<string, unknown> };
+  part: {
+    type: string;
+    state?: string;
+    input?: Record<string, unknown>;
+    output?: Record<string, unknown>;
+  };
 }) {
   const rawToolName = part.type.replace("tool-", "");
   const toolName = rawToolName.toUpperCase().replace(/_/g, "_");
@@ -234,6 +241,13 @@ function ToolCallCard({ part }: {
     if (rawToolName === "update_sandbox") {
       const code = typeof input.code === "string" ? input.code : "";
       return `Sandbox HTML (${code.length.toLocaleString()} chars)`;
+    }
+
+    if (rawToolName === "generate_image") {
+      const prompt = typeof input.prompt === "string" ? input.prompt : "";
+      const success = part.output?.success === true;
+      if (success) return `Image generated: ${prompt || "asset"}`;
+      return `Image generation requested: ${prompt || "asset"}`;
     }
 
     return null;
@@ -335,6 +349,7 @@ export function ChatPanel({
   projectFiles,
   planningTodos,
   consoleLogs,
+  generatedImages,
   onCodeUpdate,
   onProjectFilesUpdate,
   patchProjectFiles,
@@ -343,6 +358,7 @@ export function ChatPanel({
   deleteProjectFile,
   writePlanningTodos,
   onEngineUpdate,
+  addImage,
 }: ChatPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -523,6 +539,22 @@ export function ChatPanel({
           processedToolPayloadRef.current.set(key, signature);
           writePlanningTodos(toolPart.input.merge ?? false, toolPart.input.todos);
         }
+
+        if (partType === "tool-generate_image") {
+          const toolPart = part as {
+            state: string;
+            output?: { success?: boolean; url?: string; prompt?: string };
+          };
+          if (toolPart.state !== "output-available") continue;
+          if (!toolPart.output?.success || !toolPart.output.url) continue;
+          const key = `${message.id}:${partType}:${toolPart.output.url}`;
+          if (processedToolPayloadRef.current.get(key) === "1") continue;
+          processedToolPayloadRef.current.set(key, "1");
+          addImage({
+            url: toolPart.output.url,
+            prompt: toolPart.output.prompt ?? "Generated image",
+          });
+        }
       }
     }
   }, [
@@ -535,6 +567,7 @@ export function ChatPanel({
     editProjectFile,
     deleteProjectFile,
     writePlanningTodos,
+    addImage,
     selectedEngine,
   ]);
 
@@ -595,6 +628,7 @@ export function ChatPanel({
         currentProjectFiles: projectFiles,
         mentionedFiles,
         consoleLogs: consoleContext,
+        generatedImages,
         planningMode,
         gameEngine: selectedEngine,
       },
@@ -767,7 +801,12 @@ export function ChatPanel({
                         {toolParts.map((part, i) => (
                           <ToolCallCard
                             key={i}
-                            part={part as { type: string; state?: string; input?: Record<string, unknown> }}
+                            part={part as {
+                              type: string;
+                              state?: string;
+                              input?: Record<string, unknown>;
+                              output?: Record<string, unknown>;
+                            }}
                           />
                         ))}
                       </div>
