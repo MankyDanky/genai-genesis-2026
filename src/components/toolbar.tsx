@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 
 interface PanelInfo {
   id: string;
@@ -12,7 +12,17 @@ interface ToolbarProps {
   panels: PanelInfo[];
   onTogglePanel: (id: string) => void;
   onResetLayout: () => void;
+  onSaveProject: () => void;
+  onPublishProject: () => void;
+  onOpenProject: () => void;
+  onResetProject: () => void;
+  onShareClick?: () => void;
+  onPlayPathClick?: () => void;
   engineLabel?: string;
+  projectId?: string | null;
+  revisionNumber?: number | null;
+  busyAction?: "save" | "load" | "publish" | null;
+  playPath?: string | null;
 }
 
 function DropdownMenu({
@@ -54,14 +64,14 @@ function DropdownMenu({
       >
         {label}
       </button>
-      {isOpen && (
+      {isOpen ? (
         <div
-          className="absolute top-full left-0 mt-0 min-w-[200px] bg-[var(--color-surface)] border border-[var(--color-border-light)] z-50 shadow-[0_12px_32px_rgba(0,0,0,0.5)]"
+          className="absolute top-full left-0 mt-0 min-w-[220px] bg-[var(--color-surface)] border border-[var(--color-border-light)] z-50 shadow-[0_12px_32px_rgba(0,0,0,0.5)]"
           style={{ animation: "slideDown 0.12s ease-out" }}
         >
           {children}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -71,25 +81,28 @@ function MenuItem({
   checked,
   onClick,
   shortcut,
+  disabled,
 }: {
   label: string;
   checked?: boolean;
   onClick: () => void;
   shortcut?: string;
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="gf-list-row flex items-center w-full px-3 py-2 text-[11px] uppercase tracking-wider text-[var(--color-text-secondary)]"
+      disabled={disabled}
+      className="gf-list-row flex items-center w-full px-3 py-2 text-[11px] uppercase tracking-wider text-[var(--color-text-secondary)] disabled:opacity-40 disabled:cursor-default"
     >
       <span className="w-5 text-[var(--color-accent)] text-xs">
         {checked !== undefined ? (checked ? "\u2713" : "") : ""}
       </span>
       <span className="flex-1 text-left">{label}</span>
-      {shortcut && (
+      {shortcut ? (
         <span className="text-[var(--color-text-muted)] ml-6 text-[10px]">{shortcut}</span>
-      )}
+      ) : null}
     </button>
   );
 }
@@ -98,8 +111,66 @@ function MenuDivider() {
   return <div className="border-t border-[var(--color-border)] my-1 mx-2" />;
 }
 
-export function Toolbar({ panels, onTogglePanel, onResetLayout, engineLabel }: ToolbarProps) {
+function ActionButton({
+  label,
+  onClick,
+  disabled,
+}: {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="h-6 px-2.5 border border-[var(--color-border-light)] text-[10px] uppercase tracking-[0.1em] font-semibold text-[var(--color-text-secondary)] hover:text-[var(--color-text)] hover:border-[var(--color-accent)] disabled:opacity-40 disabled:cursor-default"
+    >
+      {label}
+    </button>
+  );
+}
+
+export function Toolbar({
+  panels,
+  onTogglePanel,
+  onResetLayout,
+  onSaveProject,
+  onPublishProject,
+  onOpenProject,
+  onResetProject,
+  onShareClick,
+  onPlayPathClick,
+  engineLabel,
+  projectId,
+  revisionNumber,
+  busyAction,
+  playPath,
+}: ToolbarProps) {
   const [openMenu, setOpenMenu] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState(false);
+  const isBusy = busyAction !== null;
+  const projectLabel = projectId ? `${projectId.slice(0, 8)}...` : "Unsaved";
+
+  const handleCopyProjectId = useCallback(async () => {
+    if (!projectId) return;
+    try {
+      await navigator.clipboard.writeText(projectId);
+    } catch {
+      // silent fallback
+    }
+    setCopiedId(true);
+    setTimeout(() => setCopiedId(false), 1500);
+  }, [projectId]);
+  const busyText =
+    busyAction === "save"
+      ? "Saving revision..."
+      : busyAction === "load"
+        ? "Loading project..."
+        : busyAction === "publish"
+          ? "Publishing build..."
+          : null;
 
   const toggle = (menu: string) => {
     setOpenMenu((prev) => (prev === menu ? null : menu));
@@ -114,9 +185,7 @@ export function Toolbar({ panels, onTogglePanel, onResetLayout, engineLabel }: T
         background: "var(--color-surface)",
       }}
     >
-      {/* App title */}
       <div className="px-4 flex items-center h-full border-r border-[var(--color-border)] gap-2">
-        {/* Logo mark */}
         <div className="w-4 h-4 border border-[var(--color-accent)] flex items-center justify-center">
           <div className="w-1.5 h-1.5 bg-[var(--color-accent)]" />
         </div>
@@ -130,7 +199,47 @@ export function Toolbar({ panels, onTogglePanel, onResetLayout, engineLabel }: T
         ) : null}
       </div>
 
-      {/* Window menu */}
+      <DropdownMenu
+        label="Project"
+        isOpen={openMenu === "project"}
+        onToggle={() => toggle("project")}
+        onClose={close}
+      >
+        <MenuItem
+          label="Save Revision"
+          onClick={() => {
+            onSaveProject();
+            close();
+          }}
+          disabled={isBusy}
+        />
+        <MenuItem
+          label="Publish"
+          onClick={() => {
+            onPublishProject();
+            close();
+          }}
+          disabled={isBusy}
+        />
+        <MenuItem
+          label="Open Project"
+          onClick={() => {
+            onOpenProject();
+            close();
+          }}
+          disabled={isBusy}
+        />
+        <MenuDivider />
+        <MenuItem
+          label="New Project"
+          onClick={() => {
+            onResetProject();
+            close();
+          }}
+          disabled={isBusy}
+        />
+      </DropdownMenu>
+
       <DropdownMenu
         label="Window"
         isOpen={openMenu === "window"}
@@ -158,7 +267,55 @@ export function Toolbar({ panels, onTogglePanel, onResetLayout, engineLabel }: T
         />
       </DropdownMenu>
 
-      <div className="flex-1" />
+      <div className="ml-3 flex items-center gap-2">
+        {projectId ? (
+          <button
+            type="button"
+            onClick={handleCopyProjectId}
+            title={`Click to copy full ID: ${projectId}`}
+            className={`text-[9px] uppercase tracking-[0.1em] border px-1.5 py-0.5 transition-colors ${
+              copiedId
+                ? "text-[var(--color-accent)] border-[var(--color-accent)]"
+                : "text-[var(--color-text-muted)] border-[var(--color-border)] hover:text-[var(--color-text)] hover:border-[var(--color-accent)] cursor-pointer"
+            }`}
+          >
+            {copiedId ? "Copied!" : projectLabel}
+          </button>
+        ) : (
+          <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--color-text-muted)] border border-[var(--color-border)] px-1.5 py-0.5">
+            {projectLabel}
+          </span>
+        )}
+        {revisionNumber ? (
+          <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--color-text-muted)] border border-[var(--color-border)] px-1.5 py-0.5">
+            Rev {revisionNumber}
+          </span>
+        ) : null}
+      </div>
+
+      <div className="flex-1 px-3 min-w-0">
+        {busyText ? (
+          <p className="truncate text-[10px] uppercase tracking-[0.08em] text-[var(--color-text-muted)]">
+            {busyText}
+          </p>
+        ) : playPath ? (
+          <button
+            type="button"
+            onClick={onPlayPathClick}
+            className="truncate text-[10px] uppercase tracking-[0.08em] text-[var(--color-text-muted)] hover:text-[var(--color-accent)] transition-colors cursor-pointer bg-transparent border-none p-0"
+          >
+            Latest publish: {playPath}
+          </button>
+        ) : null}
+      </div>
+
+      <div className="px-3 flex items-center gap-2">
+        <ActionButton label="Save" onClick={onSaveProject} disabled={isBusy} />
+        <ActionButton label="Publish" onClick={onPublishProject} disabled={isBusy} />
+        {playPath && onShareClick ? (
+          <ActionButton label="Share" onClick={onShareClick} disabled={isBusy} />
+        ) : null}
+      </div>
     </div>
   );
 }

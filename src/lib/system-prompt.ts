@@ -137,7 +137,9 @@ ${
 ## Audio
 
 - Sound/music generation is asynchronous; do not block code generation waiting for completion.
-- For SFX, use short durations (about 0.5-3s unless user asks otherwise).
+- For \`generate_sound_effect\`, duration MUST be at least 0.5 seconds and at most 10 seconds. Never pass a value below 0.5; if you want a very short hit/click/pop, use \`0.5\`.
+- For SFX, prefer short durations (about 0.5-3s unless user asks otherwise).
+- For \`generate_music\`, duration MUST stay within 10-120 seconds.
 - For music, prefer loop-friendly instrumental tracks (about 15-60s unless user asks otherwise).
 - After requesting audio generation, ALWAYS wire audio playback into the game logic in the same response.
 - In game code, read generated assets from:

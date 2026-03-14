@@ -7,9 +7,35 @@ import type { ProjectFile } from "@/lib/project-files";
 import { normalizeProjectFiles } from "@/lib/project-files";
 import { getGeneratedAudioId, type GeneratedAudioKind } from "@/lib/generated-audio";
 import { storeImage } from "@/lib/image-store";
-import { soundStore } from "@/lib/sound-store";
+import { putSound } from "@/lib/sound-store";
 
 export const maxDuration = 60;
+
+const SFX_DURATION_MIN_SECONDS = 0.5;
+const SFX_DURATION_MAX_SECONDS = 10;
+const SFX_DURATION_DEFAULT_SECONDS = 2;
+const MUSIC_DURATION_MIN_SECONDS = 10;
+const MUSIC_DURATION_MAX_SECONDS = 120;
+const MUSIC_DURATION_DEFAULT_SECONDS = 30;
+
+function clampDuration(value: unknown, min: number, max: number, fallback: number) {
+  const numericValue =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && value.trim().length > 0
+        ? Number(value)
+        : Number.NaN;
+
+  if (!Number.isFinite(numericValue)) {
+    return fallback;
+  }
+
+  return Math.min(max, Math.max(min, numericValue));
+}
+
+function createDurationSchema(min: number, max: number, fallback: number) {
+  return z.preprocess((value) => clampDuration(value, min, max, fallback), z.number());
+}
 
 function scheduleGeneratedAudio({
   kind,
@@ -23,7 +49,7 @@ function scheduleGeneratedAudio({
   duration: number;
 }) {
   const audioId = getGeneratedAudioId(kind, name);
-  soundStore.set(audioId, {
+  void putSound(audioId, {
     dataUrl: null,
     name,
     prompt,
@@ -31,6 +57,8 @@ function scheduleGeneratedAudio({
     duration,
     status: "pending",
     createdAt: Date.now(),
+  }).catch((error) => {
+    console.error("[Audio] Failed to schedule generated audio", error);
   });
   return audioId;
 }
@@ -445,7 +473,7 @@ async function removeBg(imageBuffer: Buffer, mimeType: string): Promise<{ data: 
     );
   }
 
-  const blob = new Blob([imageBuffer], { type: mimeType });
+  const blob = new Blob([new Uint8Array(imageBuffer)], { type: mimeType });
   const resultBlob = await removeBackgroundFn(blob, { model: "small", output: { format: "image/png" } });
   const arrayBuffer = await resultBlob.arrayBuffer();
   const b64 = Buffer.from(arrayBuffer).toString("base64");
@@ -485,7 +513,7 @@ async function generateImage(prompt: string, origin: string, shouldRemoveBg: boo
         mimeType = result.mimeType;
       }
 
-      const id = storeImage(mimeType, b64);
+      const id = await storeImage(mimeType, b64);
       return { url: `${origin}/api/images/${id}` };
     }
   }
@@ -741,18 +769,22 @@ export async function POST(req: Request) {
         }),
         generate_sound_effect: tool({
           description:
-            "Generate an AI sound effect from text. Returns a sound id/name and schedules async generation.",
+            "Generate an AI sound effect from text. Returns a sound id/name and schedules async generation. Duration is clamped to 0.5-10 seconds.",
           inputSchema: z.object({
             prompt: z.string().min(1),
             name: z.string().min(1),
-            duration: z.number().min(0.5).max(10).default(2),
+            duration: createDurationSchema(
+              SFX_DURATION_MIN_SECONDS,
+              SFX_DURATION_MAX_SECONDS,
+              SFX_DURATION_DEFAULT_SECONDS,
+            ),
           }),
           execute: async ({ prompt, name, duration }) => {
             try {
               scheduleGeneratedAudio({ kind: "sfx", name, prompt, duration });
               return { soundId: name, name, duration, status: "pending" };
             } catch (error) {
-              soundStore.set(getGeneratedAudioId("sfx", name), {
+              await putSound(getGeneratedAudioId("sfx", name), {
                 dataUrl: null,
                 name,
                 prompt,
@@ -768,18 +800,22 @@ export async function POST(req: Request) {
         }),
         generate_music: tool({
           description:
-            "Generate instrumental background music from text. Returns a music id/name and schedules async generation.",
+            "Generate instrumental background music from text. Returns a music id/name and schedules async generation. Duration is clamped to 10-120 seconds.",
           inputSchema: z.object({
             prompt: z.string().min(1),
             name: z.string().min(1),
-            duration: z.number().min(10).max(120).default(30),
+            duration: createDurationSchema(
+              MUSIC_DURATION_MIN_SECONDS,
+              MUSIC_DURATION_MAX_SECONDS,
+              MUSIC_DURATION_DEFAULT_SECONDS,
+            ),
           }),
           execute: async ({ prompt, name, duration }) => {
             try {
               scheduleGeneratedAudio({ kind: "music", name, prompt, duration });
               return { musicId: name, name, duration, status: "pending" };
             } catch (error) {
-              soundStore.set(getGeneratedAudioId("music", name), {
+              await putSound(getGeneratedAudioId("music", name), {
                 dataUrl: null,
                 name,
                 prompt,

@@ -1,15 +1,11 @@
 import { NextResponse } from "next/server";
-import {
-  soundGenerationInflight,
-  soundStore,
-  type StoredSound,
-} from "@/lib/sound-store";
-import {
-  generateMusicTrackDataUrl,
-  generateSoundEffectDataUrl,
-} from "@/lib/elevenlabs";
+import { logOptionalDbFailure } from "@/lib/db/client";
+import { storeBinaryArtifact } from "@/lib/db/artifacts";
+import { generateMusicTrackDataUrl, generateSoundEffectDataUrl } from "@/lib/elevenlabs";
+import { parseDataUrl } from "@/lib/data-url";
+import { getSound, putSound, soundGenerationInflight, type StoredSound } from "@/lib/sound-store";
 
-async function startSoundGeneration(id: string, sound: StoredSound) {
+async function startSoundGeneration(id: string, sound: StoredSound, origin: string) {
   if (soundGenerationInflight.has(id)) {
     return;
   }
@@ -17,39 +13,54 @@ async function startSoundGeneration(id: string, sound: StoredSound) {
   const generationCreatedAt = sound.createdAt;
   const generation = (async () => {
     try {
-      const dataUrl =
+      const sourceDataUrl =
         sound.kind === "music"
           ? await generateMusicTrackDataUrl(sound.prompt, sound.duration)
           : await generateSoundEffectDataUrl(sound.prompt, sound.duration);
-      const latestSound = soundStore.get(id);
 
+      const latestSound = await getSound(id);
       if (!latestSound || latestSound.createdAt !== generationCreatedAt) {
         return;
       }
 
-      soundStore.set(id, {
-        ...latestSound,
-        dataUrl,
-        status: "ready",
-        error: undefined,
-      });
+      try {
+        const parsed = parseDataUrl(sourceDataUrl);
+        const artifactId = await storeBinaryArtifact({
+          kind: "audio-binary",
+          contentType: parsed.contentType,
+          data: parsed.isBase64
+            ? Buffer.from(parsed.data, "base64")
+            : Buffer.from(decodeURIComponent(parsed.data), "utf8"),
+          filename: `${id}.bin`,
+        });
 
-      console.log("[Audio API] Audio completed and cached:", id);
+        await putSound(id, {
+          ...latestSound,
+          dataUrl: `${origin}/api/sound-files/${artifactId}`,
+          artifactId,
+          status: "ready",
+          error: undefined,
+        });
+      } catch (artifactError) {
+        logOptionalDbFailure("Audio artifact persistence", artifactError);
+        await putSound(id, {
+          ...latestSound,
+          dataUrl: sourceDataUrl,
+          artifactId: null,
+          status: "ready",
+          error: undefined,
+        });
+      }
     } catch (error) {
-      const latestSound = soundStore.get(id);
-
+      const latestSound = await getSound(id);
       if (!latestSound || latestSound.createdAt !== generationCreatedAt) {
         return;
       }
 
-      const message =
-        error instanceof Error ? error.message : "Audio generation failed";
-
-      console.error("[Audio API] Audio generation failed:", id, error);
-      soundStore.set(id, {
+      await putSound(id, {
         ...latestSound,
         status: "error",
-        error: message,
+        error: error instanceof Error ? error.message : "Audio generation failed",
       });
     } finally {
       soundGenerationInflight.delete(id);
@@ -60,17 +71,16 @@ async function startSoundGeneration(id: string, sound: StoredSound) {
 }
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const sound = soundStore.get(id);
+  const sound = await getSound(id);
 
   if (!sound) {
     return NextResponse.json({ error: "Audio not found" }, { status: 404 });
   }
 
-  // If already resolved (ready or error), return cached result.
   if (sound.status !== "pending") {
     return NextResponse.json({
       status: sound.status,
@@ -83,8 +93,9 @@ export async function GET(
   }
 
   try {
-    await startSoundGeneration(id, sound);
-    const latestSound = soundStore.get(id);
+    const origin = new URL(request.url).origin;
+    await startSoundGeneration(id, sound, origin);
+    const latestSound = await getSound(id);
 
     if (!latestSound || latestSound.status === "pending") {
       return NextResponse.json({
@@ -105,25 +116,20 @@ export async function GET(
       duration: latestSound.duration,
       error: latestSound.error ?? null,
     });
-  } catch (err) {
-    const message =
-      err instanceof Error ? err.message : "Unexpected audio status error";
-    console.error("[Audio API] Unexpected audio status error:", id, err);
-    const latestSound = soundStore.get(id);
-    if (latestSound) {
-      soundStore.set(id, {
-        ...latestSound,
-        status: "error",
-        error: message,
-      });
-    }
+  } catch (error) {
+    console.error("[Audio API] Unexpected audio status error:", id, error);
+    await putSound(id, {
+      ...sound,
+      status: "error",
+      error: error instanceof Error ? error.message : "Audio generation failed",
+    });
     return NextResponse.json({
       status: "error",
       dataUrl: null,
       name: sound.name,
       kind: sound.kind,
       duration: sound.duration,
-      error: message,
+      error: error instanceof Error ? error.message : "Audio generation failed",
     });
   }
 }
