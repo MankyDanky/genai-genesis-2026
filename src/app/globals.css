@@ -247,6 +247,26 @@ body {
 .chat-markdown h2 { font-size: 1em; }
 .chat-markdown h3 { font-size: 0.95em; }
 
+.chat-markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.45em 0;
+  font-size: 0.95em;
+}
+
+.chat-markdown th,
+.chat-markdown td {
+  border: 1px solid var(--color-border-light);
+  padding: 0.35em 0.5em;
+  text-align: left;
+  vertical-align: top;
+}
+
+.chat-markdown th {
+  background: var(--color-surface-light);
+  color: var(--color-text);
+}
+
 /* ── Animations ── */
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(4px); }

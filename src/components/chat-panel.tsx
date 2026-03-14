@@ -5,6 +5,7 @@ import { DefaultChatTransport } from "ai";
 import { createPortal } from "react-dom";
 import { useState, useEffect, useRef, useMemo, useCallback, type FormEvent, type KeyboardEvent } from "react";
 import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import type { GameEngine } from "@/lib/game-engine";
 import type { ProjectFile } from "@/lib/project-files";
 import type { PlanningTodo, ConsoleLogEntry, GeneratedImage, PendingFileWrite } from "@/lib/game-forge-context";
@@ -1079,7 +1080,7 @@ export function ChatPanel({
                         ))}
                         {textContent && (
                           <div className="chat-markdown text-[12px] text-[var(--color-text)] leading-relaxed">
-                            <Markdown>{textContent}</Markdown>
+                            <Markdown remarkPlugins={[remarkGfm]}>{textContent}</Markdown>
                           </div>
                         )}
                         {toolParts.map((part, i) => (
