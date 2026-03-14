@@ -19,12 +19,16 @@ ANTHROPIC_API_KEY=your-api-key
 ELEVENLABS_API_KEY=your-api-key
 FAL_KEY=your-api-key
 GEMINI_API_KEY=your-api-key
+NEXT_PUBLIC_PARTYKIT_HOST=localhost:1999
+NEXT_PUBLIC_PARTYKIT_PROTOCOL=ws
 ```
 
 - `ANTHROPIC_API_KEY` powers chat/tool orchestration.
 - `ELEVENLABS_API_KEY` powers sound effect + music generation.
 - `FAL_KEY` powers image generation via fal.ai.
 - `GEMINI_API_KEY` powers image editing/background workflows.
+- `NEXT_PUBLIC_PARTYKIT_HOST` configures realtime multiplayer room host for generated games.
+- `NEXT_PUBLIC_PARTYKIT_PROTOCOL` sets websocket protocol (`ws` for local, `wss` for production).
 
 ## What It Does
 
@@ -45,3 +49,22 @@ Prompt -> ChatPanel -> /api/chat
   -> project files + state update in GameForgeContext
   -> sandbox iframe re-renders with new srcDoc
 ```
+
+## Multiplayer (PartyKit) Quick Start
+
+1. Start Next.js app:
+
+```bash
+npm run dev
+```
+
+2. Start PartyKit room server (separate terminal):
+
+```bash
+pnpm dlx partykit dev
+```
+
+3. Ask the composer for a multiplayer game. The agent now has a `multiplayer_partykit_scaffold` tool and can scaffold:
+- `src/net/party-session.js` client helper
+- `partykit/room.js` room server
+- `partykit.json` config

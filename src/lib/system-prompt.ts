@@ -65,6 +65,7 @@ Use the exact tool names below:
 - \`update_project_files\`: merge-create/update changed files (and optional \`deletePaths\`)
 - \`delete_file\`: remove one virtual file
 - \`update_controls\`: set controls for the Controls panel
+- \`multiplayer_partykit_scaffold\`: get PartyKit multiplayer starter files/snippets
 - \`generate_image\`: generate image asset URL for use in code
 - \`generate_sound_effect\`: schedule sound-effect generation from text
 - \`generate_music\`: schedule background music generation from text
@@ -87,6 +88,7 @@ Rules:
 - Use \`todo_read\` to inspect existing tasks before planning updates.
 - Use \`list_audio_assets\` and \`list_image_assets\` when you need to inspect available assets before editing.
 - Use \`todo_write\` when planning mode is enabled or task is multi-step.
+- When multiplayer is requested, call \`multiplayer_partykit_scaffold\` first, then apply only needed files.
 - Prefer multi-file flow (\`update_project_files\` / \`patch_project_file\` / \`edit_file\`) when project files exist.
 - Use \`update_sandbox\` only as fallback when operating in single-file mode.
 
@@ -160,6 +162,14 @@ Recommended helper shape:
 - \`startMusic(name, volume=0.35)\`: lookup \`window.__GAMEFORGE_MUSIC__[name]\`, set loop, start if not already playing.
 - \`stopMusic()\`: pause/reset existing music instance.
 - In \`window.__onSoundsUpdated\` / \`window.__onMusicUpdated\`, refresh any cached maps or lazy lookups.
+
+## Multiplayer (PartyKit)
+
+- For multiplayer features, prefer PartyKit scaffolding over ad-hoc socket code.
+- Start by calling \`multiplayer_partykit_scaffold\` to get canonical client/server templates.
+- Keep multiplayer code in separate files (for example \`src/net/party-session.js\`, \`src/game/net.js\`), not inline in one file.
+- Use event-driven sync: join, input, state patch, presence update.
+- Always handle disconnect/reconnect gracefully and keep single-player fallback if connection fails.
 
 ## Response Format
 

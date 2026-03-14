@@ -8,6 +8,7 @@ import { normalizeProjectFiles } from "@/lib/project-files";
 import { getGeneratedAudioId, type GeneratedAudioKind } from "@/lib/generated-audio";
 import { storeImage } from "@/lib/image-store";
 import { putSound } from "@/lib/sound-store";
+import { buildPartyKitScaffold } from "@/lib/multiplayer/partykit-scaffold";
 
 export const maxDuration = 60;
 
@@ -660,6 +661,7 @@ export async function POST(req: Request) {
             "patch_project_file",
             "update_sandbox",
             "update_controls",
+            "multiplayer_partykit_scaffold",
             "generate_image",
             "generate_sound_effect",
             "generate_music",
@@ -745,6 +747,14 @@ export async function POST(req: Request) {
             ).min(1).max(12),
           }),
           execute: async ({ controls }) => ({ success: true, count: controls.length }),
+        }),
+        multiplayer_partykit_scaffold: tool({
+          description:
+            "Return PartyKit multiplayer scaffold files and quick-start instructions. Use this first when adding multiplayer support.",
+          inputSchema: z.object({
+            roomType: z.string().min(1).optional(),
+          }),
+          execute: async ({ roomType }) => buildPartyKitScaffold(roomType ?? "game"),
         }),
         generate_image: tool({
           description:
