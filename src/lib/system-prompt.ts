@@ -14,12 +14,23 @@ interface GeneratedImagePayload {
     prompt: string;
 }
 
+interface AudioTrackPayload {
+    id: string;
+    name: string;
+    type: "music" | "sfx";
+    description: string;
+    status: "pending" | "ready" | "error";
+    duration: number | null;
+    error?: string | null;
+}
+
 interface PromptOptions {
     currentCode?: string | null;
     currentProjectFiles?: ProjectFile[];
     mentionedFiles?: string[];
     consoleLogs?: ConsoleLogPayload[];
     generatedImages?: GeneratedImagePayload[];
+    currentAudioTracks?: AudioTrackPayload[];
     composerMode?: "agent" | "plan" | "debug" | "ask";
     planningMode?: boolean;
     gameEngine?: GameEngine;
@@ -31,6 +42,7 @@ export function getSystemPrompt({
     mentionedFiles = [],
     consoleLogs = [],
     generatedImages = [],
+    currentAudioTracks = [],
     composerMode = "agent",
     planningMode = false,
     gameEngine = "canvas2d",
@@ -57,6 +69,8 @@ Use the exact tool names below:
 - \`generate_sound_effect\`: schedule sound-effect generation from text
 - \`generate_music\`: schedule background music generation from text
 - \`todo_read\`: read current planning tasks/todos
+- \`list_audio_assets\`: list generated audio assets (name/type/description/status)
+- \`list_image_assets\`: list generated image assets (url/description)
 - \`todo_write\`: planning tasks/todos
 - \`update_sandbox\`: fallback single-file HTML update
 
@@ -71,6 +85,7 @@ Rules:
 - When user requests new art/assets, call \`generate_image\` before code updates and use returned URL(s).
 - When audio is requested or would clearly improve gameplay, call \`generate_sound_effect\` and/or \`generate_music\`.
 - Use \`todo_read\` to inspect existing tasks before planning updates.
+- Use \`list_audio_assets\` and \`list_image_assets\` when you need to inspect available assets before editing.
 - Use \`todo_write\` when planning mode is enabled or task is multi-step.
 - Prefer multi-file flow (\`update_project_files\` / \`patch_project_file\` / \`edit_file\`) when project files exist.
 - Use \`update_sandbox\` only as fallback when operating in single-file mode.
@@ -124,12 +139,25 @@ ${
 - Sound/music generation is asynchronous; do not block code generation waiting for completion.
 - For SFX, use short durations (about 0.5-3s unless user asks otherwise).
 - For music, prefer loop-friendly instrumental tracks (about 15-60s unless user asks otherwise).
+- After requesting audio generation, ALWAYS wire audio playback into the game logic in the same response.
 - In game code, read generated assets from:
   - \`window.__GAMEFORGE_SOUNDS__\`
   - \`window.__GAMEFORGE_MUSIC__\`
 - Register optional update hooks so new audio can appear live:
   - \`window.__onSoundsUpdated = () => { ... }\`
   - \`window.__onMusicUpdated = () => { ... }\`
+
+Audio integration contract (follow this pattern):
+- Create one-time helpers for browser-safe playback (\`Audio\` elements + promise-safe \`play()\` calls).
+- SFX: trigger on gameplay events (collect/hit/jump/explosion), not only on startup.
+- Music: start/loop as background track after first user interaction or when gameplay begins.
+- Gracefully handle missing assets (no throws). If an audio name is missing, continue silently.
+
+Recommended helper shape:
+- \`playSfx(name, volume=0.5)\`: lookup \`window.__GAMEFORGE_SOUNDS__[name]\`, clone/play at low latency.
+- \`startMusic(name, volume=0.35)\`: lookup \`window.__GAMEFORGE_MUSIC__[name]\`, set loop, start if not already playing.
+- \`stopMusic()\`: pause/reset existing music instance.
+- In \`window.__onSoundsUpdated\` / \`window.__onMusicUpdated\`, refresh any cached maps or lazy lookups.
 
 ## Response Format
 
@@ -160,6 +188,14 @@ When you create or update a game:
             .map((img, i) => `${i + 1}. "${img.prompt}" -> ${img.url}`)
             .join("\n")}`
         : "";
+    const audioSection = currentAudioTracks.length > 0
+        ? `\n\n## Available Generated Audio\n\n${currentAudioTracks
+            .map(
+                (track, i) =>
+                    `${i + 1}. [${track.type}] ${track.name} - ${track.description || "No description"} (${track.status})`
+            )
+            .join("\n")}`
+        : "";
     const consoleSection = includeConsole && consoleLogs.length > 0
         ? `\n\n## Runtime Console Logs (User Mentioned @console)\n\nUse these logs to debug before editing:\n\n${consoleLogs
             .map((entry) => `- [${new Date(entry.timestamp).toISOString()}] ${entry.level.toUpperCase()} ${entry.source}: ${entry.text}`)
@@ -182,7 +218,7 @@ When you create or update a game:
 
 The project currently has these files. Modify existing files when possible instead of replacing everything.
 
-${projectFilesToPrompt(currentProjectFiles)}${focusedSection}${consoleSection}${imagesSection}`;
+${projectFilesToPrompt(currentProjectFiles)}${focusedSection}${consoleSection}${imagesSection}${audioSection}`;
     }
 
     if (currentCode) {
@@ -194,8 +230,8 @@ The sandbox currently contains the following code. When the user asks for modifi
 
 \`\`\`html
 ${currentCode}
-\`\`\`${consoleSection}${imagesSection}`;
+\`\`\`${consoleSection}${imagesSection}${audioSection}`;
     }
 
-    return baseWithPlanning;
+    return `${baseWithPlanning}${imagesSection}${audioSection}`;
 }

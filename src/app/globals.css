@@ -608,3 +608,15 @@ body {
         transform: translateY(-4px);
     }
 }
+
+@keyframes wavePulse {
+    0%,
+    100% {
+        transform: scaleY(0.72);
+        opacity: 0.22;
+    }
+    50% {
+        transform: scaleY(1);
+        opacity: 0.5;
+    }
+}

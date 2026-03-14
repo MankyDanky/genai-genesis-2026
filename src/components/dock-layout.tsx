@@ -73,14 +73,6 @@ function buildDefaultLayout(api: DockviewApi) {
   });
 
   api.addPanel({
-    id: "audio",
-    component: "audio",
-    title: "Audio",
-    inactive: true,
-    position: { referencePanel: "inspector", direction: "within" },
-  });
-
-  api.addPanel({
     id: "code",
     component: "code",
     title: "Code",
@@ -101,6 +93,14 @@ function buildDefaultLayout(api: DockviewApi) {
     title: "Images",
     position: { referencePanel: "inspector", direction: "below" },
     initialHeight: h * 0.35,
+  });
+
+  api.addPanel({
+    id: "audio",
+    component: "audio",
+    title: "Audio",
+    inactive: true,
+    position: { referencePanel: "images", direction: "within" },
   });
 
   const apiAny = api as unknown as {

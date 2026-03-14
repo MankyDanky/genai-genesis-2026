@@ -12,6 +12,7 @@ export function ChatPanelWrapper() {
     planningTodos,
     consoleLogs,
     generatedImages,
+    audioTracks,
     onCodeUpdate,
     onProjectFilesUpdate,
     patchProjectFiles,
@@ -25,6 +26,8 @@ export function ChatPanelWrapper() {
     setControls,
     focusCodeFile,
     focusConsolePanel,
+    focusImagesPanel,
+    focusAudioPanel,
     setPendingFileWrites,
     clearPendingFileWrites,
   } = useGameForge();
@@ -37,6 +40,7 @@ export function ChatPanelWrapper() {
       planningTodos={planningTodos}
       consoleLogs={consoleLogs}
       generatedImages={generatedImages}
+      audioTracks={audioTracks}
       onCodeUpdate={onCodeUpdate}
       onProjectFilesUpdate={onProjectFilesUpdate}
       patchProjectFiles={patchProjectFiles}
@@ -50,6 +54,8 @@ export function ChatPanelWrapper() {
       setControls={setControls}
       focusCodeFile={focusCodeFile}
       focusConsolePanel={focusConsolePanel}
+      focusImagesPanel={focusImagesPanel}
+      focusAudioPanel={focusAudioPanel}
       setPendingFileWrites={setPendingFileWrites}
       clearPendingFileWrites={clearPendingFileWrites}
     />

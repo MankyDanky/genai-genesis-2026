@@ -47,6 +47,16 @@ interface GeneratedImagePayload {
   prompt: string;
 }
 
+interface AudioTrackPayload {
+  id: string;
+  name: string;
+  type: "music" | "sfx";
+  description: string;
+  status: "pending" | "ready" | "error";
+  duration: number | null;
+  error?: string | null;
+}
+
 interface PlanningTodoPayload {
   id: string;
   content: string;
@@ -495,6 +505,7 @@ export async function POST(req: Request) {
       mentionedFiles?: unknown;
       consoleLogs?: unknown;
       generatedImages?: unknown;
+      audioTracks?: unknown;
       composerMode?: unknown;
       planningMode?: unknown;
       gameEngine?: unknown;
@@ -548,6 +559,22 @@ export async function POST(req: Request) {
           })
           .slice(-120)
       : [];
+    const audioTracks: AudioTrackPayload[] = Array.isArray(parsed.audioTracks)
+      ? parsed.audioTracks
+          .filter((v): v is AudioTrackPayload => {
+            if (!v || typeof v !== "object") return false;
+            const candidate = v as Partial<AudioTrackPayload>;
+            return (
+              typeof candidate.id === "string" &&
+              typeof candidate.name === "string" &&
+              (candidate.type === "music" || candidate.type === "sfx") &&
+              typeof candidate.description === "string" &&
+              (candidate.status === "pending" || candidate.status === "ready" || candidate.status === "error") &&
+              (typeof candidate.duration === "number" || candidate.duration === null)
+            );
+          })
+          .slice(-240)
+      : [];
     const composerMode: ComposerMode = isComposerMode(parsed.composerMode)
       ? parsed.composerMode
       : parsed.planningMode === true
@@ -592,6 +619,7 @@ export async function POST(req: Request) {
         mentionedFiles,
         consoleLogs,
         generatedImages,
+        currentAudioTracks: audioTracks,
         composerMode,
         gameEngine,
         planningMode,
@@ -608,6 +636,8 @@ export async function POST(req: Request) {
             "generate_sound_effect",
             "generate_music",
             "todo_read",
+            "list_audio_assets",
+            "list_image_assets",
             "read_file",
             "list_dir",
             "dir_tree",
@@ -773,6 +803,49 @@ export async function POST(req: Request) {
             const filtered = status ? planningTodos.filter((todo) => todo.status === status) : planningTodos;
             const items = typeof limit === "number" ? filtered.slice(0, limit) : filtered;
             return { count: items.length, todos: items };
+          },
+        }),
+        list_audio_assets: tool({
+          description: "List known generated audio tracks with descriptions and statuses.",
+          inputSchema: z.object({
+            status: z.enum(["pending", "ready", "error"]).optional(),
+            type: z.enum(["music", "sfx"]).optional(),
+            limit: z.number().int().positive().max(200).optional(),
+          }),
+          execute: async ({ status, type, limit }) => {
+            let items = [...audioTracks];
+            if (status) items = items.filter((track) => track.status === status);
+            if (type) items = items.filter((track) => track.type === type);
+            if (typeof limit === "number") items = items.slice(0, limit);
+            return {
+              count: items.length,
+              tracks: items.map((track) => ({
+                id: track.id,
+                name: track.name,
+                type: track.type,
+                description: track.description,
+                status: track.status,
+                duration: track.duration,
+                error: track.error ?? null,
+              })),
+            };
+          },
+        }),
+        list_image_assets: tool({
+          description: "List known generated image assets with prompt descriptions and URLs.",
+          inputSchema: z.object({
+            limit: z.number().int().positive().max(200).optional(),
+          }),
+          execute: async ({ limit }) => {
+            const items = typeof limit === "number" ? generatedImages.slice(0, limit) : generatedImages;
+            return {
+              count: items.length,
+              images: items.map((image, index) => ({
+                id: `image:${index + 1}`,
+                url: image.url,
+                description: image.prompt,
+              })),
+            };
           },
         }),
         read_file: tool({

@@ -106,14 +106,24 @@ export async function GET(
       error: latestSound.error ?? null,
     });
   } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "Unexpected audio status error";
     console.error("[Audio API] Unexpected audio status error:", id, err);
+    const latestSound = soundStore.get(id);
+    if (latestSound) {
+      soundStore.set(id, {
+        ...latestSound,
+        status: "error",
+        error: message,
+      });
+    }
     return NextResponse.json({
-      status: "pending",
+      status: "error",
       dataUrl: null,
       name: sound.name,
       kind: sound.kind,
       duration: sound.duration,
-      error: null,
+      error: message,
     });
   }
 }
