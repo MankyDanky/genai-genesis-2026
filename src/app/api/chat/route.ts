@@ -796,7 +796,7 @@ export async function POST(req: Request) {
           thinking: { type: "enabled", budgetTokens: 10000 },
         },
       },
-      stopWhen: stepCountIs(composerMode === "plan" ? 1 : 5),
+      stopWhen: stepCountIs(composerMode === "plan" ? 3 : 5),
       onStepFinish: (step) => {
         const toolCalls = (step.toolCalls ?? []).map((call) => ({
           toolName: call.toolName,
