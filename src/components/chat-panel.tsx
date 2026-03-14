@@ -411,6 +411,7 @@ export function ChatPanel({
   const modeMenuPopupRef = useRef<HTMLDivElement>(null);
   const modeMenuButtonRef = useRef<HTMLButtonElement>(null);
   const planListRef = useRef<HTMLDivElement>(null);
+  const lastPlanAutoScrollRef = useRef(0);
   const mentionItemRefs = useRef<Map<string, HTMLButtonElement | null>>(new Map());
   const processedToolPayloadRef = useRef<Map<string, string>>(new Map());
   const [input, setInput] = useState("");
@@ -962,18 +963,23 @@ export function ChatPanel({
   const autoScrollPlanList = (clientY: number) => {
     const listEl = planListRef.current;
     if (!listEl) return;
+    const now = Date.now();
+    if (now - lastPlanAutoScrollRef.current < 65) return;
+    lastPlanAutoScrollRef.current = now;
     const rect = listEl.getBoundingClientRect();
-    const threshold = 24;
-    const maxSpeed = 6;
+    const threshold = 20;
+    const maxSpeed = 2;
     const distanceToTop = clientY - rect.top;
     const distanceToBottom = rect.bottom - clientY;
 
     if (distanceToTop < threshold) {
       const intensity = Math.max(0, (threshold - distanceToTop) / threshold);
-      listEl.scrollTop -= Math.max(1, Math.round(maxSpeed * intensity));
+      const delta = Math.floor(maxSpeed * intensity);
+      if (delta > 0) listEl.scrollTop -= delta;
     } else if (distanceToBottom < threshold) {
       const intensity = Math.max(0, (threshold - distanceToBottom) / threshold);
-      listEl.scrollTop += Math.max(1, Math.round(maxSpeed * intensity));
+      const delta = Math.floor(maxSpeed * intensity);
+      if (delta > 0) listEl.scrollTop += delta;
     }
   };
 
@@ -1100,11 +1106,17 @@ export function ChatPanel({
       {(composerMode === "plan" || planningTodos.length > 0) && (
         <div className="shrink-0 border-t border-[var(--color-border)] p-2">
           <div className="border border-[var(--color-border)] bg-[var(--color-surface)]">
-            <div className="px-2 py-1.5 border-b border-[var(--color-border)] flex items-center justify-between gap-2">
+            <div
+              className="px-2 py-1.5 border-b border-[var(--color-border)] flex items-center justify-between gap-2 cursor-pointer"
+              onClick={() => setIsPlanCollapsed((prev) => !prev)}
+            >
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setIsPlanCollapsed((prev) => !prev)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsPlanCollapsed((prev) => !prev);
+                  }}
                   className="inline-flex h-4 w-4 items-center justify-center text-[10px] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
                   aria-label={isPlanCollapsed ? "Expand plan" : "Collapse plan"}
                   title={isPlanCollapsed ? "Expand plan" : "Collapse plan"}
@@ -1119,14 +1131,20 @@ export function ChatPanel({
               <div className="flex items-center gap-1.5">
                 <button
                   type="button"
-                  onClick={handleAddTodo}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleAddTodo();
+                  }}
                   className="text-[9px] uppercase tracking-[0.12em] px-1 py-0.5 border border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
                 >
                   Add
                 </button>
                 <button
                   type="button"
-                  onClick={handleClearTodos}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleClearTodos();
+                  }}
                   disabled={planningTodos.length === 0}
                   className="text-[9px] uppercase tracking-[0.12em] px-1 py-0.5 border border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] disabled:opacity-40"
                 >
