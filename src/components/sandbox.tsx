@@ -13,6 +13,12 @@ interface SandboxProps {
     source: "console" | "error" | "unhandledrejection";
   }) => void;
   onReload?: () => void;
+  onFpsUpdate?: (fps: number) => void;
+  reloadTrigger?: number;
+  screenshotRequest?: number;
+  onScreenshotReady?: (dataUrl: string) => void;
+  pauseRequest?: number;
+  onPauseStateChange?: (paused: boolean) => void;
 }
 
 function ShareBar({
@@ -163,13 +169,97 @@ function ShareBar({
 function buildInstrumentedSrcDoc(code: string): string {
   const bridge = `<script>(function(){\n  var SESSION = "${Date.now()}-${Math.random().toString(36).slice(2)}";\n  function safe(v){\n    if (typeof v === "string") return v;\n    try { return JSON.stringify(v); } catch (_e) { return String(v); }\n  }\n  function send(level,args,source){\n    try{\n      parent.postMessage({\n        __gameForgeConsole: true,\n        session: SESSION,\n        level: level,\n        source: source || "console",\n        args: Array.isArray(args) ? args.map(safe) : [safe(args)]\n      }, "*");\n    }catch(_err){}\n  }\n  ["log","info","warn","error"].forEach(function(level){\n    var orig = console[level];\n    console[level] = function(){\n      var args = Array.prototype.slice.call(arguments);\n      send(level,args,"console");\n      return orig.apply(console,args);\n    };\n  });\n  window.addEventListener("error", function(e){\n    send("error", [e.message || "Unknown error", e.filename || "", String(e.lineno || 0) + ":" + String(e.colno || 0)], "error");\n  });\n  window.addEventListener("unhandledrejection", function(e){\n    var reason = e.reason && e.reason.message ? e.reason.message : e.reason;\n    send("error", ["Unhandled promise rejection", safe(reason)], "unhandledrejection");\n  });\n})();<\/script>`;
 
+  const fpsBridge = `<script>(function(){
+  var frames=0,last=performance.now();
+  function tick(){
+    frames++;
+    var now=performance.now();
+    if(now-last>=500){
+      var fps=Math.round(frames*1000/(now-last));
+      frames=0;last=now;
+      try{parent.postMessage({__gameForgeFps:true,fps:fps},"*");}catch(_){}
+    }
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+})();<\/script>`;
+
+  const screenshotBridge = `<script>(function(){
+  window.addEventListener("message",function(e){
+    if(!e.data||e.data.type!=="gameforge-screenshot-request")return;
+    var canvas=document.querySelector("canvas");
+    if(!canvas){
+      try{parent.postMessage({__gameForgeScreenshot:true,dataUrl:null},"*");}catch(_){}
+      return;
+    }
+    try{
+      var dataUrl=canvas.toDataURL("image/png");
+      parent.postMessage({__gameForgeScreenshot:true,dataUrl:dataUrl},"*");
+    }catch(_){
+      parent.postMessage({__gameForgeScreenshot:true,dataUrl:null},"*");
+    }
+  });
+})();<\/script>`;
+
+  const pauseBridge = `<script>(function(){
+  var origRAF=window.requestAnimationFrame;
+  var paused=false,queued=[];
+  var trackedAudio=[];
+  var OrigAudio=window.Audio;
+  window.__gameForgePaused=false;
+  window.Audio=function(src){
+    var a=arguments.length?new OrigAudio(src):new OrigAudio();
+    trackedAudio.push(a);
+    return a;
+  };
+  window.Audio.prototype=OrigAudio.prototype;
+  window.requestAnimationFrame=function(cb){
+    if(paused){queued.push(cb);return queued.length;}
+    return origRAF.call(window,cb);
+  };
+  function pauseAllAudio(){
+    trackedAudio=trackedAudio.filter(function(a){return a.src;});
+    for(var i=0;i<trackedAudio.length;i++){
+      try{if(!trackedAudio[i].paused)trackedAudio[i].pause();}catch(_){}
+    }
+    var elems=document.querySelectorAll("audio,video");
+    for(var j=0;j<elems.length;j++){
+      try{if(!elems[j].paused)elems[j].pause();}catch(_){}
+    }
+  }
+  function resumeAllAudio(){
+    for(var i=0;i<trackedAudio.length;i++){
+      try{if(trackedAudio[i].paused&&trackedAudio[i].currentTime>0)trackedAudio[i].play();}catch(_){}
+    }
+    var elems=document.querySelectorAll("audio,video");
+    for(var j=0;j<elems.length;j++){
+      try{if(elems[j].paused&&elems[j].currentTime>0)elems[j].play();}catch(_){}
+    }
+  }
+  window.addEventListener("message",function(e){
+    if(!e.data||e.data.type!=="gameforge-pause-toggle")return;
+    paused=!paused;
+    window.__gameForgePaused=paused;
+    if(paused){
+      pauseAllAudio();
+    }else{
+      var q=queued.slice();queued=[];
+      for(var i=0;i<q.length;i++){origRAF.call(window,q[i]);}
+      resumeAllAudio();
+    }
+    try{parent.postMessage({__gameForgePauseState:true,paused:paused},"*");}catch(_){}
+  });
+})();<\/script>`;
+
+  const allBridges = `${bridge}${fpsBridge}${screenshotBridge}${pauseBridge}`;
+
   if (/<head[^>]*>/i.test(code)) {
-    return code.replace(/<head([^>]*)>/i, `<head$1>${bridge}`);
+    return code.replace(/<head([^>]*)>/i, `<head$1>${allBridges}`);
   }
   if (/<body[^>]*>/i.test(code)) {
-    return code.replace(/<body([^>]*)>/i, `<body$1>${bridge}`);
+    return code.replace(/<body([^>]*)>/i, `<body$1>${allBridges}`);
   }
-  return `${bridge}${code}`;
+  return `${allBridges}${code}`;
 }
 
 const SOUND_BRIDGE_SCRIPT = `<script>
@@ -234,7 +324,19 @@ window.__GAMEFORGE_MESHES__ = ${JSON.stringify(meshMap)};
   return `${combined}${html}`;
 }
 
-export function Sandbox({ code, audioTracks = [], generatedMeshes = [], onConsoleMessage, onReload }: SandboxProps) {
+export function Sandbox({
+  code,
+  audioTracks = [],
+  generatedMeshes = [],
+  onConsoleMessage,
+  onReload,
+  onFpsUpdate,
+  reloadTrigger,
+  screenshotRequest,
+  onScreenshotReady,
+  pauseRequest,
+  onPauseStateChange,
+}: SandboxProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -249,27 +351,64 @@ export function Sandbox({ code, audioTracks = [], generatedMeshes = [], onConsol
     onReload?.();
   }, [onReload]);
 
-  useEffect(() => {
-    if (!onConsoleMessage) return;
+  // Combine local reload key with external trigger for iframe key
+  const combinedReloadKey = `${reloadKey}:${reloadTrigger ?? 0}`;
 
+  // Screenshot request
+  const prevScreenshotRequest = useRef(screenshotRequest);
+  useEffect(() => {
+    if (screenshotRequest !== undefined && screenshotRequest !== prevScreenshotRequest.current) {
+      prevScreenshotRequest.current = screenshotRequest;
+      const iframe = iframeRef.current;
+      if (iframe?.contentWindow) {
+        iframe.contentWindow.postMessage({ type: "gameforge-screenshot-request" }, "*");
+      }
+    }
+  }, [screenshotRequest]);
+
+  // Pause request
+  const prevPauseRequest = useRef(pauseRequest);
+  useEffect(() => {
+    if (pauseRequest !== undefined && pauseRequest !== prevPauseRequest.current) {
+      prevPauseRequest.current = pauseRequest;
+      const iframe = iframeRef.current;
+      if (iframe?.contentWindow) {
+        iframe.contentWindow.postMessage({ type: "gameforge-pause-toggle" }, "*");
+      }
+    }
+  }, [pauseRequest]);
+
+  useEffect(() => {
     const handler = (event: MessageEvent) => {
-      const data = event.data as {
-        __gameForgeConsole?: boolean;
-        level?: "log" | "info" | "warn" | "error";
-        args?: string[];
-        source?: "console" | "error" | "unhandledrejection";
-      };
-      if (!data || data.__gameForgeConsole !== true) return;
-      onConsoleMessage({
-        level: data.level ?? "log",
-        args: Array.isArray(data.args) ? data.args : [],
-        source: data.source ?? "console",
-      });
+      const data = event.data;
+      if (!data || typeof data !== "object") return;
+
+      if (data.__gameForgeConsole === true && onConsoleMessage) {
+        onConsoleMessage({
+          level: data.level ?? "log",
+          args: Array.isArray(data.args) ? data.args : [],
+          source: data.source ?? "console",
+        });
+      }
+
+      if (data.__gameForgeFps === true && onFpsUpdate) {
+        onFpsUpdate(data.fps);
+      }
+
+      if (data.__gameForgeScreenshot === true && onScreenshotReady) {
+        if (data.dataUrl) {
+          onScreenshotReady(data.dataUrl);
+        }
+      }
+
+      if (data.__gameForgePauseState === true && onPauseStateChange) {
+        onPauseStateChange(data.paused);
+      }
     };
 
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
-  }, [onConsoleMessage]);
+  }, [onConsoleMessage, onFpsUpdate, onScreenshotReady, onPauseStateChange]);
 
   useEffect(() => {
     const iframe = iframeRef.current;
@@ -332,7 +471,7 @@ export function Sandbox({ code, audioTracks = [], generatedMeshes = [], onConsol
       <ShareBar code={code} audioTracks={audioTracks ?? []} generatedMeshes={generatedMeshes ?? []} containerRef={containerRef} onReload={handleReload} />
       <iframe
         ref={iframeRef}
-        key={`${code}:${reloadKey}`}
+        key={`${code}:${combinedReloadKey}`}
         srcDoc={srcDoc}
         sandbox="allow-scripts"
         title="Game Preview"
