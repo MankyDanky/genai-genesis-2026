@@ -1,11 +1,9 @@
 "use client";
 
-import { createContext, useContext, useState, useCallback, type ReactNode, useMemo, useEffect } from "react";
+import { createContext, useContext, useState, useCallback, type ReactNode, useMemo } from "react";
 import type { GameEngine } from "@/lib/game-engine";
 import type { ProjectFile, ProjectFileKind } from "@/lib/project-files";
 import { compileProjectToHtml, normalizeProjectFiles } from "@/lib/project-files";
-
-const TODOS_STORAGE_KEY = "game-forge-planning-todos";
 
 export interface PlanningTodo {
   id: string;
@@ -155,27 +153,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
   const [projectFiles, setProjectFiles] = useState<ProjectFile[]>([]);
   const [pendingFileWrites, setPendingFileWritesState] = useState<PendingFileWrite[]>([]);
   const [consoleLogs, setConsoleLogs] = useState<ConsoleLogEntry[]>([]);
-  const [planningTodos, setPlanningTodos] = useState<PlanningTodo[]>(() => {
-    if (typeof window === "undefined") return [];
-    try {
-      const raw = window.localStorage.getItem(TODOS_STORAGE_KEY);
-      if (!raw) return [];
-      const parsed = JSON.parse(raw) as unknown;
-      if (!Array.isArray(parsed)) return [];
-      return parsed
-        .filter((todo): todo is PlanningTodo => {
-          return (
-            !!todo &&
-            typeof todo === "object" &&
-            typeof (todo as PlanningTodo).id === "string" &&
-            typeof (todo as PlanningTodo).content === "string" &&
-            ["pending", "in_progress", "completed", "cancelled"].includes((todo as PlanningTodo).status)
-          );
-        });
-    } catch {
-      return [];
-    }
-  });
+  const [planningTodos, setPlanningTodos] = useState<PlanningTodo[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [audioTracks, setAudioTracks] = useState<AudioTrack[]>([]);
   const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>([]);
@@ -184,10 +162,6 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     { action: "Action", keys: "Space" },
     { action: "Pause", keys: "P / Esc" },
   ]);
-
-  useEffect(() => {
-    window.localStorage.setItem(TODOS_STORAGE_KEY, JSON.stringify(planningTodos));
-  }, [planningTodos]);
 
   const onCodeUpdate = useCallback((code: string, engine?: GameEngine) => {
     setCurrentCode(code);
