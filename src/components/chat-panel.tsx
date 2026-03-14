@@ -6,11 +6,13 @@ import { useState, useEffect, useRef, useMemo, useCallback, type FormEvent, type
 import Markdown from "react-markdown";
 import type { GameEngine } from "@/lib/game-engine";
 import type { ProjectFile } from "@/lib/project-files";
+import type { PlanningTodo } from "@/lib/game-forge-context";
 
 interface ChatPanelProps {
   currentCode: string | null;
   currentEngine: GameEngine;
   projectFiles: ProjectFile[];
+  planningTodos: PlanningTodo[];
   onCodeUpdate: (code: string, engine?: GameEngine) => void;
   onProjectFilesUpdate: (files: ProjectFile[], engine?: GameEngine, deletePaths?: string[]) => void;
   patchProjectFiles: (files: ProjectFile[], engine?: GameEngine) => void;
@@ -18,6 +20,15 @@ interface ChatPanelProps {
     path: string,
     edits: Array<{ find: string; replace: string; replaceAll?: boolean }>
   ) => void;
+  editProjectFile: (args: {
+    targetFile: string;
+    oldString: string;
+    newString: string;
+    replaceAll?: boolean;
+    createIfMissing?: boolean;
+  }) => boolean;
+  deleteProjectFile: (path: string) => void;
+  writePlanningTodos: (merge: boolean, todos: PlanningTodo[]) => void;
   onEngineUpdate: (engine: GameEngine) => void;
 }
 
@@ -282,10 +293,14 @@ export function ChatPanel({
   currentCode,
   currentEngine,
   projectFiles,
+  planningTodos,
   onCodeUpdate,
   onProjectFilesUpdate,
   patchProjectFiles,
   patchProjectFileContent,
+  editProjectFile,
+  deleteProjectFile,
+  writePlanningTodos,
   onEngineUpdate,
 }: ChatPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -297,6 +312,7 @@ export function ChatPanel({
   const [mentionStart, setMentionStart] = useState<number | null>(null);
   const [mentionIndex, setMentionIndex] = useState(0);
   const [selectedEngine, setSelectedEngine] = useState<GameEngine>(currentEngine);
+  const [planningMode, setPlanningMode] = useState(false);
 
   const mentionSuggestions = useMemo(() => {
     if (mentionStart === null) return [];
@@ -407,9 +423,75 @@ export function ChatPanel({
           processedToolPayloadRef.current.set(key, signature);
           patchProjectFileContent(toolPart.input.path, toolPart.input.edits);
         }
+
+        if (partType === "tool-edit_file") {
+          const toolPart = part as {
+            state: string;
+            input?: {
+              targetFile?: string;
+              oldString?: string;
+              newString?: string;
+              replaceAll?: boolean;
+              createIfMissing?: boolean;
+            };
+          };
+          if (toolPart.state !== "output-available") continue;
+          if (!toolPart.input?.targetFile || typeof toolPart.input.newString !== "string") continue;
+
+          const signature = JSON.stringify(toolPart.input);
+          const key = `${message.id}:${partType}:${toolPart.input.targetFile}`;
+          if (processedToolPayloadRef.current.get(key) === signature) continue;
+          processedToolPayloadRef.current.set(key, signature);
+
+          editProjectFile({
+            targetFile: toolPart.input.targetFile,
+            oldString: toolPart.input.oldString ?? "",
+            newString: toolPart.input.newString,
+            replaceAll: toolPart.input.replaceAll,
+            createIfMissing: toolPart.input.createIfMissing,
+          });
+        }
+
+        if (partType === "tool-delete_file") {
+          const toolPart = part as { state: string; input?: { targetFile?: string } };
+          if (toolPart.state !== "output-available") continue;
+          if (!toolPart.input?.targetFile) continue;
+          const key = `${message.id}:${partType}:${toolPart.input.targetFile}`;
+          if (processedToolPayloadRef.current.get(key) === "1") continue;
+          processedToolPayloadRef.current.set(key, "1");
+          deleteProjectFile(toolPart.input.targetFile);
+        }
+
+        if (partType === "tool-todo_write") {
+          const toolPart = part as {
+            state: string;
+            input?: { merge?: boolean; todos?: PlanningTodo[] };
+          };
+          if (toolPart.state !== "output-available") continue;
+          if (!Array.isArray(toolPart.input?.todos)) continue;
+          const signature = JSON.stringify({
+            merge: toolPart.input.merge ?? false,
+            todos: toolPart.input.todos,
+          });
+          const key = `${message.id}:${partType}`;
+          if (processedToolPayloadRef.current.get(key) === signature) continue;
+          processedToolPayloadRef.current.set(key, signature);
+          writePlanningTodos(toolPart.input.merge ?? false, toolPart.input.todos);
+        }
       }
     }
-  }, [messages, currentCode, onCodeUpdate, onProjectFilesUpdate, patchProjectFiles, patchProjectFileContent, selectedEngine]);
+  }, [
+    messages,
+    currentCode,
+    onCodeUpdate,
+    onProjectFilesUpdate,
+    patchProjectFiles,
+    patchProjectFileContent,
+    editProjectFile,
+    deleteProjectFile,
+    writePlanningTodos,
+    selectedEngine,
+  ]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -455,6 +537,7 @@ export function ChatPanel({
         currentCode,
         currentProjectFiles: projectFiles,
         mentionedFiles,
+        planningMode,
         gameEngine: selectedEngine,
       },
     })
@@ -659,7 +742,7 @@ export function ChatPanel({
       </div>
 
       <div className="shrink-0 border-t border-[var(--color-border)] p-2">
-        <div className="mb-2 flex gap-1.5">
+        <div className="mb-2 flex flex-wrap gap-1.5 items-center">
           {ENGINE_OPTIONS.map((engine) => (
             <button
               key={engine.id}
@@ -674,6 +757,17 @@ export function ChatPanel({
               {engine.label}
             </button>
           ))}
+          <button
+            type="button"
+            onClick={() => setPlanningMode((prev) => !prev)}
+            className={`gf-btn-chip text-[10px] px-2.5 py-1 uppercase tracking-wider font-semibold border ${
+              planningMode
+                ? "border-[var(--color-success)] text-[var(--color-success)] bg-[var(--color-success)]/10"
+                : "border-[var(--color-border)] text-[var(--color-text-muted)]"
+            }`}
+          >
+            Planning {planningMode ? "On" : "Off"}
+          </button>
         </div>
 
         <form onSubmit={handleSubmit} className="flex gap-2">
@@ -717,6 +811,22 @@ export function ChatPanel({
                 >
                   @{path}
                 </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {planningMode && planningTodos.length > 0 && (
+          <div className="mt-1 border border-[var(--color-border)] bg-[var(--color-surface)]">
+            <div className="px-2 py-1 text-[9px] uppercase tracking-[0.12em] text-[var(--color-text-muted)]">
+              Todo List
+            </div>
+            <div className="max-h-28 overflow-y-auto border-t border-[var(--color-border)]">
+              {planningTodos.map((todo) => (
+                <div key={todo.id} className="px-2 py-1.5 text-[10px] text-[var(--color-text-secondary)] border-b border-[var(--color-border)] last:border-b-0">
+                  <span className="uppercase mr-2 text-[var(--color-text-muted)]">{todo.status}</span>
+                  {todo.content}
+                </div>
               ))}
             </div>
           </div>

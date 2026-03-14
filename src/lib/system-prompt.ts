@@ -6,6 +6,7 @@ interface PromptOptions {
     currentCode?: string | null;
     currentProjectFiles?: ProjectFile[];
     mentionedFiles?: string[];
+    planningMode?: boolean;
     gameEngine?: GameEngine;
 }
 
@@ -13,6 +14,7 @@ export function getSystemPrompt({
     currentCode,
     currentProjectFiles = [],
     mentionedFiles = [],
+    planningMode = false,
     gameEngine = "canvas2d",
 }: PromptOptions = {}): string {
     const isThreeJs = gameEngine === "threejs";
@@ -21,15 +23,20 @@ export function getSystemPrompt({
 
 ## Your Tools
 
-You have three tools:
-1) \`patch_project_file\` (PREFERRED for small edits) — targeted text replacements in an existing file
-2) \`update_project_files\` (PRIMARY for new files or larger changes) — merge-create/update virtual files like \`index.html\`, \`src/game.js\`, \`styles/game.css\`, \`assets/*\`
-3) \`update_sandbox\` (FALLBACK) — only if the user explicitly requests single-file output
+You have these tools:
+- \`read_file\`, \`list_dir\`, \`glob_file_search\`, \`grep\`, \`read_lints\`
+- \`edit_file\`, \`patch_project_file\`, \`update_project_files\`, \`delete_file\`
+- \`todo_write\` for planning tasks
+- \`update_sandbox\` fallback for single-file output
 
 Rules:
+- Inspect before editing: use read/list/search/lint tools when uncertain.
 - Do NOT rewrite full files for small edits; use \`patch_project_file\`
-- \`update_project_files\` is merge-based; unspecified files are preserved
+- Use \`edit_file\` for context-matched edits (oldString -> newString) when patching one file.
+- \`update_project_files\` is merge-based; unspecified files are preserved.
 - Use \`deletePaths\` only when you intentionally remove files
+- Use \`delete_file\` only when explicitly removing a file.
+- Use \`todo_write\` when planning mode is enabled or task is multi-step.
 
 ## Execution Policy
 
@@ -85,6 +92,11 @@ When you create or update a game:
 5. Keep your text response BRIEF — the game speaks for itself
 6. NEVER use emojis in your text responses — plain text only`;
 
+    const planningSection = planningMode
+      ? `\n\n## Planning Mode\n\nPlanning mode is ON. Before major edits, write/update concise todos with \`todo_write\` and keep statuses accurate.`
+      : "";
+    const baseWithPlanning = `${base}${planningSection}`;
+
     if (currentProjectFiles.length > 0) {
         const mentionedSet = new Set(mentionedFiles);
         const focusedFiles = currentProjectFiles.filter((file) => mentionedSet.has(file.path));
@@ -93,7 +105,7 @@ When you create or update a game:
                 ? `\n\n## Focused Files (User Mentioned)\n\nPrioritize these files for this request:\n\n${projectFilesToPrompt(focusedFiles)}`
                 : "";
 
-        return `${base}
+        return `${baseWithPlanning}
 
 ## Current Project Files
 
@@ -103,7 +115,7 @@ ${projectFilesToPrompt(currentProjectFiles)}${focusedSection}`;
     }
 
     if (currentCode) {
-        return `${base}
+        return `${baseWithPlanning}
 
 ## Current Sandbox Code
 
@@ -114,5 +126,5 @@ ${currentCode}
 \`\`\``;
     }
 
-    return base;
+    return baseWithPlanning;
 }

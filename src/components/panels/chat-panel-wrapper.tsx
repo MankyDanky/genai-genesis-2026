@@ -8,10 +8,14 @@ export function ChatPanelWrapper() {
     currentCode,
     currentEngine,
     projectFiles,
+    planningTodos,
     onCodeUpdate,
     onProjectFilesUpdate,
     patchProjectFiles,
     patchProjectFileContent,
+    editProjectFile,
+    deleteProjectFile,
+    writePlanningTodos,
     onEngineUpdate,
   } = useGameForge();
   return (
@@ -19,10 +23,14 @@ export function ChatPanelWrapper() {
       currentCode={currentCode}
       currentEngine={currentEngine}
       projectFiles={projectFiles}
+      planningTodos={planningTodos}
       onCodeUpdate={onCodeUpdate}
       onProjectFilesUpdate={onProjectFilesUpdate}
       patchProjectFiles={patchProjectFiles}
       patchProjectFileContent={patchProjectFileContent}
+      editProjectFile={editProjectFile}
+      deleteProjectFile={deleteProjectFile}
+      writePlanningTodos={writePlanningTodos}
       onEngineUpdate={onEngineUpdate}
     />
   );
