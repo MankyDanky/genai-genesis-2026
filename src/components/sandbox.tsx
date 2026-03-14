@@ -1,9 +1,11 @@
 "use client";
 
 import { useState, useCallback, useRef, useMemo, useEffect } from "react";
+import type { AudioTrack } from "@/lib/game-forge-context";
 
 interface SandboxProps {
   code: string | null;
+  audioTracks?: AudioTrack[];
   onConsoleMessage?: (event: {
     level: "log" | "info" | "warn" | "error";
     args: string[];
@@ -163,10 +165,58 @@ function buildInstrumentedSrcDoc(code: string): string {
   return `${bridge}${code}`;
 }
 
-export function Sandbox({ code, onConsoleMessage, onReload }: SandboxProps) {
+const SOUND_BRIDGE_SCRIPT = `<script>
+window.__GAMEFORGE_SOUNDS__ = window.__GAMEFORGE_SOUNDS__ || {};
+window.__GAMEFORGE_MUSIC__ = window.__GAMEFORGE_MUSIC__ || {};
+window.addEventListener('message', function(e) {
+  if (!e.data || e.data.type !== 'gameforge-sounds-update') return;
+  var sounds = e.data.sounds || {};
+  var music = e.data.music || {};
+  for (var soundName in sounds) {
+    window.__GAMEFORGE_SOUNDS__[soundName] = sounds[soundName];
+  }
+  for (var musicName in music) {
+    window.__GAMEFORGE_MUSIC__[musicName] = music[musicName];
+  }
+  if (typeof window.__onSoundsUpdated === 'function') window.__onSoundsUpdated();
+  if (typeof window.__onMusicUpdated === 'function') window.__onMusicUpdated();
+});
+</script>`;
+
+function injectSoundBridge(html: string, tracks: AudioTrack[]): string {
+  const readyTracks = tracks.filter((track) => track.status === "ready" && !!track.dataUrl);
+  const soundMap: Record<string, string> = {};
+  const musicMap: Record<string, string> = {};
+
+  for (const track of readyTracks) {
+    if (track.type === "music") {
+      musicMap[track.name] = track.dataUrl!;
+    } else {
+      soundMap[track.name] = track.dataUrl!;
+    }
+  }
+
+  const initialScript = `<script>
+window.__GAMEFORGE_SOUNDS__ = ${JSON.stringify(soundMap)};
+window.__GAMEFORGE_MUSIC__ = ${JSON.stringify(musicMap)};
+</script>`;
+
+  const combined = `${SOUND_BRIDGE_SCRIPT}${initialScript}`;
+  if (/<head[^>]*>/i.test(html)) {
+    return html.replace(/<head([^>]*)>/i, `<head$1>${combined}`);
+  }
+  return `${combined}${html}`;
+}
+
+export function Sandbox({ code, audioTracks = [], onConsoleMessage, onReload }: SandboxProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
   const [reloadKey, setReloadKey] = useState(0);
-  const srcDoc = useMemo(() => (code ? buildInstrumentedSrcDoc(code) : null), [code]);
+  const srcDoc = useMemo(() => {
+    if (!code) return null;
+    const withConsole = buildInstrumentedSrcDoc(code);
+    return injectSoundBridge(withConsole, audioTracks);
+  }, [audioTracks, code]);
 
   const handleReload = useCallback(() => {
     setReloadKey((prev) => prev + 1);
@@ -195,6 +245,26 @@ export function Sandbox({ code, onConsoleMessage, onReload }: SandboxProps) {
     return () => window.removeEventListener("message", handler);
   }, [onConsoleMessage]);
 
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe?.contentWindow) return;
+
+    const readyTracks = audioTracks.filter((track) => track.status === "ready" && !!track.dataUrl);
+    if (readyTracks.length === 0) return;
+
+    const sounds: Record<string, string> = {};
+    const music: Record<string, string> = {};
+    for (const track of readyTracks) {
+      if (track.type === "music") {
+        music[track.name] = track.dataUrl!;
+      } else {
+        sounds[track.name] = track.dataUrl!;
+      }
+    }
+
+    iframe.contentWindow.postMessage({ type: "gameforge-sounds-update", sounds, music }, "*");
+  }, [audioTracks]);
+
   if (!code || !srcDoc) {
     return (
       <div className="relative flex h-full w-full items-center justify-center bg-[var(--color-bg)] overflow-hidden">
@@ -220,6 +290,7 @@ export function Sandbox({ code, onConsoleMessage, onReload }: SandboxProps) {
     <div ref={containerRef} className="relative h-full w-full bg-black">
       <ShareBar code={code} containerRef={containerRef} onReload={handleReload} />
       <iframe
+        ref={iframeRef}
         key={`${code}:${reloadKey}`}
         srcDoc={srcDoc}
         sandbox="allow-scripts"

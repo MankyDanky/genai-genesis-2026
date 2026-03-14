@@ -9,7 +9,8 @@ import remarkGfm from "remark-gfm";
 import { Mention, MentionsInput } from "react-mentions";
 import type { GameEngine } from "@/lib/game-engine";
 import type { ProjectFile } from "@/lib/project-files";
-import type { PlanningTodo, ConsoleLogEntry, GeneratedImage, PendingFileWrite, GameControl } from "@/lib/game-forge-context";
+import type { PlanningTodo, ConsoleLogEntry, GeneratedImage, PendingFileWrite, GameControl, AudioTrack } from "@/lib/game-forge-context";
+import { getGeneratedAudioId } from "@/lib/generated-audio";
 
 interface ChatPanelProps {
   currentCode: string | null;
@@ -37,6 +38,7 @@ interface ChatPanelProps {
   writePlanningTodos: (merge: boolean, todos: PlanningTodo[]) => void;
   onEngineUpdate: (engine: GameEngine) => void;
   addImage: (image: GeneratedImage) => void;
+  addAudioTrack: (track: AudioTrack) => void;
   setControls: (controls: GameControl[]) => void;
   focusCodeFile: (path: string) => void;
   focusConsolePanel: () => void;
@@ -489,6 +491,7 @@ export function ChatPanel({
   writePlanningTodos,
   onEngineUpdate,
   addImage,
+  addAudioTrack,
   setControls,
   focusCodeFile,
   focusConsolePanel,
@@ -875,6 +878,32 @@ export function ChatPanel({
           processedToolPayloadRef.current.set(key, signature);
           setControls(normalized);
         }
+
+        if (partType === "tool-generate_sound_effect" || partType === "tool-generate_music") {
+          const toolPart = part as {
+            state: string;
+            input?: { name?: string; prompt?: string; duration?: number };
+          };
+          if (toolPart.state !== "output-available") continue;
+          const name = toolPart.input?.name;
+          if (!name) continue;
+          const type = partType === "tool-generate_music" ? "music" as const : "sfx" as const;
+          const id = getGeneratedAudioId(type, name);
+          const key = `${message.id}:${partType}:${id}`;
+          if (processedToolPayloadRef.current.get(key) === "1") continue;
+          processedToolPayloadRef.current.set(key, "1");
+          addAudioTrack({
+            id,
+            name,
+            type,
+            description: toolPart.input?.prompt ?? "",
+            dataUrl: null,
+            status: "pending",
+            error: null,
+            duration: typeof toolPart.input?.duration === "number" ? toolPart.input.duration : null,
+            createdAt: Date.now(),
+          });
+        }
       }
     }
   }, [
@@ -890,6 +919,7 @@ export function ChatPanel({
     planningTodos,
     composerMode,
     addImage,
+    addAudioTrack,
     setControls,
     setPendingFileWrites,
     clearPendingFileWrites,

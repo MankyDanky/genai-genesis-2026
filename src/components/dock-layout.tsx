@@ -10,6 +10,7 @@ import { gameForgeTheme } from "@/lib/dock-theme";
 import { useGameForge } from "@/lib/game-forge-context";
 import { getEngineLabel } from "@/lib/game-engine";
 import { SandboxPanel } from "@/components/panels/sandbox-panel";
+import { AudioPanel } from "@/components/panels/audio-panel";
 import { ChatPanelWrapper } from "@/components/panels/chat-panel-wrapper";
 import { CodePanel } from "@/components/panels/code-panel";
 import { ConsolePanel } from "@/components/panels/console-panel";
@@ -22,6 +23,7 @@ import "dockview/dist/styles/dockview.css";
 
 const components = {
   sandbox: SandboxPanel,
+  audio: AudioPanel,
   composer: ChatPanelWrapper,
   code: CodePanel,
   console: ConsolePanel,
@@ -38,6 +40,7 @@ interface PanelDef {
 
 const ALL_PANELS: PanelDef[] = [
   { id: "sandbox", component: "sandbox", title: "Game View" },
+  { id: "audio", component: "audio", title: "Audio" },
   { id: "composer", component: "composer", title: "Composer" },
   { id: "inspector", component: "inspector", title: "Inspector" },
   { id: "code", component: "code", title: "Code" },
@@ -70,6 +73,14 @@ function buildDefaultLayout(api: DockviewApi) {
     title: "Inspector",
     position: { referencePanel: "sandbox", direction: "right" },
     initialWidth: w * 0.18,
+  });
+
+  api.addPanel({
+    id: "audio",
+    component: "audio",
+    title: "Audio",
+    inactive: true,
+    position: { referencePanel: "inspector", direction: "within" },
   });
 
   api.addPanel({

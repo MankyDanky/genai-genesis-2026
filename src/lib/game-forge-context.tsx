@@ -36,6 +36,8 @@ export interface AudioTrack {
   type: "music" | "sfx";
   description: string;
   dataUrl: string | null;
+  status: "pending" | "ready" | "error";
+  error?: string | null;
   duration: number | null;
   createdAt: number;
 }
@@ -384,7 +386,17 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const addAudioTrack = useCallback((track: AudioTrack) => {
-    setAudioTracks((prev) => [...prev, track]);
+    setAudioTracks((prev) => {
+      const existing = prev.find((item) => item.id === track.id);
+      if (!existing) return [track, ...prev];
+
+      const nextTrack: AudioTrack = {
+        ...existing,
+        ...track,
+        createdAt: existing.createdAt,
+      };
+      return prev.map((item) => (item.id === track.id ? nextTrack : item));
+    });
   }, []);
 
   const removeAudioTrack = useCallback((id: string) => {

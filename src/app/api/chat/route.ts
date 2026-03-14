@@ -5,9 +5,35 @@ import { getSystemPrompt } from "@/lib/system-prompt";
 import type { GameEngine } from "@/lib/game-engine";
 import type { ProjectFile } from "@/lib/project-files";
 import { normalizeProjectFiles } from "@/lib/project-files";
+import { getGeneratedAudioId, type GeneratedAudioKind } from "@/lib/generated-audio";
 import { storeImage } from "@/lib/image-store";
+import { soundStore } from "@/lib/sound-store";
 
 export const maxDuration = 60;
+
+function scheduleGeneratedAudio({
+  kind,
+  name,
+  prompt,
+  duration,
+}: {
+  kind: GeneratedAudioKind;
+  name: string;
+  prompt: string;
+  duration: number;
+}) {
+  const audioId = getGeneratedAudioId(kind, name);
+  soundStore.set(audioId, {
+    dataUrl: null,
+    name,
+    prompt,
+    kind,
+    duration,
+    status: "pending",
+    createdAt: Date.now(),
+  });
+  return audioId;
+}
 
 interface ConsoleLogPayload {
   level: "log" | "info" | "warn" | "error";
@@ -388,10 +414,13 @@ const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/
 
 async function removeBg(imageBuffer: Buffer, mimeType: string): Promise<{ data: string; mimeType: string }> {
   const moduleName = "@imgly/background-removal-node";
+  const dynamicImport = new Function("moduleName", "return import(moduleName);") as (
+    name: string
+  ) => Promise<unknown>;
   let removeBackgroundFn: ((input: Blob, options?: unknown) => Promise<Blob>) | null = null;
 
   try {
-    const pkg = await import(moduleName);
+    const pkg = await dynamicImport(moduleName);
     const maybeFn = (pkg as { removeBackground?: unknown }).removeBackground;
     if (typeof maybeFn === "function") {
       removeBackgroundFn = maybeFn as (input: Blob, options?: unknown) => Promise<Blob>;
@@ -576,6 +605,8 @@ export async function POST(req: Request) {
             "update_sandbox",
             "update_controls",
             "generate_image",
+            "generate_sound_effect",
+            "generate_music",
             "todo_read",
             "read_file",
             "list_dir",
@@ -675,6 +706,60 @@ export async function POST(req: Request) {
                 error: error instanceof Error ? error.message : "Image generation failed",
                 prompt,
               };
+            }
+          },
+        }),
+        generate_sound_effect: tool({
+          description:
+            "Generate an AI sound effect from text. Returns a sound id/name and schedules async generation.",
+          inputSchema: z.object({
+            prompt: z.string().min(1),
+            name: z.string().min(1),
+            duration: z.number().min(0.5).max(10).default(2),
+          }),
+          execute: async ({ prompt, name, duration }) => {
+            try {
+              scheduleGeneratedAudio({ kind: "sfx", name, prompt, duration });
+              return { soundId: name, name, duration, status: "pending" };
+            } catch (error) {
+              soundStore.set(getGeneratedAudioId("sfx", name), {
+                dataUrl: null,
+                name,
+                prompt,
+                kind: "sfx",
+                duration,
+                status: "error",
+                error: error instanceof Error ? error.message : "Sound generation setup failed",
+                createdAt: Date.now(),
+              });
+              return { soundId: name, name, duration, status: "error" };
+            }
+          },
+        }),
+        generate_music: tool({
+          description:
+            "Generate instrumental background music from text. Returns a music id/name and schedules async generation.",
+          inputSchema: z.object({
+            prompt: z.string().min(1),
+            name: z.string().min(1),
+            duration: z.number().min(10).max(120).default(30),
+          }),
+          execute: async ({ prompt, name, duration }) => {
+            try {
+              scheduleGeneratedAudio({ kind: "music", name, prompt, duration });
+              return { musicId: name, name, duration, status: "pending" };
+            } catch (error) {
+              soundStore.set(getGeneratedAudioId("music", name), {
+                dataUrl: null,
+                name,
+                prompt,
+                kind: "music",
+                duration,
+                status: "error",
+                error: error instanceof Error ? error.message : "Music generation setup failed",
+                createdAt: Date.now(),
+              });
+              return { musicId: name, name, duration, status: "error" };
             }
           },
         }),

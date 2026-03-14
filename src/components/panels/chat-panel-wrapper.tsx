@@ -21,6 +21,7 @@ export function ChatPanelWrapper() {
     writePlanningTodos,
     onEngineUpdate,
     addImage,
+    addAudioTrack,
     setControls,
     focusCodeFile,
     focusConsolePanel,
@@ -45,6 +46,7 @@ export function ChatPanelWrapper() {
       writePlanningTodos={writePlanningTodos}
       onEngineUpdate={onEngineUpdate}
       addImage={addImage}
+      addAudioTrack={addAudioTrack}
       setControls={setControls}
       focusCodeFile={focusCodeFile}
       focusConsolePanel={focusConsolePanel}
