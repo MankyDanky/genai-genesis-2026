@@ -384,6 +384,7 @@ export function ChatPanel({
 }: ChatPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const modeMenuRef = useRef<HTMLDivElement>(null);
   const mentionItemRefs = useRef<Map<string, HTMLButtonElement | null>>(new Map());
   const processedToolPayloadRef = useRef<Map<string, string>>(new Map());
   const [input, setInput] = useState("");
@@ -392,6 +393,7 @@ export function ChatPanel({
   const [mentionIndex, setMentionIndex] = useState(0);
   const [selectedEngine, setSelectedEngine] = useState<GameEngine>(currentEngine);
   const [composerMode, setComposerMode] = useState<ComposerMode>("agent");
+  const [isModeMenuOpen, setIsModeMenuOpen] = useState(false);
   const planningMode = composerMode === "plan";
 
   const mentionSuggestions = useMemo(() => {
@@ -444,6 +446,17 @@ export function ChatPanel({
     if (!activeEl) return;
     activeEl.scrollIntoView({ block: "nearest" });
   }, [mentionIndex, mentionSuggestions]);
+
+  useEffect(() => {
+    if (!isModeMenuOpen) return;
+    const onClick = (e: MouseEvent) => {
+      if (modeMenuRef.current && !modeMenuRef.current.contains(e.target as Node)) {
+        setIsModeMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [isModeMenuOpen]);
 
   const transport = useMemo(
     () => new DefaultChatTransport({ api: "/api/chat" }),
@@ -928,16 +941,36 @@ export function ChatPanel({
       <div className="shrink-0 border-t border-[var(--color-border)] p-2">
         <div className="mb-2 flex items-center gap-2">
           <span className="text-[9px] uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Mode</span>
-          <select
-            value={composerMode}
-            onChange={(e) => setComposerMode(e.target.value as ComposerMode)}
-            className="bg-[var(--color-surface)] border border-[var(--color-border)] text-[10px] uppercase tracking-wider text-[var(--color-text-secondary)] px-2 py-1 outline-none"
-          >
-            <option value="agent">agent</option>
-            <option value="plan">plan</option>
-            <option value="debug">debug</option>
-            <option value="ask">ask</option>
-          </select>
+          <div ref={modeMenuRef} className="relative">
+            <button
+              type="button"
+              onClick={() => setIsModeMenuOpen((prev) => !prev)}
+              className="inline-flex items-center gap-2 bg-[var(--color-surface)] border border-[var(--color-border)] text-[10px] uppercase tracking-wider text-[var(--color-text-secondary)] px-2 py-1"
+            >
+              <span>{composerMode}</span>
+              <span className="text-[9px]">{isModeMenuOpen ? "▴" : "▾"}</span>
+            </button>
+            {isModeMenuOpen && (
+              <div className="absolute top-full left-0 mt-1 min-w-[120px] bg-[var(--color-surface)] border border-[var(--color-border-light)] z-20 shadow-[0_12px_24px_rgba(0,0,0,0.45)]">
+                {(["agent", "plan", "debug", "ask"] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => {
+                      setComposerMode(mode);
+                      setIsModeMenuOpen(false);
+                    }}
+                    className={`w-full text-left px-2 py-1.5 text-[10px] uppercase tracking-wider flex items-center justify-between hover:bg-[var(--color-surface-light)] ${
+                      composerMode === mode ? "text-[var(--color-accent)]" : "text-[var(--color-text-secondary)]"
+                    }`}
+                  >
+                    <span>{mode}</span>
+                    <span className="text-[10px]">{composerMode === mode ? "✓" : ""}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <span className="text-[9px] text-[var(--color-text-muted)]">
             {composerMode === "debug"
               ? "Auto-attaches console logs"
