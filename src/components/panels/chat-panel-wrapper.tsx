@@ -4,7 +4,7 @@ import { useGameForge } from "@/lib/game-forge-context";
 import { ChatPanel } from "@/components/chat-panel";
 
 export function ChatPanelWrapper() {
-  const { currentCode, currentEngine, projectFiles, onCodeUpdate, onProjectFilesUpdate, onEngineUpdate } = useGameForge();
+  const { currentCode, currentEngine, projectFiles, onCodeUpdate, onProjectFilesUpdate, patchProjectFiles, onEngineUpdate } = useGameForge();
   return (
     <ChatPanel
       currentCode={currentCode}
@@ -12,6 +12,7 @@ export function ChatPanelWrapper() {
       projectFiles={projectFiles}
       onCodeUpdate={onCodeUpdate}
       onProjectFilesUpdate={onProjectFilesUpdate}
+      patchProjectFiles={patchProjectFiles}
       onEngineUpdate={onEngineUpdate}
     />
   );

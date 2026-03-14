@@ -32,6 +32,7 @@ interface GameForgeContextValue {
   projectFiles: ProjectFile[];
   onCodeUpdate: (code: string, engine?: GameEngine) => void;
   onProjectFilesUpdate: (files: ProjectFile[], engine?: GameEngine) => void;
+  patchProjectFiles: (files: ProjectFile[], engine?: GameEngine) => void;
   updateProjectFile: (path: string, content: string) => void;
   onEngineUpdate: (engine: GameEngine) => void;
   assets: Asset[];
@@ -61,6 +62,22 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     const normalized = normalizeProjectFiles(files);
     setProjectFiles(normalized);
     setCurrentCode(compileProjectToHtml(normalized));
+    if (engine) setCurrentEngine(engine);
+  }, []);
+
+  const patchProjectFiles = useCallback((files: ProjectFile[], engine?: GameEngine) => {
+    const normalized = normalizeProjectFiles(files);
+    if (normalized.length === 0) return;
+
+    setProjectFiles((prev) => {
+      const byPath = new Map(prev.map((file) => [file.path, file]));
+      for (const file of normalized) {
+        byPath.set(file.path, file);
+      }
+      const next = Array.from(byPath.values());
+      setCurrentCode(compileProjectToHtml(next));
+      return next;
+    });
     if (engine) setCurrentEngine(engine);
   }, []);
 
@@ -99,6 +116,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       projectFiles,
       onCodeUpdate,
       onProjectFilesUpdate,
+      patchProjectFiles,
       updateProjectFile,
       onEngineUpdate,
       assets,
@@ -114,6 +132,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       projectFiles,
       onCodeUpdate,
       onProjectFilesUpdate,
+      patchProjectFiles,
       updateProjectFile,
       onEngineUpdate,
       assets,

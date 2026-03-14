@@ -13,6 +13,7 @@ interface ChatPanelProps {
   projectFiles: ProjectFile[];
   onCodeUpdate: (code: string, engine?: GameEngine) => void;
   onProjectFilesUpdate: (files: ProjectFile[], engine?: GameEngine) => void;
+  patchProjectFiles: (files: ProjectFile[], engine?: GameEngine) => void;
   onEngineUpdate: (engine: GameEngine) => void;
 }
 
@@ -279,6 +280,7 @@ export function ChatPanel({
   projectFiles,
   onCodeUpdate,
   onProjectFilesUpdate,
+  patchProjectFiles,
   onEngineUpdate,
 }: ChatPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -330,13 +332,17 @@ export function ChatPanel({
 
         if (partType === "tool-update_project_files") {
           const toolPart = part as { state: string; input?: { files?: ProjectFile[] } };
-          if (toolPart.state === "output-available" && Array.isArray(toolPart.input?.files) && toolPart.input.files.length > 0) {
-            onProjectFilesUpdate(toolPart.input.files, selectedEngine);
+          if (Array.isArray(toolPart.input?.files) && toolPart.input.files.length > 0) {
+            if (toolPart.state === "output-available") {
+              onProjectFilesUpdate(toolPart.input.files, selectedEngine);
+            } else if (toolPart.state === "input-streaming" || toolPart.state === "input-available") {
+              patchProjectFiles(toolPart.input.files, selectedEngine);
+            }
           }
         }
       }
     }
-  }, [messages, currentCode, onCodeUpdate, onProjectFilesUpdate, selectedEngine]);
+  }, [messages, currentCode, onCodeUpdate, onProjectFilesUpdate, patchProjectFiles, selectedEngine]);
 
   useEffect(() => {
     if (scrollRef.current) {
