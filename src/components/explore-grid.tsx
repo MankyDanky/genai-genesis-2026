@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 
 export interface ExploreGameItem {
   id: string;
@@ -151,6 +152,7 @@ function formatDate(value: string) {
 }
 
 function ExploreCard({ game }: { game: ExploreGameItem }) {
+  const router = useRouter();
   const [code, setCode] = useState<string | null>(null);
   const [isVisible, setIsVisible] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -206,6 +208,10 @@ function ExploreCard({ game }: { game: ExploreGameItem }) {
 
   const joinRoomId = `game-${game.id}`;
   const playHref = game.multiplayer ? `/play/${game.id}?room=${encodeURIComponent(joinRoomId)}` : `/play/${game.id}`;
+  const createRoom = () => {
+    const nextRoom = `${game.id}-${Math.random().toString(36).slice(2, 8)}`;
+    router.push(`/play/${game.id}?room=${encodeURIComponent(nextRoom)}`);
+  };
 
   return (
     <article
@@ -251,8 +257,17 @@ function ExploreCard({ game }: { game: ExploreGameItem }) {
           href={playHref}
           className="gf-btn-chip border border-[var(--color-border-light)] bg-[var(--color-surface-light)] px-2.5 py-1 text-[10px] uppercase tracking-[0.1em] text-[var(--color-accent)]"
         >
-          {game.multiplayer ? "Join" : "Play"}
+          {game.multiplayer ? "Join Public" : "Play"}
         </Link>
+        {game.multiplayer ? (
+          <button
+            type="button"
+            onClick={createRoom}
+            className="gf-btn-chip border border-[var(--color-border-light)] bg-[var(--color-surface)] px-2.5 py-1 text-[10px] uppercase tracking-[0.1em] text-[var(--color-text-secondary)] hover:text-[var(--color-accent)]"
+          >
+            Create Room
+          </button>
+        ) : null}
         <span className="text-[9px] text-[var(--color-text-muted)]">ID: {game.id.slice(0, 8)}…</span>
       </div>
     </article>
