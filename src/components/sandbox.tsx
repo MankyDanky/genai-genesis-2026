@@ -127,20 +127,22 @@ export function Sandbox({ code }: SandboxProps) {
 
   if (!code) {
     return (
-      <div className="relative flex h-full w-full items-center justify-center bg-[var(--color-bg)] overflow-hidden">
-        <div className="relative text-center animate-[fadeIn_0.4s_ease-out] space-y-3">
-          <div className="mx-auto w-10 h-10 border border-[var(--color-border-light)] flex items-center justify-center">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--color-text-muted)" strokeWidth="1.2">
-              <rect x="1" y="1" width="14" height="14" rx="1" />
-              <polygon points="6,4 12,8 6,12" fill="var(--color-text-muted)" opacity="0.5" stroke="none" />
+      <div className="flex h-full flex-col bg-[var(--color-bg)]">
+        <div className="flex-1 flex flex-col items-center justify-center gap-4">
+          <div className="w-12 h-12 border border-dashed border-[var(--color-border-light)] flex items-center justify-center">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="var(--color-text-muted)" strokeWidth="1.2" opacity="0.6">
+              <rect x="2" y="2" width="16" height="16" rx="1" />
+              <polygon points="8,5 15,10 8,15" fill="var(--color-text-muted)" opacity="0.5" stroke="none" />
             </svg>
           </div>
-          <p className="text-[11px] text-[var(--color-text-muted)] uppercase tracking-[0.15em] font-semibold">
-            No Game Loaded
-          </p>
-          <p className="text-[10px] text-[var(--color-text-muted)] opacity-60">
-            Use the Composer to generate a game
-          </p>
+          <div className="text-center space-y-1">
+            <p className="text-[11px] text-[var(--color-text-muted)] uppercase tracking-[0.12em] font-semibold">
+              No Game Loaded
+            </p>
+            <p className="text-[10px] text-[var(--color-text-muted)] opacity-60">
+              Use the Composer to generate a game
+            </p>
+          </div>
         </div>
       </div>
     );

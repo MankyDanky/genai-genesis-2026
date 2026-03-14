@@ -5,9 +5,13 @@ import { DefaultChatTransport } from "ai";
 import { useState, useEffect, useRef, useMemo, useCallback, type FormEvent, type KeyboardEvent } from "react";
 import Markdown from "react-markdown";
 
+import type { GeneratedImage } from "@/lib/game-forge-context";
+
 interface ChatPanelProps {
   currentCode: string | null;
   onCodeUpdate: (code: string) => void;
+  generatedImages: GeneratedImage[];
+  addImage: (image: GeneratedImage) => void;
 }
 
 const EXAMPLE_PROMPTS = [
@@ -175,27 +179,51 @@ function StreamingIndicator({ phase, timer, message }: {
 // ── Tool call card ──
 
 function ToolCallCard({ part }: {
-  part: { type: string; state?: string; input?: { code?: string } };
+  part: {
+    type: string;
+    state?: string;
+    input?: { code?: string; prompt?: string };
+    output?: { success?: boolean; url?: string };
+  };
 }) {
   const toolName = part.type.replace("tool-", "").toUpperCase().replace(/_/g, "_");
   const state = part.state;
-  const codeLength = part.input?.code?.length;
+  const isImageTool = part.type === "tool-generate_image";
 
   let statusText: string;
   let statusColor: string;
 
-  if (state === "input-streaming") {
-    statusText = "Generating game code...";
-    statusColor = "var(--color-accent)";
-  } else if (state === "input-available" || state === "output-available") {
-    statusText = codeLength
-      ? `Code ready (${codeLength.toLocaleString()} chars)`
-      : "Code ready";
-    statusColor = "var(--color-success)";
+  if (isImageTool) {
+    if (state === "input-streaming") {
+      statusText = "Preparing image prompt...";
+      statusColor = "var(--color-accent)";
+    } else if (state === "input-available") {
+      statusText = "Generating image...";
+      statusColor = "var(--color-accent)";
+    } else if (state === "output-available") {
+      statusText = part.output?.success ? "Image generated" : "Image generation failed";
+      statusColor = part.output?.success ? "var(--color-success)" : "var(--color-danger)";
+    } else {
+      statusText = "Preparing...";
+      statusColor = "var(--color-text-muted)";
+    }
   } else {
-    statusText = "Preparing...";
-    statusColor = "var(--color-text-muted)";
+    const codeLength = part.input?.code?.length;
+    if (state === "input-streaming") {
+      statusText = "Generating game code...";
+      statusColor = "var(--color-accent)";
+    } else if (state === "input-available" || state === "output-available") {
+      statusText = codeLength
+        ? `Code ready (${codeLength.toLocaleString()} chars)`
+        : "Code ready";
+      statusColor = "var(--color-success)";
+    } else {
+      statusText = "Preparing...";
+      statusColor = "var(--color-text-muted)";
+    }
   }
+
+  const showSpinner = state === "input-streaming" || (isImageTool && state === "input-available");
 
   return (
     <div
@@ -212,7 +240,7 @@ function ToolCallCard({ part }: {
       </div>
       <div className="px-3 py-2 flex items-center gap-2">
         <span style={{ color: statusColor }}>
-          {state === "input-streaming" ? (
+          {showSpinner ? (
             <svg width="10" height="10" viewBox="0 0 10 10" className="animate-spin">
               <circle cx="5" cy="5" r="4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeDasharray="18" strokeLinecap="round" />
             </svg>
@@ -224,6 +252,15 @@ function ToolCallCard({ part }: {
           {statusText}
         </span>
       </div>
+      {isImageTool && state === "output-available" && part.output?.success && part.output.url && (
+        <div className="px-3 pb-2">
+          <img
+            src={part.output.url}
+            alt={part.input?.prompt ?? "Generated image"}
+            className="w-20 h-20 object-cover border border-[var(--color-border)]"
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -277,7 +314,7 @@ function useAutoResize(textareaRef: React.RefObject<HTMLTextAreaElement | null>,
 
 // ── Main component ──
 
-export function ChatPanel({ currentCode, onCodeUpdate }: ChatPanelProps) {
+export function ChatPanel({ currentCode, onCodeUpdate, generatedImages, addImage }: ChatPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [input, setInput] = useState("");
@@ -301,7 +338,7 @@ export function ChatPanel({ currentCode, onCodeUpdate }: ChatPanelProps) {
     onFinish,
   });
 
-  // Extract code from tool invocations
+  // Extract code and images from tool invocations
   useEffect(() => {
     for (const message of messages) {
       if (message.role !== "assistant") continue;
@@ -319,9 +356,18 @@ export function ChatPanel({ currentCode, onCodeUpdate }: ChatPanelProps) {
             }
           }
         }
+        if (partType === "tool-generate_image") {
+          const toolPart = part as {
+            state: string;
+            output?: { success: boolean; url?: string; prompt?: string };
+          };
+          if (toolPart.state === "output-available" && toolPart.output?.success && toolPart.output.url) {
+            addImage({ url: toolPart.output.url, prompt: toolPart.output.prompt ?? "" });
+          }
+        }
       }
     }
-  }, [messages, currentCode, onCodeUpdate]);
+  }, [messages, currentCode, onCodeUpdate, addImage]);
 
   // Log status changes
   useEffect(() => {
@@ -359,7 +405,7 @@ export function ChatPanel({ currentCode, onCodeUpdate }: ChatPanelProps) {
     if (!text || isLoading) return;
     console.log("[Chat] Submitting:", text);
     setInput("");
-    sendMessage({ text }, { body: { currentCode } })
+    sendMessage({ text }, { body: { currentCode, generatedImages } })
       .then(() => console.log("[Chat] sendMessage resolved"))
       .catch((err) => console.error("[Chat] sendMessage rejected:", err));
   };
@@ -467,7 +513,12 @@ export function ChatPanel({ currentCode, onCodeUpdate }: ChatPanelProps) {
                         {toolParts.map((part, i) => (
                           <ToolCallCard
                             key={i}
-                            part={part as { type: string; state?: string; input?: { code?: string } }}
+                            part={part as {
+                              type: string;
+                              state?: string;
+                              input?: { code?: string; prompt?: string };
+                              output?: { success?: boolean; url?: string };
+                            }}
                           />
                         ))}
                       </div>
