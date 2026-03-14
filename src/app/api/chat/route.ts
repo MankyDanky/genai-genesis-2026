@@ -2,74 +2,50 @@ import { anthropic } from "@ai-sdk/anthropic";
 import { streamText, tool, stepCountIs, convertToModelMessages } from "ai";
 import { z } from "zod";
 import { getSystemPrompt } from "@/lib/system-prompt";
+import { storeImage } from "@/lib/image-store";
 
 export const maxDuration = 120;
 
-const FAL_MODEL = "fal-ai/flux/schnell";
+const GEMINI_MODEL = "gemini-2.5-flash-image";
+const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
-async function generateImageWithFal(prompt: string): Promise<{ url: string }> {
-  const key = process.env.FALAI_API_KEY;
-  if (!key) throw new Error("FALAI_API_KEY is not set");
+async function generateImage(prompt: string, origin: string): Promise<{ url: string }> {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) throw new Error("GEMINI_API_KEY is not set");
 
-  const submitRes = await fetch(`https://queue.fal.run/${FAL_MODEL}`, {
+  console.log("[GEMINI] Generating image with", GEMINI_MODEL);
+
+  const res = await fetch(`${GEMINI_API_URL}?key=${key}`, {
     method: "POST",
-    headers: {
-      Authorization: `Key ${key}`,
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      prompt,
-      image_size: "square",
-      num_inference_steps: 4,
-      enable_safety_checker: true,
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        responseModalities: ["TEXT", "IMAGE"],
+      },
     }),
   });
 
-  if (!submitRes.ok) {
-    const text = await submitRes.text();
-    throw new Error(`fal.ai submit failed (${submitRes.status}): ${text}`);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Gemini API failed (${res.status}): ${text}`);
   }
 
-  const { request_id, status: initialStatus, response_url } = await submitRes.json();
-  console.log("[FAL] Submitted job:", request_id, "status:", initialStatus, "model:", FAL_MODEL);
+  const data = await res.json();
+  const parts = data.candidates?.[0]?.content?.parts;
+  if (!parts) throw new Error("Gemini returned no content parts");
 
-  if (initialStatus === "COMPLETED") {
-    const resultRes = await fetch(response_url, {
-      headers: { Authorization: `Key ${key}` },
-    });
-    const data = await resultRes.json();
-    return { url: data.images[0].url };
-  }
-
-  const statusUrl = `${response_url}/status`;
-  const maxAttempts = 60;
-  for (let i = 0; i < maxAttempts; i++) {
-    await new Promise((r) => setTimeout(r, 1000));
-
-    const pollRes = await fetch(statusUrl, {
-      headers: { Authorization: `Key ${key}` },
-    });
-    if (!pollRes.ok) {
-      console.warn("[FAL] Poll failed:", pollRes.status);
-      continue;
-    }
-    const pollData = await pollRes.json();
-    console.log("[FAL] Poll attempt", i + 1, "status:", pollData.status);
-
-    if (pollData.status === "COMPLETED") {
-      const resultRes = await fetch(response_url, {
-        headers: { Authorization: `Key ${key}` },
-      });
-      const data = await resultRes.json();
-      return { url: data.images[0].url };
-    }
-
-    if (pollData.status === "FAILED") {
-      throw new Error(`fal.ai job failed: ${JSON.stringify(pollData)}`);
+  for (const part of parts) {
+    if (part.inlineData) {
+      const { mimeType, data: b64 } = part.inlineData;
+      const id = storeImage(mimeType, b64);
+      const url = `${origin}/api/images/${id}`;
+      console.log("[GEMINI] Image stored, id:", id, "size:", b64.length, "chars base64");
+      return { url };
     }
   }
 
-  throw new Error("fal.ai image generation timed out after 60s");
+  throw new Error("Gemini response contained no image data");
 }
 
 export async function POST(req: Request) {
@@ -126,7 +102,8 @@ export async function POST(req: Request) {
           execute: async ({ prompt }) => {
             console.log("[API] Tool generate_image called, prompt:", prompt);
             try {
-              const { url } = await generateImageWithFal(prompt);
+              const origin = new URL(req.url).origin;
+              const { url } = await generateImage(prompt, origin);
               console.log("[API] Image generated:", url);
               return { success: true, url, prompt };
             } catch (err) {

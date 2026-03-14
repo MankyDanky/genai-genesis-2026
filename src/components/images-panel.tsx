@@ -1,27 +1,169 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect, type FormEvent, type KeyboardEvent } from "react";
 import type { GeneratedImage } from "@/lib/game-forge-context";
 
 interface ImagesPanelProps {
   images: GeneratedImage[];
+  onAddImage: (image: GeneratedImage) => void;
 }
 
-export function ImagesPanel({ images }: ImagesPanelProps) {
-  const [toast, setToast] = useState<string | null>(null);
+function EditPopup({
+  image,
+  onClose,
+  onAddImage,
+}: {
+  image: GeneratedImage;
+  onClose: () => void;
+  onAddImage: (image: GeneratedImage) => void;
+}) {
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const backdropRef = useRef<HTMLDivElement>(null);
 
-  const showToast = useCallback((msg: string) => {
-    setToast(msg);
-    setTimeout(() => setToast(null), 2000);
+  useEffect(() => {
+    textareaRef.current?.focus();
   }, []);
 
-  const copyUrl = useCallback(
-    (url: string) => {
-      navigator.clipboard.writeText(url);
-      showToast("URL copied");
-    },
-    [showToast]
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 100)}px`;
+  }, [input]);
+
+  useEffect(() => {
+    const handleEsc = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape" && !loading) onClose();
+    };
+    window.addEventListener("keydown", handleEsc);
+    return () => window.removeEventListener("keydown", handleEsc);
+  }, [onClose, loading]);
+
+  const imageId = image.url.split("/api/images/")[1];
+
+  const doSubmit = async () => {
+    const text = input.trim();
+    if (!text || loading || !imageId) return;
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/images/edit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageId, prompt: text }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Edit failed");
+      }
+
+      onAddImage({ url: data.url, prompt: text });
+      setInput("");
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    doSubmit();
+  };
+
+  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      doSubmit();
+    }
+  };
+
+  const handleBackdropClick = (e: React.MouseEvent) => {
+    if (e.target === backdropRef.current && !loading) onClose();
+  };
+
+  return (
+    <div
+      ref={backdropRef}
+      onClick={handleBackdropClick}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
+      style={{ animation: "fadeIn 0.15s ease-out" }}
+    >
+      <div className="flex flex-col items-center gap-4 max-w-[520px] w-full mx-4">
+        <div className="relative border border-[var(--color-border-light)] bg-black">
+          <button
+            onClick={() => !loading && onClose()}
+            className="absolute -top-3 -right-3 w-6 h-6 flex items-center justify-center bg-[var(--color-surface)] border border-[var(--color-border-light)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] text-xs z-10 transition-colors"
+          >
+            &times;
+          </button>
+          <img
+            src={image.url}
+            alt={image.prompt}
+            className="max-h-[50vh] w-auto object-contain"
+          />
+        </div>
+
+        <p className="text-[10px] text-[var(--color-text-muted)] text-center max-w-[400px] leading-relaxed">
+          {image.prompt}
+        </p>
+
+        <form onSubmit={handleSubmit} className="flex gap-2 w-full">
+          <textarea
+            ref={textareaRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Describe how to edit this image..."
+            disabled={loading}
+            rows={1}
+            className="gf-input flex-1 min-w-0 bg-[var(--color-surface)] text-[var(--color-text)] text-[12px] leading-relaxed px-3 py-2 border border-[var(--color-border-light)] outline-none placeholder:text-[var(--color-text-muted)] disabled:opacity-50 resize-none overflow-hidden"
+          />
+          <button
+            type="submit"
+            disabled={!input.trim() || loading}
+            className="gf-btn-chip shrink-0 w-[34px] self-stretch flex items-center justify-center border border-[var(--color-border-light)] bg-[var(--color-surface)] text-[var(--color-text-muted)] disabled:opacity-20 disabled:cursor-default"
+            aria-label="Send"
+          >
+            {loading ? (
+              <svg width="12" height="12" viewBox="0 0 12 12" className="animate-spin">
+                <circle cx="6" cy="6" r="5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeDasharray="20" strokeLinecap="round" />
+              </svg>
+            ) : (
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+                <path d="M1 1l10 5-10 5z" />
+              </svg>
+            )}
+          </button>
+        </form>
+
+        {error && (
+          <p className="text-[10px] text-[var(--color-danger)] uppercase tracking-wider">
+            {error}
+          </p>
+        )}
+
+        {loading && (
+          <p className="text-[10px] text-[var(--color-accent)] uppercase tracking-[0.15em] font-bold">
+            Editing image...
+          </p>
+        )}
+      </div>
+    </div>
   );
+}
+
+export function ImagesPanel({ images, onAddImage }: ImagesPanelProps) {
+  const [selectedImage, setSelectedImage] = useState<GeneratedImage | null>(null);
+
+  const handleClose = useCallback(() => setSelectedImage(null), []);
 
   if (images.length === 0) {
     return (
@@ -49,60 +191,27 @@ export function ImagesPanel({ images }: ImagesPanelProps) {
 
   return (
     <div className="h-full w-full bg-[var(--color-bg)] flex flex-col overflow-hidden">
-      {/* Header */}
-      <div className="shrink-0 px-3 py-2 border-b border-[var(--color-border)] bg-[var(--color-surface)] flex items-center justify-between">
+      <div className="shrink-0 px-3 py-2 border-b border-[var(--color-border)] flex items-center justify-between">
         <span className="text-[10px] text-[var(--color-text-muted)] uppercase tracking-[0.15em] font-bold">
-          Generated Images
-        </span>
-        <span className="text-[10px] text-[var(--color-accent)] font-mono">
-          {images.length}
+          {images.length} {images.length === 1 ? "image" : "images"}
         </span>
       </div>
 
-      {/* Toast */}
-      {toast && (
-        <div className="shrink-0 px-3 py-1">
-          <span
-            className="text-[10px] text-[var(--color-success)] uppercase tracking-wider font-bold"
-            style={{ animation: "messageFade 2s ease forwards" }}
-          >
-            {toast}
-          </span>
-        </div>
-      )}
-
-      {/* Image grid */}
       <div className="flex-1 overflow-y-auto p-2">
         <div className="grid grid-cols-2 gap-2">
           {images.map((image, i) => (
             <div
               key={`${image.url}-${i}`}
-              className="border border-[var(--color-border-light)] bg-[var(--color-surface)] overflow-hidden group"
+              className="border border-[var(--color-border-light)] overflow-hidden cursor-pointer hover:border-[var(--color-accent)] transition-colors"
+              onClick={() => setSelectedImage(image)}
               style={{ animation: "fadeIn 0.2s ease-out" }}
             >
-              <div className="relative aspect-square overflow-hidden bg-black">
+              <div className="aspect-square overflow-hidden bg-black">
                 <img
                   src={image.url}
                   alt={image.prompt}
                   className="w-full h-full object-cover"
                 />
-                <button
-                  onClick={() => copyUrl(image.url)}
-                  title="Copy image URL"
-                  className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity gf-btn-chip p-1 border border-[var(--color-border-light)] bg-[var(--color-surface)] text-[var(--color-text-muted)]"
-                >
-                  <svg
-                    width="10"
-                    height="10"
-                    viewBox="0 0 16 16"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                  >
-                    <rect x="5" y="5" width="9" height="9" rx="1" />
-                    <path d="M11 5V3a1 1 0 0 0-1-1H3a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h2" />
-                  </svg>
-                </button>
               </div>
               <div className="px-2 py-1.5">
                 <p className="text-[9px] text-[var(--color-text-secondary)] leading-tight line-clamp-2">
@@ -113,6 +222,14 @@ export function ImagesPanel({ images }: ImagesPanelProps) {
           ))}
         </div>
       </div>
+
+      {selectedImage && (
+        <EditPopup
+          image={selectedImage}
+          onClose={handleClose}
+          onAddImage={onAddImage}
+        />
+      )}
     </div>
   );
 }

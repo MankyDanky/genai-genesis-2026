@@ -154,7 +154,7 @@ export function Sandbox({ code }: SandboxProps) {
       <iframe
         key={code}
         srcDoc={code}
-        sandbox="allow-scripts"
+        sandbox="allow-scripts allow-same-origin"
         title="Game Preview"
         className="h-full w-full border-none"
       />

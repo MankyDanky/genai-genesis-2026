@@ -4,6 +4,6 @@ import { useGameForge } from "@/lib/game-forge-context";
 import { ImagesPanel } from "@/components/images-panel";
 
 export function ImagesPanelWrapper() {
-  const { generatedImages } = useGameForge();
-  return <ImagesPanel images={generatedImages} />;
+  const { generatedImages, addImage } = useGameForge();
+  return <ImagesPanel images={generatedImages} onAddImage={addImage} />;
 }
