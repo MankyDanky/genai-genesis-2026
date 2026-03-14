@@ -221,6 +221,14 @@ function useRotatingMessage(phase: GenerationPhase, isActive: boolean) {
   return msgs[count % msgs.length];
 }
 
+function estimateTokensFromJson(value: unknown): number {
+  try {
+    return Math.max(0, Math.ceil(JSON.stringify(value).length / 4));
+  } catch {
+    return 0;
+  }
+}
+
 function useComposerAutoHeight(
   inputRef: { current: HTMLTextAreaElement | null },
   value: string
@@ -727,6 +735,35 @@ export function ChatPanel({
     },
     [audioTracks, generatedImages, pendingFileWrites, projectFiles]
   );
+
+  const estimatedTokens = useMemo(() => {
+    const transcriptTokens = estimateTokensFromJson(messages);
+    const contextTokens = estimateTokensFromJson({
+      currentProjectFiles: projectFiles,
+      currentCode,
+      planningTodos,
+      generatedImages,
+      audioTracks: audioTracks.map((track) => ({
+        id: track.id,
+        name: track.name,
+        type: track.type,
+        status: track.status,
+        duration: track.duration,
+      })),
+      runtimeEnv,
+      composerMode,
+    });
+    return transcriptTokens + contextTokens;
+  }, [
+    audioTracks,
+    composerMode,
+    currentCode,
+    generatedImages,
+    messages,
+    planningTodos,
+    projectFiles,
+    runtimeEnv,
+  ]);
 
   const handleMentionChipClick = useCallback(
     (label: string) => {
@@ -1892,6 +1929,9 @@ export function ChatPanel({
                 : composerMode === "ask"
                   ? "Q&A mode"
                   : "Full edit mode"}
+          </span>
+          <span className="ml-auto text-[9px] text-[var(--color-text-muted)]">
+            ~{estimatedTokens.toLocaleString()} tokens
           </span>
         </div>
 
