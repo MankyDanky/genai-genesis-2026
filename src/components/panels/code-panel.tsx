@@ -737,7 +737,22 @@ export function CodePanel() {
         </div>
 
         {tree.length === 0 && !createState ? (
-          <p className="text-[10px] text-[var(--color-text-muted)] p-3 uppercase">No code files</p>
+          <div className="relative flex h-[80%] w-full items-center justify-center overflow-hidden px-3">
+            <div className="relative text-center animate-[fadeIn_0.4s_ease-out] space-y-3">
+              <div className="mx-auto w-10 h-10 border border-[var(--color-border-light)] flex items-center justify-center">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--color-text-muted)" strokeWidth="1.2">
+                  <rect x="2" y="3" width="12" height="10" rx="1" />
+                  <path d="M5 6h6M5 9h6" />
+                </svg>
+              </div>
+              <p className="text-[11px] text-[var(--color-text-muted)] uppercase tracking-[0.15em] font-semibold">
+                No Code Files
+              </p>
+              <p className="text-[10px] text-[var(--color-text-muted)] opacity-60">
+                Generate a game to create files
+              </p>
+            </div>
+          </div>
         ) : (
           <TreeView
             nodes={tree}
@@ -798,8 +813,21 @@ export function CodePanel() {
             </div>
           </>
         ) : (
-          <div className="flex-1 flex items-center justify-center text-[10px] text-[var(--color-text-muted)] uppercase">
-            No code selected
+          <div className="relative flex-1 flex items-center justify-center overflow-hidden">
+            <div className="relative text-center animate-[fadeIn_0.4s_ease-out] space-y-3">
+              <div className="mx-auto w-10 h-10 border border-[var(--color-border-light)] flex items-center justify-center">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--color-text-muted)" strokeWidth="1.2">
+                  <path d="M3 3h10v10H3z" />
+                  <path d="M6 6h4v4H6z" />
+                </svg>
+              </div>
+              <p className="text-[11px] text-[var(--color-text-muted)] uppercase tracking-[0.15em] font-semibold">
+                No Code Selected
+              </p>
+              <p className="text-[10px] text-[var(--color-text-muted)] opacity-60">
+                Pick a file from Explorer
+              </p>
+            </div>
           </div>
         )}
       </div>
