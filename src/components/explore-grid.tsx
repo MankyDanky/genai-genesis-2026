@@ -10,6 +10,134 @@ export interface ExploreGameItem {
   createdAt: string;
 }
 
+const PREVIEW_TIMEOUT_MS = 7_000;
+const PREVIEW_CONCURRENCY = 3;
+
+const previewCodeCache = new Map<string, string | null>();
+const previewInflight = new Map<string, Promise<string | null>>();
+const previewQueue: Array<() => void> = [];
+let activePreviewFetches = 0;
+
+function runNextPreviewTask() {
+  if (activePreviewFetches >= PREVIEW_CONCURRENCY) return;
+  const task = previewQueue.shift();
+  if (!task) return;
+  activePreviewFetches += 1;
+  task();
+}
+
+function queuePreviewTask<T>(task: () => Promise<T>) {
+  return new Promise<T>((resolve, reject) => {
+    previewQueue.push(() => {
+      task()
+        .then(resolve)
+        .catch(reject)
+        .finally(() => {
+          activePreviewFetches = Math.max(0, activePreviewFetches - 1);
+          runNextPreviewTask();
+        });
+    });
+    runNextPreviewTask();
+  });
+}
+
+function fetchPreviewCode(gameId: string): Promise<string | null> {
+  if (previewCodeCache.has(gameId)) {
+    return Promise.resolve(previewCodeCache.get(gameId) ?? null);
+  }
+
+  const existing = previewInflight.get(gameId);
+  if (existing) return existing;
+
+  const request = queuePreviewTask(async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), PREVIEW_TIMEOUT_MS);
+    try {
+      const res = await fetch(`/api/games/${gameId}/preview`, {
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        previewCodeCache.set(gameId, null);
+        return null;
+      }
+      const payload = (await res.json()) as { code?: string };
+      const code = typeof payload.code === "string" && payload.code.length > 0
+        ? payload.code
+        : null;
+      previewCodeCache.set(gameId, code);
+      return code;
+    } catch {
+      previewCodeCache.set(gameId, null);
+      return null;
+    } finally {
+      clearTimeout(timer);
+      previewInflight.delete(gameId);
+    }
+  });
+
+  previewInflight.set(gameId, request);
+  return request;
+}
+
+function buildFittedPreviewSrcDoc(code: string): string {
+  const fitScript = `<script>(function(){
+    function getContentSize() {
+      var de = document.documentElement;
+      var b = document.body;
+      if (!de || !b) return { w: 1, h: 1 };
+      var w = Math.max(
+        de.scrollWidth || 0,
+        de.offsetWidth || 0,
+        b.scrollWidth || 0,
+        b.offsetWidth || 0
+      );
+      var h = Math.max(
+        de.scrollHeight || 0,
+        de.offsetHeight || 0,
+        b.scrollHeight || 0,
+        b.offsetHeight || 0
+      );
+      return { w: Math.max(1, w), h: Math.max(1, h) };
+    }
+
+    function fitPreview() {
+      var de = document.documentElement;
+      var b = document.body;
+      if (!de || !b) return;
+
+      de.style.overflow = "hidden";
+      b.style.margin = "0";
+      b.style.transformOrigin = "top left";
+      b.style.position = "absolute";
+
+      var size = getContentSize();
+      var vw = Math.max(1, window.innerWidth || 1);
+      var vh = Math.max(1, window.innerHeight || 1);
+      var scale = Math.min(vw / size.w, vh / size.h);
+      if (!isFinite(scale) || scale <= 0) scale = 1;
+      var tx = (vw - size.w * scale) / 2;
+      var ty = (vh - size.h * scale) / 2;
+
+      b.style.width = size.w + "px";
+      b.style.height = size.h + "px";
+      b.style.transform = "translate(" + tx + "px," + ty + "px) scale(" + scale + ")";
+    }
+
+    window.addEventListener("load", function(){ setTimeout(fitPreview, 0); });
+    window.addEventListener("resize", fitPreview);
+    setTimeout(fitPreview, 120);
+    setTimeout(fitPreview, 500);
+  })();<\/script>`;
+
+  if (/<head[^>]*>/i.test(code)) {
+    return code.replace(/<head([^>]*)>/i, `<head$1>${fitScript}`);
+  }
+  if (/<body[^>]*>/i.test(code)) {
+    return code.replace(/<body([^>]*)>/i, `<body$1>${fitScript}`);
+  }
+  return `${fitScript}${code}`;
+}
+
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("en-US", {
     year: "numeric",
@@ -45,18 +173,14 @@ function ExploreCard({ game }: { game: ExploreGameItem }) {
     if (!isVisible || code || failed || fetchStartedRef.current) return;
     let cancelled = false;
     fetchStartedRef.current = true;
-    fetch(`/api/games/${game.id}`)
-      .then(async (res) => {
-        if (!res.ok) throw new Error(`Preview failed (${res.status})`);
-        return res.json() as Promise<{ code?: string }>;
-      })
-      .then((payload) => {
+    fetchPreviewCode(game.id)
+      .then((nextCode) => {
         if (cancelled) return;
-        if (typeof payload.code !== "string" || payload.code.length === 0) {
+        if (!nextCode) {
           setFailed(true);
           return;
         }
-        setCode(payload.code);
+        setCode(nextCode);
       })
       .catch(() => {
         if (!cancelled) setFailed(true);
@@ -71,7 +195,7 @@ function ExploreCard({ game }: { game: ExploreGameItem }) {
     return (
       <iframe
         title={`${game.title} preview`}
-        srcDoc={code}
+        srcDoc={buildFittedPreviewSrcDoc(code)}
         sandbox="allow-scripts"
         className="h-full w-full border-none pointer-events-none"
       />
