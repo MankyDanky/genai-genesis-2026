@@ -1241,6 +1241,46 @@ export function ChatPanel({
           updateRuntimeEnv(setVars, unsetVars);
         }
 
+        if (partType === "tool-multiplayer_partykit_scaffold") {
+          const toolPart = part as {
+            state: string;
+            output?: {
+              files?: Array<{ path?: string; kind?: string; content?: string }>;
+            };
+          };
+          if (toolPart.state !== "output-available") continue;
+          const filesRaw = Array.isArray(toolPart.output?.files) ? toolPart.output.files : [];
+          const existingPaths = new Set(projectFiles.map((file) => file.path));
+          const files: ProjectFile[] = filesRaw
+            .filter((file): file is { path: string; kind?: string; content?: string } =>
+              typeof file?.path === "string" && typeof file?.content === "string"
+            )
+            .filter((file) => isStableProjectPath(file.path))
+            .filter((file) => !isReservedSdkPath(file.path))
+            .filter((file) => !(isImmutableProjectPath(file.path) && existingPaths.has(file.path)))
+            .filter((file) => !existingPaths.has(file.path))
+            .map((file) => ({
+              path: file.path,
+              content: file.content,
+              kind:
+                file.kind === "script"
+                  ? "script"
+                  : file.kind === "config"
+                    ? "config"
+                    : file.path.endsWith(".html")
+                      ? "html"
+                      : file.path.endsWith(".css")
+                        ? "style"
+                        : "other",
+            }));
+          if (files.length === 0) continue;
+          const signature = JSON.stringify(files.map((file) => ({ path: file.path, content: file.content })));
+          const key = `${message.id}:${partType}`;
+          if (processedToolPayloadRef.current.get(key) === signature) continue;
+          processedToolPayloadRef.current.set(key, signature);
+          patchProjectFiles(files, selectedEngine);
+        }
+
         if (partType === "tool-todo_write") {
           const toolPart = part as {
             state: string;
