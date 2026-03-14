@@ -396,12 +396,25 @@ export function CodePanel() {
     () => new Map(pendingFileWrites.map((entry) => [entry.path, entry.status])),
     [pendingFileWrites]
   );
-  const pendingPaths = useMemo(
-    () => pendingFileWrites
-      .map((entry) => entry.path)
-      .filter((path) => path && !codeFiles.some((file) => file.path === path)),
-    [codeFiles, pendingFileWrites]
-  );
+  const previewCodeFiles = useMemo(() => {
+    const byPath = new Map(codeFiles.map((file) => [file.path, file]));
+    for (const entry of pendingFileWrites) {
+      if (!entry.path) continue;
+      const existing = byPath.get(entry.path);
+      if (existing) {
+        if (typeof entry.content === "string") {
+          byPath.set(entry.path, { ...existing, content: entry.content });
+        }
+        continue;
+      }
+      byPath.set(entry.path, {
+        path: entry.path,
+        content: typeof entry.content === "string" ? entry.content : "",
+        kind: "other",
+      });
+    }
+    return Array.from(byPath.values());
+  }, [codeFiles, pendingFileWrites]);
 
   const explorerRef = useRef<HTMLDivElement>(null);
   const createInputRef = useRef<HTMLInputElement>(null);
@@ -422,16 +435,16 @@ export function CodePanel() {
   const canPortal = typeof document !== "undefined";
 
   const tree = useMemo(
-    () => buildTree([...codeFiles.map((file) => file.path), ...pendingPaths], virtualFolders),
-    [codeFiles, pendingPaths, virtualFolders]
+    () => buildTree(previewCodeFiles.map((file) => file.path), virtualFolders),
+    [previewCodeFiles, virtualFolders]
   );
 
   const effectiveSelectedFilePath =
-    selectedFilePath && codeFiles.some((file) => file.path === selectedFilePath)
+    selectedFilePath && previewCodeFiles.some((file) => file.path === selectedFilePath)
       ? selectedFilePath
-      : (codeFiles[0]?.path ?? null);
+      : (previewCodeFiles[0]?.path ?? null);
 
-  const selectedFile = codeFiles.find((file) => file.path === effectiveSelectedFilePath) ?? null;
+  const selectedFile = previewCodeFiles.find((file) => file.path === effectiveSelectedFilePath) ?? null;
   const highlightCode = useCallback((code: string) => {
     const language = selectedFile ? getPrismLanguage(selectedFile.path) : "plain";
     const grammar = Prism.languages[language] ?? Prism.languages.plain ?? Prism.languages.plaintext;

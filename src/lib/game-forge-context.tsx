@@ -50,6 +50,7 @@ export interface GeneratedImage {
 export interface PendingFileWrite {
   path: string;
   status: "streaming" | "finalizing";
+  content?: string;
 }
 
 interface GameForgeContextValue {
@@ -91,7 +92,9 @@ interface GameForgeContextValue {
   addAudioTrack: (track: AudioTrack) => void;
   removeAudioTrack: (id: string) => void;
   addImage: (image: GeneratedImage) => void;
-  setPendingFileWrites: (paths: string[], status: "streaming" | "finalizing") => void;
+  setPendingFileWrites: (
+    entries: Array<{ path: string; status: "streaming" | "finalizing"; content?: string }>
+  ) => void;
   clearPendingFileWrites: (paths?: string[]) => void;
 }
 
@@ -393,14 +396,21 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const setPendingFileWrites = useCallback((paths: string[], status: "streaming" | "finalizing") => {
-    if (paths.length === 0) return;
-    const unique = Array.from(new Set(paths.filter(Boolean)));
-    if (unique.length === 0) return;
+  const setPendingFileWrites = useCallback((
+    entries: Array<{ path: string; status: "streaming" | "finalizing"; content?: string }>
+  ) => {
+    const normalized = entries
+      .filter((entry) => entry.path)
+      .map((entry) => ({
+        path: entry.path,
+        status: entry.status,
+        content: typeof entry.content === "string" ? entry.content : undefined,
+      }));
+    if (normalized.length === 0) return;
     setPendingFileWritesState((prev) => {
       const byPath = new Map(prev.map((entry) => [entry.path, entry]));
-      for (const path of unique) {
-        byPath.set(path, { path, status });
+      for (const entry of normalized) {
+        byPath.set(entry.path, entry);
       }
       return Array.from(byPath.values());
     });

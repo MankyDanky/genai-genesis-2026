@@ -35,7 +35,9 @@ interface ChatPanelProps {
   writePlanningTodos: (merge: boolean, todos: PlanningTodo[]) => void;
   onEngineUpdate: (engine: GameEngine) => void;
   addImage: (image: GeneratedImage) => void;
-  setPendingFileWrites: (paths: string[], status: "streaming" | "finalizing") => void;
+  setPendingFileWrites: (
+    entries: Array<{ path: string; status: "streaming" | "finalizing"; content?: string }>
+  ) => void;
   clearPendingFileWrites: (paths?: string[]) => void;
 }
 
@@ -589,11 +591,15 @@ export function ChatPanel({
           const files = rawFiles.filter((file) => isStableProjectPath(file?.path));
           const deletePaths = Array.isArray(toolPart.input?.deletePaths) ? toolPart.input.deletePaths : [];
           const filePaths = files.map((file) => file.path);
+          const pendingEntries = files.map((file) => ({
+            path: file.path,
+            status: toolPart.state === "input-streaming" ? "streaming" as const : "finalizing" as const,
+            content: typeof file.content === "string" ? file.content : undefined,
+          }));
 
           if (filePaths.length > 0) {
-            const pendingState = toolPart.state === "input-streaming" ? "streaming" : "finalizing";
             if (toolPart.state === "input-streaming" || toolPart.state === "input-available") {
-              setPendingFileWrites(filePaths, pendingState);
+              setPendingFileWrites(pendingEntries);
             }
           }
 
@@ -629,7 +635,12 @@ export function ChatPanel({
           if (!toolPart.input?.path || !Array.isArray(toolPart.input.edits) || toolPart.input.edits.length === 0) continue;
           if (toolPart.state === "input-streaming" || toolPart.state === "input-available") {
             if (isStableProjectPath(toolPart.input.path)) {
-              setPendingFileWrites([toolPart.input.path], toolPart.state === "input-streaming" ? "streaming" : "finalizing");
+              setPendingFileWrites([
+                {
+                  path: toolPart.input.path,
+                  status: toolPart.state === "input-streaming" ? "streaming" : "finalizing",
+                },
+              ]);
             }
           }
           if (toolPart.state !== "output-available") continue;
@@ -660,8 +671,10 @@ export function ChatPanel({
           if (toolPart.state === "input-streaming" || toolPart.state === "input-available") {
             if (isStableProjectPath(toolPart.input?.targetFile)) {
               setPendingFileWrites(
-                [toolPart.input.targetFile],
-                toolPart.state === "input-streaming" ? "streaming" : "finalizing"
+                [{
+                  path: toolPart.input.targetFile,
+                  status: toolPart.state === "input-streaming" ? "streaming" : "finalizing",
+                }]
               );
             }
           }
