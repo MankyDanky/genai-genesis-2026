@@ -750,16 +750,32 @@ export function CodePanel() {
           ) : null}
 
           {contextMenu.target.kind === "file" ? (
-            <button
-              type="button"
-              onClick={() => {
-                deleteFile(contextMenu.target.path);
-                closeContextMenu();
-              }}
-              className="w-full text-left px-2 py-1.5 text-[10px] uppercase tracking-wider text-[var(--color-danger)] hover:bg-[var(--color-surface-light)]"
-            >
-              Delete File
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => startCreate("file", dirname(contextMenu.target.path))}
+                className="w-full text-left px-2 py-1.5 text-[10px] uppercase tracking-wider text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-light)]"
+              >
+                Add File
+              </button>
+              <button
+                type="button"
+                onClick={() => startCreate("folder", dirname(contextMenu.target.path))}
+                className="w-full text-left px-2 py-1.5 text-[10px] uppercase tracking-wider text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-light)]"
+              >
+                Add Folder
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  deleteFile(contextMenu.target.path);
+                  closeContextMenu();
+                }}
+                className="w-full text-left px-2 py-1.5 text-[10px] uppercase tracking-wider text-[var(--color-danger)] hover:bg-[var(--color-surface-light)]"
+              >
+                Delete File
+              </button>
+            </>
           ) : null}
 
           {contextMenu.target.kind === "root" ? (
