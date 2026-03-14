@@ -29,7 +29,13 @@ export function ChatPanelWrapper() {
     setControls,
     chatMessages,
     chatSessionId,
+    chatTabs,
+    activeChatTabId,
     setChatMessages,
+    createChatTab,
+    deleteChatTab,
+    switchChatTab,
+    renameChatTab,
     focusCodeFile,
     focusConsolePanel,
     focusImagesPanel,
@@ -64,7 +70,13 @@ export function ChatPanelWrapper() {
       setControls={setControls}
       chatMessages={chatMessages}
       chatSessionId={chatSessionId}
+      chatTabs={chatTabs}
+      activeChatTabId={activeChatTabId}
       setChatMessages={setChatMessages}
+      createChatTab={createChatTab}
+      deleteChatTab={deleteChatTab}
+      switchChatTab={switchChatTab}
+      renameChatTab={renameChatTab}
       focusCodeFile={focusCodeFile}
       focusConsolePanel={focusConsolePanel}
       focusImagesPanel={focusImagesPanel}

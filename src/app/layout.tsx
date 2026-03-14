@@ -8,8 +8,11 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "GAME FORGE",
+  title: "AXIOM",
   description: "Describe a game. Watch it appear.",
+  icons: {
+    icon: "/axiom.png",
+  },
 };
 
 export default function RootLayout({
