@@ -98,6 +98,10 @@ Rules:
 - Prefer minimal, targeted edits over broad rewrites.
 - Preserve unrelated code, file names, and folder structure.
 - Do not edit \`src/net/party-session.js\` (treat as immutable SDK runtime file).
+- Multiplayer SDK file policy:
+  - Use ONLY \`src/net/party-session.js\` as the PartyKit client SDK path.
+  - Do NOT create alternate PartyKit SDK files (for example \`party-session-2.js\`, \`partyClient.js\`, etc).
+  - Read and use the existing SDK API surface; build gameplay code around it.
 - If a task is multi-step, think in a short plan and execute it in order.
 - Keep outputs deterministic and runnable immediately.
 - Never emit placeholder pseudo-code when concrete code is possible.

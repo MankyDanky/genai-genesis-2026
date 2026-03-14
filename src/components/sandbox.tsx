@@ -208,6 +208,48 @@ window.__GAMEFORGE_MUSIC__ = ${JSON.stringify(musicMap)};
   return `${combined}${html}`;
 }
 
+function injectMultiplayerRuntime(html: string): string {
+  const script = `<script>
+window.__PARTYKIT_HOST__ = window.__PARTYKIT_HOST__ || ${JSON.stringify(process.env.NEXT_PUBLIC_PARTYKIT_HOST || "localhost:1999")};
+window.__PARTYKIT_PROTOCOL__ = window.__PARTYKIT_PROTOCOL__ || ${JSON.stringify(process.env.NEXT_PUBLIC_PARTYKIT_PROTOCOL || "")};
+(function () {
+  if (!window.WebSocket || window.__GAMEFORGE_WS_PATCHED__) return;
+  window.__GAMEFORGE_WS_PATCHED__ = true;
+  const NativeWebSocket = window.WebSocket;
+  const host = window.__PARTYKIT_HOST__;
+  const defaultRoomType = "game";
+  function rewriteUrl(url) {
+    try {
+      const u = new URL(url);
+      if (!host || u.host !== host) return url;
+      const parts = u.pathname.split("/").filter(Boolean);
+      if (parts.length >= 3 && parts[0] === "parties" && parts[1] !== defaultRoomType) {
+        parts[1] = defaultRoomType;
+        u.pathname = "/" + parts.join("/");
+        return u.toString();
+      }
+      return url;
+    } catch {
+      return url;
+    }
+  }
+  function PatchedWebSocket(url, protocols) {
+    const rewritten = typeof url === "string" ? rewriteUrl(url) : url;
+    return protocols === undefined
+      ? new NativeWebSocket(rewritten)
+      : new NativeWebSocket(rewritten, protocols);
+  }
+  PatchedWebSocket.prototype = NativeWebSocket.prototype;
+  Object.setPrototypeOf(PatchedWebSocket, NativeWebSocket);
+  window.WebSocket = PatchedWebSocket;
+})();
+</script>`;
+  if (/<head[^>]*>/i.test(html)) {
+    return html.replace(/<head([^>]*)>/i, `<head$1>${script}`);
+  }
+  return `${script}${html}`;
+}
+
 export function Sandbox({ code, audioTracks = [], onConsoleMessage, onReload }: SandboxProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -215,7 +257,8 @@ export function Sandbox({ code, audioTracks = [], onConsoleMessage, onReload }: 
   const srcDoc = useMemo(() => {
     if (!code) return null;
     const withConsole = buildInstrumentedSrcDoc(code);
-    return injectSoundBridge(withConsole, audioTracks);
+    const withAudio = injectSoundBridge(withConsole, audioTracks);
+    return injectMultiplayerRuntime(withAudio);
   }, [audioTracks, code]);
 
   const handleReload = useCallback(() => {
