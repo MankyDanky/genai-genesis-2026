@@ -21,6 +21,12 @@ interface GeneratedImagePayload {
   prompt: string;
 }
 
+type ComposerMode = "agent" | "plan" | "debug" | "ask";
+
+function isComposerMode(value: unknown): value is ComposerMode {
+  return value === "agent" || value === "plan" || value === "debug" || value === "ask";
+}
+
 function safeJsonPreview(value: unknown, max = 300): string {
   try {
     const raw = JSON.stringify(value);
@@ -397,6 +403,7 @@ export async function POST(req: Request) {
       mentionedFiles?: unknown;
       consoleLogs?: unknown;
       generatedImages?: unknown;
+      composerMode?: unknown;
       planningMode?: unknown;
       gameEngine?: unknown;
     };
@@ -433,7 +440,12 @@ export async function POST(req: Request) {
           })
           .slice(-120)
       : [];
-    const planningMode = parsed.planningMode === true;
+    const composerMode: ComposerMode = isComposerMode(parsed.composerMode)
+      ? parsed.composerMode
+      : parsed.planningMode === true
+        ? "plan"
+        : "agent";
+    const planningMode = composerMode === "plan";
     const gameEngine: GameEngine = isGameEngine(parsed.gameEngine) ? parsed.gameEngine : "canvas2d";
 
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
@@ -446,7 +458,7 @@ export async function POST(req: Request) {
     console.log("[API] /api/chat request", {
       requestId,
       messageCount: messages.length,
-      planningMode,
+      composerMode,
       gameEngine,
       projectFileCount: currentProjectFiles.length,
       generatedImageCount: generatedImages.length,
@@ -472,10 +484,47 @@ export async function POST(req: Request) {
         mentionedFiles,
         consoleLogs,
         generatedImages,
+        composerMode,
         gameEngine,
         planningMode,
       }),
       messages: modelMessages,
+      activeTools: (
+        (() => {
+          const allTools = [
+            "update_project_files",
+            "patch_project_file",
+            "update_sandbox",
+            "generate_image",
+            "read_file",
+            "list_dir",
+            "glob_file_search",
+            "grep",
+            "delete_file",
+            "read_lints",
+            "edit_file",
+            "todo_write",
+          ] as const;
+
+          const mutatingTools = new Set<string>([
+            "update_project_files",
+            "patch_project_file",
+            "update_sandbox",
+            "delete_file",
+            "edit_file",
+          ]);
+
+          if (composerMode === "agent" || composerMode === "debug") {
+            return [...allTools];
+          }
+
+          if (composerMode === "plan") {
+            return allTools.filter((name) => !mutatingTools.has(name));
+          }
+
+          return allTools.filter((name) => !mutatingTools.has(name) && name !== "todo_write");
+        })()
+      ),
       tools: {
         update_project_files: tool({
           description:
@@ -644,7 +693,7 @@ export async function POST(req: Request) {
           thinking: { type: "enabled", budgetTokens: 10000 },
         },
       },
-      stopWhen: stepCountIs(planningMode ? 1 : 5),
+      stopWhen: stepCountIs(composerMode === "plan" ? 1 : 5),
       onStepFinish: (step) => {
         const toolCalls = (step.toolCalls ?? []).map((call) => ({
           toolName: call.toolName,

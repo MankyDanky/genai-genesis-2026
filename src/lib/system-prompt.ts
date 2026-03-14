@@ -20,6 +20,7 @@ interface PromptOptions {
     mentionedFiles?: string[];
     consoleLogs?: ConsoleLogPayload[];
     generatedImages?: GeneratedImagePayload[];
+    composerMode?: "agent" | "plan" | "debug" | "ask";
     planningMode?: boolean;
     gameEngine?: GameEngine;
 }
@@ -30,6 +31,7 @@ export function getSystemPrompt({
     mentionedFiles = [],
     consoleLogs = [],
     generatedImages = [],
+    composerMode = "agent",
     planningMode = false,
     gameEngine = "canvas2d",
 }: PromptOptions = {}): string {
@@ -121,10 +123,14 @@ When you create or update a game:
 7. Keep your text response BRIEF — the game speaks for itself.
 8. NEVER use emojis in your text responses — plain text only.`;
 
-    const planningSection = planningMode
+    const modeSection = `\n\n## Composer Mode\n\nCurrent mode: ${composerMode.toUpperCase()}\n\nMode behavior:\n- agent: full implementation mode, including mutating tools.\n- debug: full implementation mode with runtime-console-first debugging.\n- plan: read-only/planning mode; no code-mutating tools are available.\n- ask: Q&A mode; no code-mutating tools are available.`;
+    const planningSection = planningMode || composerMode === "plan"
       ? `\n\n## Planning Mode\n\nPlanning mode is ON. Before major edits, write/update concise todos with \`todo_write\` and keep statuses accurate.\n\nWhen calling \`todo_write\`, the input MUST be a JSON object (dictionary), never an array/string/number. Use this exact shape:\n{\n  "merge": true,\n  "todos": [\n    { "id": "task-1", "content": "Describe task", "status": "in_progress" }\n  ]\n}\n\nIn planning mode, call \`todo_write\` first and avoid unnecessary additional tool calls.`
       : "";
-    const baseWithPlanning = `${base}${planningSection}`;
+    const debugSection = composerMode === "debug"
+      ? `\n\n## Debug Priority\n\nDebug mode is ON. Treat runtime console logs as first-class evidence. Diagnose from logs first, then propose/apply minimal fixes.`
+      : "";
+    const baseWithPlanning = `${base}${modeSection}${planningSection}${debugSection}`;
 
     const includeConsole = consoleLogs.length > 0 || mentionedFiles.some((value) => value === "console");
     const imagesSection = generatedImages.length > 0

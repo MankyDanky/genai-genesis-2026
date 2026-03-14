@@ -35,6 +35,8 @@ interface ChatPanelProps {
   addImage: (image: GeneratedImage) => void;
 }
 
+type ComposerMode = "agent" | "plan" | "debug" | "ask";
+
 const EXAMPLE_PROMPTS = [
   "Space Invaders",
   "Asteroids",
@@ -382,7 +384,8 @@ export function ChatPanel({
   const [mentionStart, setMentionStart] = useState<number | null>(null);
   const [mentionIndex, setMentionIndex] = useState(0);
   const [selectedEngine, setSelectedEngine] = useState<GameEngine>(currentEngine);
-  const [planningMode, setPlanningMode] = useState(false);
+  const [composerMode, setComposerMode] = useState<ComposerMode>("agent");
+  const planningMode = composerMode === "plan";
 
   const mentionSuggestions = useMemo(() => {
     if (mentionStart === null) return [];
@@ -614,14 +617,18 @@ export function ChatPanel({
     const mentions = [...text.matchAll(/@([^\s]+)/g)]
       .map((match) => (match[1] ?? "").trim())
       .filter((token) => token.length > 0);
+    const autoDebugConsole = composerMode === "debug";
     const mentionedFiles = Array.from(
       new Set(
-        mentions.filter(
-          (token) => token.toLowerCase() === "console" || projectFiles.some((file) => file.path === token)
-        )
+        [
+          ...(autoDebugConsole ? ["console"] : []),
+          ...mentions.filter(
+            (token) => token.toLowerCase() === "console" || projectFiles.some((file) => file.path === token)
+          ),
+        ]
       )
     );
-    const mentionedConsole = mentions.some((token) => token.toLowerCase() === "console");
+    const mentionedConsole = autoDebugConsole || mentions.some((token) => token.toLowerCase() === "console");
     const consoleContext = mentionedConsole
       ? consoleLogs.slice(-120).map((entry) => ({
           level: entry.level,
@@ -643,6 +650,7 @@ export function ChatPanel({
         mentionedFiles,
         consoleLogs: consoleContext,
         generatedImages,
+        composerMode,
         planningMode,
         gameEngine: effectiveEngine,
       },
@@ -879,17 +887,20 @@ export function ChatPanel({
 
       <div className="shrink-0 border-t border-[var(--color-border)] p-2">
         <div className="mb-2 flex flex-wrap gap-1.5 items-center">
-          <button
-            type="button"
-            onClick={() => setPlanningMode((prev) => !prev)}
-            className={`gf-btn-chip text-[10px] px-2.5 py-1 uppercase tracking-wider font-semibold border ${
-              planningMode
-                ? "border-[var(--color-success)] text-[var(--color-success)] bg-[var(--color-success)]/10"
-                : "border-[var(--color-border)] text-[var(--color-text-muted)]"
-            }`}
-          >
-            Planning {planningMode ? "On" : "Off"}
-          </button>
+          {(["agent", "plan", "debug", "ask"] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => setComposerMode(mode)}
+              className={`gf-btn-chip text-[10px] px-2.5 py-1 uppercase tracking-wider font-semibold border ${
+                composerMode === mode
+                  ? "border-[var(--color-accent)] text-[var(--color-accent)] bg-[var(--color-accent-glow)]"
+                  : "border-[var(--color-border)] text-[var(--color-text-muted)]"
+              }`}
+            >
+              {mode}
+            </button>
+          ))}
         </div>
 
         <form onSubmit={handleSubmit} className="flex gap-2">
@@ -898,7 +909,13 @@ export function ChatPanel({
             value={input}
             onChange={(e) => handleInputChange(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={isEmpty ? "Describe your game..." : "Ask for changes..."}
+            placeholder={
+              composerMode === "ask"
+                ? "Ask about the project..."
+                : isEmpty
+                  ? "Describe your game..."
+                  : "Ask for changes..."
+            }
             rows={1}
             className="gf-input flex-1 min-w-0 bg-[var(--color-surface)] text-[var(--color-text)] text-[12px] leading-relaxed px-3 py-2 border border-[var(--color-border-light)] outline-none placeholder:text-[var(--color-text-muted)] resize-none overflow-hidden"
           />
