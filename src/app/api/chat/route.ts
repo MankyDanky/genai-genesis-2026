@@ -9,6 +9,7 @@ import { getGeneratedAudioId, type GeneratedAudioKind } from "@/lib/generated-au
 import { storeImage } from "@/lib/image-store";
 import { putSound } from "@/lib/sound-store";
 import { buildPartyKitScaffold } from "@/lib/multiplayer/partykit-scaffold";
+import { normalizeRuntimeEnv } from "@/lib/runtime-env";
 
 export const maxDuration = 60;
 
@@ -535,6 +536,7 @@ export async function POST(req: Request) {
       consoleLogs?: unknown;
       generatedImages?: unknown;
       audioTracks?: unknown;
+      runtimeEnv?: unknown;
       composerMode?: unknown;
       planningMode?: unknown;
       gameEngine?: unknown;
@@ -604,6 +606,7 @@ export async function POST(req: Request) {
           })
           .slice(-240)
       : [];
+    const runtimeEnv = normalizeRuntimeEnv(parsed.runtimeEnv);
     const composerMode: ComposerMode = isComposerMode(parsed.composerMode)
       ? parsed.composerMode
       : parsed.planningMode === true
@@ -649,6 +652,7 @@ export async function POST(req: Request) {
         consoleLogs,
         generatedImages,
         currentAudioTracks: audioTracks,
+        runtimeEnv,
         composerMode,
         gameEngine,
         planningMode,
@@ -665,6 +669,7 @@ export async function POST(req: Request) {
             "generate_image",
             "generate_sound_effect",
             "generate_music",
+            "update_runtime_env",
             "todo_read",
             "list_audio_assets",
             "list_image_assets",
@@ -685,6 +690,7 @@ export async function POST(req: Request) {
             "update_sandbox",
             "delete_file",
             "edit_file",
+            "update_runtime_env",
           ]);
 
           if (composerMode === "agent" || composerMode === "debug") {
@@ -838,6 +844,19 @@ export async function POST(req: Request) {
               return { musicId: name, name, duration, status: "error" };
             }
           },
+        }),
+        update_runtime_env: tool({
+          description:
+            "Update runtime environment variables available to the game iframe. Use set for upserts and unset for deletions.",
+          inputSchema: z.object({
+            set: z.record(z.string(), z.string()).default({}),
+            unset: z.array(z.string().min(1)).optional(),
+          }),
+          execute: async ({ set, unset }) => ({
+            success: true,
+            setCount: Object.keys(set).length,
+            unsetCount: unset?.length ?? 0,
+          }),
         }),
         todo_read: tool({
           description: "Read the current planning todo list. Use this before writing todos when unsure.",

@@ -223,6 +223,7 @@ async function hydrateRevision(revision: ProjectRevisionDocument) {
     planningTodos: revision.planningTodos,
     generatedImages: revision.generatedImages,
     audioTracks: revision.audioTracks,
+    runtimeEnv: revision.runtimeEnv ?? {},
     currentCode: compiledHtml,
     chatMessages: (JSON.parse(rawChatMessages || "[]") as PersistedChatMessage[]),
     createdAt: revision.createdAt,
@@ -297,6 +298,7 @@ export async function createRevisionFromSnapshot(
     planningTodos: snapshot.planningTodos,
     generatedImages: snapshot.generatedImages,
     audioTracks: snapshot.audioTracks,
+    runtimeEnv: snapshot.runtimeEnv,
     compiledHtml,
     chatTranscript: chatMessages,
     createdAt: now,
@@ -516,6 +518,7 @@ export async function forkPublishedGame(gameId: string | ObjectId) {
         planningTodos: [],
         generatedImages: revision.generatedImages,
         audioTracks: revision.audioTracks,
+        runtimeEnv: revision.runtimeEnv ?? {},
         chatMessages: [],
       };
 
@@ -535,6 +538,7 @@ export async function forkPublishedGame(gameId: string | ObjectId) {
     planningTodos: [],
     generatedImages: [],
     audioTracks: [],
+    runtimeEnv: {},
     chatMessages: [],
   };
 

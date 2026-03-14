@@ -12,6 +12,7 @@ import type { ProjectFile } from "@/lib/project-files";
 import type { PlanningTodo, ConsoleLogEntry, GeneratedImage, PendingFileWrite, GameControl, AudioTrack } from "@/lib/game-forge-context";
 import { getGeneratedAudioId } from "@/lib/generated-audio";
 import type { PersistedChatMessage } from "@/lib/db/schema";
+import type { RuntimeEnvMap } from "@/lib/runtime-env";
 
 interface ChatPanelProps {
   currentCode: string | null;
@@ -22,6 +23,7 @@ interface ChatPanelProps {
   consoleLogs: ConsoleLogEntry[];
   generatedImages: GeneratedImage[];
   audioTracks: AudioTrack[];
+  runtimeEnv: RuntimeEnvMap;
   onCodeUpdate: (code: string, engine?: GameEngine) => void;
   onProjectFilesUpdate: (files: ProjectFile[], engine?: GameEngine, deletePaths?: string[]) => void;
   patchProjectFiles: (files: ProjectFile[], engine?: GameEngine) => void;
@@ -53,6 +55,7 @@ interface ChatPanelProps {
     entries: Array<{ path: string; status: "streaming" | "finalizing"; content?: string }>
   ) => void;
   clearPendingFileWrites: (paths?: string[]) => void;
+  updateRuntimeEnv: (set: RuntimeEnvMap, unset?: string[]) => void;
 }
 
 type ComposerMode = "agent" | "plan" | "debug" | "ask";
@@ -492,6 +495,15 @@ function ToolCallCard({ part, audioTrack }: {
       return `${controls} control${controls === 1 ? "" : "s"} updated`;
     }
 
+    if (rawToolName === "update_runtime_env") {
+      const setCount =
+        input.set && typeof input.set === "object"
+          ? Object.keys(input.set as Record<string, unknown>).length
+          : 0;
+      const unsetCount = Array.isArray(input.unset) ? input.unset.length : 0;
+      return `Env updated (+${setCount} / -${unsetCount})`;
+    }
+
     return null;
   };
 
@@ -633,6 +645,7 @@ export function ChatPanel({
   consoleLogs,
   generatedImages,
   audioTracks,
+  runtimeEnv,
   onCodeUpdate,
   onProjectFilesUpdate,
   patchProjectFiles,
@@ -653,6 +666,7 @@ export function ChatPanel({
   focusAudioPanel,
   setPendingFileWrites,
   clearPendingFileWrites,
+  updateRuntimeEnv,
 }: ChatPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef(true);
@@ -1174,6 +1188,22 @@ export function ChatPanel({
           deleteProjectFile(toolPart.input.targetFile);
         }
 
+        if (partType === "tool-update_runtime_env") {
+          const toolPart = part as {
+            state: string;
+            input?: { set?: Record<string, string>; unset?: string[] };
+          };
+          if (toolPart.state !== "output-available") continue;
+          const setVars =
+            toolPart.input?.set && typeof toolPart.input.set === "object" ? toolPart.input.set : {};
+          const unsetVars = Array.isArray(toolPart.input?.unset) ? toolPart.input.unset : [];
+          const signature = JSON.stringify({ set: setVars, unset: unsetVars });
+          const key = `${message.id}:${partType}`;
+          if (processedToolPayloadRef.current.get(key) === signature) continue;
+          processedToolPayloadRef.current.set(key, signature);
+          updateRuntimeEnv(setVars, unsetVars);
+        }
+
         if (partType === "tool-todo_write") {
           const toolPart = part as {
             state: string;
@@ -1288,6 +1318,7 @@ export function ChatPanel({
     setControls,
     setPendingFileWrites,
     clearPendingFileWrites,
+    updateRuntimeEnv,
     selectedEngine,
     projectFiles,
   ]);
@@ -1390,6 +1421,7 @@ export function ChatPanel({
         })),
         consoleLogs: consoleContext,
         generatedImages,
+        runtimeEnv,
         composerMode,
         planningMode,
         gameEngine: effectiveEngine,
