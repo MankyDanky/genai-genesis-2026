@@ -432,6 +432,7 @@ export function ChatPanel({
   const modeMenuPopupRef = useRef<HTMLDivElement>(null);
   const modeMenuButtonRef = useRef<HTMLButtonElement>(null);
   const planListRef = useRef<HTMLDivElement>(null);
+  const inputOverlayRef = useRef<HTMLDivElement>(null);
   const lastPlanAutoScrollRef = useRef(0);
   const mentionItemRefs = useRef<Map<string, HTMLButtonElement | null>>(new Map());
   const processedToolPayloadRef = useRef<Map<string, string>>(new Map());
@@ -489,48 +490,24 @@ export function ChatPanel({
     return [...consoleSuggestion, ...fileSuggestions].slice(0, 8);
   }, [mentionQuery, mentionStart, pendingFileWrites, projectFiles]);
 
-  const inputMentionChips = useMemo(() => {
-    const seen = new Set<string>();
-    const chips: InputMentionChip[] = [];
-    const matches = input.matchAll(/(?:^|\s)@([^\s]+)/g);
-    for (const match of matches) {
-      const raw = (match[1] ?? "").trim();
-      if (!raw) continue;
+  const inlineInputSegments = useMemo(() => {
+    const parts = input.split(/(@[^\s]+)/g);
+    return parts.map((part, idx) => {
+      if (!part.startsWith("@")) {
+        return { key: `text-${idx}`, type: "text" as const, text: part };
+      }
+      const raw = part.slice(1);
       const lower = raw.toLowerCase();
       if (lower === "console") {
-        if (!seen.has("console")) {
-          chips.push({ kind: "console", value: "console" });
-          seen.add("console");
-        }
-        continue;
+        return { key: `chip-${idx}`, type: "chip" as const, chip: { kind: "console" as const, value: "console" } };
       }
       const normalized = lower.startsWith("file:") ? raw.slice(5) : raw;
-      if (!normalized) continue;
-      if (!projectFiles.some((file) => file.path === normalized)) continue;
-      const key = `file:${normalized}`;
-      if (seen.has(key)) continue;
-      chips.push({ kind: "file", value: normalized });
-      seen.add(key);
-    }
-    return chips;
-  }, [input, projectFiles]);
-
-  const removeMentionChip = useCallback((chip: InputMentionChip) => {
-    const token = chip.kind === "console" ? "@console" : `@${chip.value}`;
-    const fileToken = chip.kind === "file" ? `@file:${chip.value}` : "";
-    setInput((prev) => {
-      const patterns = [token, fileToken].filter(Boolean);
-      let next = prev;
-      for (const pattern of patterns) {
-        const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        next = next.replace(new RegExp(`(?:^|\\s)${escaped}(?=\\s|$)`), "");
+      if (projectFiles.some((file) => file.path === normalized)) {
+        return { key: `chip-${idx}`, type: "chip" as const, chip: { kind: "file" as const, value: normalized } };
       }
-      return next.replace(/\s{2,}/g, " ").trimStart();
+      return { key: `text-${idx}`, type: "text" as const, text: part };
     });
-    setMentionQuery("");
-    setMentionStart(null);
-    setMentionIndex(0);
-  }, []);
+  }, [input, projectFiles]);
 
   const handleChipClick = useCallback((chip: InputMentionChip) => {
     if (chip.kind === "console") {
@@ -539,6 +516,12 @@ export function ChatPanel({
     }
     focusCodeFile(chip.value);
   }, [focusCodeFile, focusConsolePanel]);
+
+  const syncInputOverlayScroll = useCallback(() => {
+    if (!textareaRef.current || !inputOverlayRef.current) return;
+    inputOverlayRef.current.scrollTop = textareaRef.current.scrollTop;
+    inputOverlayRef.current.scrollLeft = textareaRef.current.scrollLeft;
+  }, []);
 
   useEffect(() => {
     setSelectedEngine(currentEngine);
@@ -1417,40 +1400,35 @@ export function ChatPanel({
         </div>
 
         <form onSubmit={handleSubmit} className="flex gap-2">
-          <div className="gf-input flex-1 min-w-0 border border-[var(--color-border-light)] bg-[var(--color-surface)]">
-            {inputMentionChips.length > 0 && (
-              <div className="px-2 pt-2 pb-1 flex flex-wrap gap-1.5 border-b border-[var(--color-border)]">
-                {inputMentionChips.map((chip) => (
-                  <span
-                    key={`${chip.kind}:${chip.value}`}
-                    className="inline-flex items-center gap-1.5 rounded-sm border border-[var(--color-border-light)] bg-[var(--color-surface-light)] px-1.5 py-1 text-[9px] text-[var(--color-text-secondary)]"
+          <div className="gf-input relative flex-1 min-w-0 border border-[var(--color-border-light)] bg-[var(--color-surface)]">
+            <div
+              ref={inputOverlayRef}
+              aria-hidden
+              className="absolute inset-0 px-3 py-2 text-[12px] leading-relaxed whitespace-pre-wrap break-words overflow-y-auto pointer-events-none"
+            >
+              {inlineInputSegments.map((segment) => (
+                segment.type === "text" ? (
+                  <span key={segment.key} className="text-[var(--color-text)]">{segment.text}</span>
+                ) : (
+                  <button
+                    key={segment.key}
+                    type="button"
+                    tabIndex={-1}
+                    onClick={() => handleChipClick(segment.chip)}
+                    className="pointer-events-auto inline-flex align-baseline items-center rounded-md border border-[var(--color-accent)]/35 bg-[var(--color-accent-glow)] px-1.5 py-[1px] text-[10px] leading-4 text-[var(--color-accent)] shadow-[inset_0_0_0_1px_rgba(88,166,255,0.2)]"
+                    title={segment.chip.kind === "console" ? "Open Console panel" : `Open ${segment.chip.value} in Code panel`}
                   >
-                    <button
-                      type="button"
-                      onClick={() => handleChipClick(chip)}
-                      className="hover:text-[var(--color-accent)]"
-                      title={chip.kind === "console" ? "Open Console panel" : `Open ${chip.value} in Code panel`}
-                    >
-                      @{chip.kind === "console" ? "console" : chip.value}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => removeMentionChip(chip)}
-                      className="text-[var(--color-text-muted)] hover:text-[var(--color-danger)]"
-                      title="Remove mention"
-                      aria-label="Remove mention"
-                    >
-                      ×
-                    </button>
-                  </span>
-                ))}
-              </div>
-            )}
+                    @{segment.chip.kind === "console" ? "console" : segment.chip.value}
+                  </button>
+                )
+              ))}
+            </div>
             <textarea
               ref={textareaRef}
               value={input}
               onChange={(e) => handleInputChange(e.target.value)}
               onKeyDown={handleKeyDown}
+              onScroll={syncInputOverlayScroll}
               placeholder={
                 composerMode === "ask"
                   ? "Ask about the project..."
@@ -1459,7 +1437,12 @@ export function ChatPanel({
                     : "Ask for changes..."
               }
               rows={1}
-              className="w-full bg-transparent text-[var(--color-text)] text-[12px] leading-relaxed px-3 py-2 outline-none placeholder:text-[var(--color-text-muted)] resize-none overflow-y-auto max-h-[150px]"
+              className="relative z-10 w-full bg-transparent text-[12px] leading-relaxed px-3 py-2 outline-none placeholder:text-[var(--color-text-muted)] resize-none overflow-y-auto max-h-[150px]"
+              style={{
+                color: input.length === 0 ? "var(--color-text)" : "transparent",
+                WebkitTextFillColor: input.length === 0 ? "var(--color-text)" : "transparent",
+                caretColor: "var(--color-text)",
+              }}
             />
           </div>
           <button
