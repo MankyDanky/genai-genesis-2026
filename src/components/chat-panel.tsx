@@ -294,6 +294,7 @@ export function ChatPanel({
   const [input, setInput] = useState("");
   const [mentionQuery, setMentionQuery] = useState("");
   const [mentionStart, setMentionStart] = useState<number | null>(null);
+  const [mentionIndex, setMentionIndex] = useState(0);
   const [selectedEngine, setSelectedEngine] = useState<GameEngine>(currentEngine);
 
   const mentionSuggestions = useMemo(() => {
@@ -436,6 +437,7 @@ export function ChatPanel({
     setInput("");
     setMentionQuery("");
     setMentionStart(null);
+    setMentionIndex(0);
     sendMessage({
       text,
     }, {
@@ -456,19 +458,32 @@ export function ChatPanel({
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (mentionSuggestions.length > 0 && e.key === "Tab") {
+    if (mentionSuggestions.length > 0 && e.key === "ArrowDown") {
       e.preventDefault();
-      const first = mentionSuggestions[0];
-      if (!first) return;
+      setMentionIndex((prev) => (prev + 1) % mentionSuggestions.length);
+      return;
+    }
+
+    if (mentionSuggestions.length > 0 && e.key === "ArrowUp") {
+      e.preventDefault();
+      setMentionIndex((prev) => (prev - 1 + mentionSuggestions.length) % mentionSuggestions.length);
+      return;
+    }
+
+    if (mentionSuggestions.length > 0 && (e.key === "Tab" || e.key === "Enter")) {
+      e.preventDefault();
+      const selected = mentionSuggestions[mentionIndex] ?? mentionSuggestions[0];
+      if (!selected) return;
 
       const cursor = textareaRef.current?.selectionStart ?? input.length;
       const start = mentionStart ?? cursor;
-      const next = `${input.slice(0, start)}@${first} ${input.slice(cursor)}`;
+      const next = `${input.slice(0, start)}@${selected} ${input.slice(cursor)}`;
       setInput(next);
       setMentionQuery("");
       setMentionStart(null);
+      setMentionIndex(0);
       requestAnimationFrame(() => {
-        const pos = start + first.length + 2;
+        const pos = start + selected.length + 2;
         textareaRef.current?.focus();
         textareaRef.current?.setSelectionRange(pos, pos);
       });
@@ -489,11 +504,13 @@ export function ChatPanel({
     if (!mentionMatch) {
       setMentionQuery("");
       setMentionStart(null);
+      setMentionIndex(0);
       return;
     }
     const query = mentionMatch[1] ?? "";
     setMentionQuery(query);
     setMentionStart(cursor - query.length - 1);
+    setMentionIndex(0);
   };
 
   const applyMention = (path: string) => {
@@ -503,6 +520,7 @@ export function ChatPanel({
     setInput(next);
     setMentionQuery("");
     setMentionStart(null);
+    setMentionIndex(0);
     requestAnimationFrame(() => {
       const pos = start + path.length + 2;
       textareaRef.current?.focus();
@@ -680,7 +698,9 @@ export function ChatPanel({
                   key={path}
                   type="button"
                   onClick={() => applyMention(path)}
-                  className="w-full text-left px-2 py-1.5 text-[10px] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-light)]"
+                  className={`w-full text-left px-2 py-1.5 text-[10px] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-light)] ${
+                    mentionSuggestions[mentionIndex] === path ? "bg-[var(--color-surface-light)]" : ""
+                  }`}
                 >
                   @{path}
                 </button>

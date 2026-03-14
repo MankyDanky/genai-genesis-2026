@@ -4,37 +4,180 @@ import { useMemo, useState } from "react";
 import { useGameForge } from "@/lib/game-forge-context";
 import { isCodeFile } from "@/lib/project-files";
 
+interface FileNode {
+  kind: "file";
+  name: string;
+  path: string;
+}
+
+interface FolderNode {
+  kind: "folder";
+  name: string;
+  path: string;
+  children: TreeNode[];
+}
+
+type TreeNode = FileNode | FolderNode;
+
+function insertNode(nodes: TreeNode[], parts: string[], fullPath: string, prefix = ""): TreeNode[] {
+  if (parts.length === 0) return nodes;
+  const [head, ...tail] = parts;
+  const currentPath = prefix ? `${prefix}/${head}` : head;
+
+  if (tail.length === 0) {
+    return [...nodes, { kind: "file", name: head, path: fullPath }];
+  }
+
+  const existingIndex = nodes.findIndex((node) => node.kind === "folder" && node.name === head);
+  if (existingIndex >= 0) {
+    const folder = nodes[existingIndex] as FolderNode;
+    const updated: FolderNode = {
+      ...folder,
+      children: insertNode(folder.children, tail, fullPath, currentPath),
+    };
+    const copy = [...nodes];
+    copy[existingIndex] = updated;
+    return copy;
+  }
+
+  return [
+    ...nodes,
+    {
+      kind: "folder",
+      name: head,
+      path: currentPath,
+      children: insertNode([], tail, fullPath, currentPath),
+    },
+  ];
+}
+
+function buildTree(paths: string[]): TreeNode[] {
+  let tree: TreeNode[] = [];
+  for (const path of paths) {
+    tree = insertNode(tree, path.split("/"), path);
+  }
+
+  const sortNodes = (nodes: TreeNode[]): TreeNode[] => {
+    const next = nodes.map((node) => {
+      if (node.kind === "folder") {
+        return { ...node, children: sortNodes(node.children) };
+      }
+      return node;
+    });
+
+    next.sort((a, b) => {
+      if (a.kind !== b.kind) return a.kind === "folder" ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+    return next;
+  };
+
+  return sortNodes(tree);
+}
+
+function TreeView({
+  nodes,
+  depth,
+  selectedPath,
+  expanded,
+  onToggleFolder,
+  onSelectFile,
+}: {
+  nodes: TreeNode[];
+  depth: number;
+  selectedPath: string | null;
+  expanded: Set<string>;
+  onToggleFolder: (path: string) => void;
+  onSelectFile: (path: string) => void;
+}) {
+  return (
+    <>
+      {nodes.map((node) => {
+        const paddingLeft = 8 + depth * 12;
+        if (node.kind === "folder") {
+          const isOpen = expanded.has(node.path);
+          return (
+            <div key={node.path}>
+              <button
+                type="button"
+                onClick={() => onToggleFolder(node.path)}
+                className="w-full text-left py-1.5 text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] hover:bg-[var(--color-surface-light)]"
+                style={{ paddingLeft }}
+              >
+                <span className="inline-block w-3">{isOpen ? "▾" : "▸"}</span>
+                {node.name}
+              </button>
+              {isOpen ? (
+                <TreeView
+                  nodes={node.children}
+                  depth={depth + 1}
+                  selectedPath={selectedPath}
+                  expanded={expanded}
+                  onToggleFolder={onToggleFolder}
+                  onSelectFile={onSelectFile}
+                />
+              ) : null}
+            </div>
+          );
+        }
+
+        const isSelected = node.path === selectedPath;
+        return (
+          <button
+            key={node.path}
+            type="button"
+            onClick={() => onSelectFile(node.path)}
+            className={`w-full text-left py-1.5 text-[10px] tracking-wider hover:bg-[var(--color-surface-light)] ${
+              isSelected ? "text-[var(--color-accent)] bg-[var(--color-accent-glow)]" : "text-[var(--color-text-secondary)]"
+            }`}
+            style={{ paddingLeft }}
+          >
+            {node.name}
+          </button>
+        );
+      })}
+    </>
+  );
+}
+
 export function CodePanel() {
   const { projectFiles, updateProjectFile } = useGameForge();
   const codeFiles = useMemo(() => projectFiles.filter(isCodeFile), [projectFiles]);
+  const tree = useMemo(() => buildTree(codeFiles.map((file) => file.path)), [codeFiles]);
+
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set(["src", "styles", "assets"]));
 
   const effectiveSelectedPath =
     selectedPath && codeFiles.some((file) => file.path === selectedPath)
       ? selectedPath
       : (codeFiles[0]?.path ?? null);
+
   const selectedFile = codeFiles.find((file) => file.path === effectiveSelectedPath) ?? null;
+
+  const handleToggleFolder = (path: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  };
 
   return (
     <div className="flex h-full bg-[var(--color-bg)]">
-      <div className="w-44 border-r border-[var(--color-border)] overflow-y-auto">
-        {codeFiles.length === 0 ? (
+      <div className="w-56 border-r border-[var(--color-border)] overflow-y-auto py-1">
+        {tree.length === 0 ? (
           <p className="text-[10px] text-[var(--color-text-muted)] p-3 uppercase">No code files</p>
         ) : (
-          codeFiles.map((file) => (
-            <button
-              key={file.path}
-              type="button"
-              onClick={() => setSelectedPath(file.path)}
-              className={`w-full text-left px-3 py-2 text-[10px] uppercase tracking-wider border-b border-[var(--color-border)] ${
-                file.path === effectiveSelectedPath
-                  ? "bg-[var(--color-accent-glow)] text-[var(--color-accent)]"
-                  : "text-[var(--color-text-muted)]"
-              }`}
-            >
-              {file.path}
-            </button>
-          ))
+          <TreeView
+            nodes={tree}
+            depth={0}
+            selectedPath={effectiveSelectedPath}
+            expanded={expanded}
+            onToggleFolder={handleToggleFolder}
+            onSelectFile={setSelectedPath}
+          />
         )}
       </div>
 
