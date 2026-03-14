@@ -6,7 +6,6 @@ import type { GameEngine } from "@/lib/game-engine";
 import type { ProjectFile } from "@/lib/project-files";
 import { normalizeProjectFiles } from "@/lib/project-files";
 import { storeImage } from "@/lib/image-store";
-import { removeBackground } from "@imgly/background-removal-node";
 
 export const maxDuration = 60;
 
@@ -244,8 +243,27 @@ const GEMINI_MODEL = "gemini-2.5-flash-image";
 const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 async function removeBg(imageBuffer: Buffer, mimeType: string): Promise<{ data: string; mimeType: string }> {
+  const moduleName = "@imgly/background-removal-node";
+  let removeBackgroundFn: ((input: Blob, options?: unknown) => Promise<Blob>) | null = null;
+
+  try {
+    const pkg = await import(moduleName);
+    const maybeFn = (pkg as { removeBackground?: unknown }).removeBackground;
+    if (typeof maybeFn === "function") {
+      removeBackgroundFn = maybeFn as (input: Blob, options?: unknown) => Promise<Blob>;
+    }
+  } catch {
+    removeBackgroundFn = null;
+  }
+
+  if (!removeBackgroundFn) {
+    throw new Error(
+      "Background removal is unavailable. Install '@imgly/background-removal-node' to use removeBackground."
+    );
+  }
+
   const blob = new Blob([imageBuffer], { type: mimeType });
-  const resultBlob = await removeBackground(blob, { model: "small", output: { format: "image/png" } });
+  const resultBlob = await removeBackgroundFn(blob, { model: "small", output: { format: "image/png" } });
   const arrayBuffer = await resultBlob.arrayBuffer();
   const b64 = Buffer.from(arrayBuffer).toString("base64");
   return { data: b64, mimeType: "image/png" };
