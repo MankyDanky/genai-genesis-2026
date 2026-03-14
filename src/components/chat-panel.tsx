@@ -36,6 +36,13 @@ interface ChatPanelProps {
 }
 
 type ComposerMode = "agent" | "plan" | "debug" | "ask";
+type MentionSuggestion = {
+  id: string;
+  kind: "console" | "file";
+  value: string;
+  label: string;
+  insertText: string;
+};
 
 const EXAMPLE_PROMPTS = [
   "Space Invaders",
@@ -388,16 +395,41 @@ export function ChatPanel({
   const planningMode = composerMode === "plan";
 
   const mentionSuggestions = useMemo(() => {
-    if (mentionStart === null) return [];
-    const query = mentionQuery.toLowerCase();
-    const fileSuggestions = projectFiles
-      .map((file) => file.path)
-      .filter((path) => path.toLowerCase().includes(query))
-      .slice(0, 7);
+    if (mentionStart === null) return [] as MentionSuggestion[];
+    const rawQuery = mentionQuery.toLowerCase();
+    const fileQuery = rawQuery.startsWith("file:") ? rawQuery.slice(5) : rawQuery;
 
-    const includesConsole = "console".includes(query);
-    if (includesConsole) fileSuggestions.unshift("console");
-    return fileSuggestions.slice(0, 8);
+    const fileSuggestions: MentionSuggestion[] = projectFiles
+      .map((file) => file.path)
+      .filter((path) => path.toLowerCase().includes(fileQuery))
+      .slice(0, 7)
+      .map((path) => {
+        const needsFilePrefix = path.toLowerCase() === "console";
+        return {
+          id: `file:${path}`,
+          kind: "file" as const,
+          value: path,
+          label: path,
+          insertText: needsFilePrefix ? `file:${path}` : path,
+        };
+      });
+
+    const includeConsoleSuggestion =
+      "console".includes(rawQuery) || "runtime".includes(rawQuery) || rawQuery.length === 0;
+
+    const consoleSuggestion: MentionSuggestion[] = includeConsoleSuggestion
+      ? [
+          {
+            id: "console",
+            kind: "console",
+            value: "console",
+            label: "Runtime Console",
+            insertText: "console",
+          },
+        ]
+      : [];
+
+    return [...consoleSuggestion, ...fileSuggestions].slice(0, 8);
   }, [mentionQuery, mentionStart, projectFiles]);
 
   useEffect(() => {
@@ -406,9 +438,9 @@ export function ChatPanel({
 
   useEffect(() => {
     if (mentionSuggestions.length === 0) return;
-    const activePath = mentionSuggestions[mentionIndex];
-    if (!activePath) return;
-    const activeEl = mentionItemRefs.current.get(activePath);
+    const active = mentionSuggestions[mentionIndex];
+    if (!active) return;
+    const activeEl = mentionItemRefs.current.get(active.id);
     if (!activeEl) return;
     activeEl.scrollIntoView({ block: "nearest" });
   }, [mentionIndex, mentionSuggestions]);
@@ -618,12 +650,20 @@ export function ChatPanel({
       .map((match) => (match[1] ?? "").trim())
       .filter((token) => token.length > 0);
     const autoDebugConsole = composerMode === "debug";
+    const explicitFileMentions = mentions
+      .filter((token) => token.toLowerCase().startsWith("file:"))
+      .map((token) => token.slice(5))
+      .filter((token) => token.length > 0);
+    const implicitFileMentions = mentions.filter(
+      (token) => !token.toLowerCase().startsWith("file:") && token.toLowerCase() !== "console"
+    );
     const mentionedFiles = Array.from(
       new Set(
         [
           ...(autoDebugConsole ? ["console"] : []),
-          ...mentions.filter(
-            (token) => token.toLowerCase() === "console" || projectFiles.some((file) => file.path === token)
+          ...mentions.filter((token) => token.toLowerCase() === "console"),
+          ...[...explicitFileMentions, ...implicitFileMentions].filter((token) =>
+            projectFiles.some((file) => file.path === token)
           ),
         ]
       )
@@ -684,13 +724,13 @@ export function ChatPanel({
 
       const cursor = textareaRef.current?.selectionStart ?? input.length;
       const start = mentionStart ?? cursor;
-      const next = `${input.slice(0, start)}@${selected} ${input.slice(cursor)}`;
+      const next = `${input.slice(0, start)}@${selected.insertText} ${input.slice(cursor)}`;
       setInput(next);
       setMentionQuery("");
       setMentionStart(null);
       setMentionIndex(0);
       requestAnimationFrame(() => {
-        const pos = start + selected.length + 2;
+        const pos = start + selected.insertText.length + 2;
         textareaRef.current?.focus();
         textareaRef.current?.setSelectionRange(pos, pos);
       });
@@ -707,7 +747,7 @@ export function ChatPanel({
     setInput(value);
     const cursor = textareaRef.current?.selectionStart ?? value.length;
     const beforeCursor = value.slice(0, cursor);
-    const mentionMatch = beforeCursor.match(/(?:^|\s)@([a-zA-Z0-9_./-]*)$/);
+    const mentionMatch = beforeCursor.match(/(?:^|\s)@([a-zA-Z0-9_./:-]*)$/);
     if (!mentionMatch) {
       setMentionQuery("");
       setMentionStart(null);
@@ -720,16 +760,16 @@ export function ChatPanel({
     setMentionIndex(0);
   };
 
-  const applyMention = (path: string) => {
+  const applyMention = (suggestion: MentionSuggestion) => {
     const cursor = textareaRef.current?.selectionStart ?? input.length;
     const start = mentionStart ?? cursor;
-    const next = `${input.slice(0, start)}@${path} ${input.slice(cursor)}`;
+    const next = `${input.slice(0, start)}@${suggestion.insertText} ${input.slice(cursor)}`;
     setInput(next);
     setMentionQuery("");
     setMentionStart(null);
     setMentionIndex(0);
     requestAnimationFrame(() => {
-      const pos = start + path.length + 2;
+      const pos = start + suggestion.insertText.length + 2;
       textareaRef.current?.focus();
       textareaRef.current?.setSelectionRange(pos, pos);
     });
@@ -933,22 +973,37 @@ export function ChatPanel({
         {mentionSuggestions.length > 0 && (
           <div className="mt-1 border border-[var(--color-border)] bg-[var(--color-surface)]">
             <div className="px-2 py-1 text-[9px] uppercase tracking-[0.12em] text-[var(--color-text-muted)]">
-              Mention Files
+              Mentions
             </div>
             <div className="max-h-28 overflow-y-auto border-t border-[var(--color-border)]">
-              {mentionSuggestions.map((path) => (
+              {mentionSuggestions.map((suggestion) => (
                 <button
-                  key={path}
+                  key={suggestion.id}
                   ref={(el) => {
-                    mentionItemRefs.current.set(path, el);
+                    mentionItemRefs.current.set(suggestion.id, el);
                   }}
                   type="button"
-                  onClick={() => applyMention(path)}
+                  onClick={() => applyMention(suggestion)}
                   className={`w-full text-left px-2 py-1.5 text-[10px] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-light)] ${
-                    mentionSuggestions[mentionIndex] === path ? "bg-[var(--color-surface-light)]" : ""
+                    mentionSuggestions[mentionIndex]?.id === suggestion.id ? "bg-[var(--color-surface-light)]" : ""
                   }`}
                 >
-                  @{path}
+                  <span className="inline-flex items-center gap-1.5">
+                    {suggestion.kind === "console" ? (
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <polyline points="4 17 10 11 4 5" />
+                        <line x1="12" y1="19" x2="20" y2="19" />
+                      </svg>
+                    ) : (
+                      <span className="text-[9px] opacity-70">#</span>
+                    )}
+                    <span>
+                      @{suggestion.insertText}
+                      <span className="ml-1 text-[var(--color-text-muted)]">
+                        {suggestion.kind === "console" ? "(runtime)" : "(file)"}
+                      </span>
+                    </span>
+                  </span>
                 </button>
               ))}
             </div>
