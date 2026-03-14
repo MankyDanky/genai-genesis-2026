@@ -5,7 +5,7 @@ import {
   type DockviewReadyEvent,
   type DockviewApi,
 } from "dockview";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { gameForgeTheme } from "@/lib/dock-theme";
 import { useGameForge } from "@/lib/game-forge-context";
 import { getEngineLabel } from "@/lib/game-engine";
@@ -104,7 +104,8 @@ function buildDefaultLayout(api: DockviewApi) {
 
 export function DockLayout() {
   const apiRef = useRef<DockviewApi | null>(null);
-  const { currentEngine } = useGameForge();
+  const lastFocusRequestIdRef = useRef<number>(0);
+  const { currentEngine, panelFocusRequest } = useGameForge();
   const [openPanels, setOpenPanels] = useState<Set<string>>(
     () => new Set(ALL_PANELS.map((p) => p.id))
   );
@@ -172,6 +173,30 @@ export function DockLayout() {
   }, []);
 
   const theme = useMemo(() => gameForgeTheme, []);
+
+  useEffect(() => {
+    const api = apiRef.current;
+    if (!api || !panelFocusRequest) return;
+    if (panelFocusRequest.id === lastFocusRequestIdRef.current) return;
+    lastFocusRequestIdRef.current = panelFocusRequest.id;
+
+    const targetId = panelFocusRequest.panel;
+    let panel = api.panels.find((p) => p.id === targetId);
+    if (!panel) {
+      const def = ALL_PANELS.find((p) => p.id === targetId);
+      const refPanel = api.panels.find((p) => p.id === "sandbox") ?? api.panels[0];
+      if (def) {
+        panel = api.addPanel({
+          id: def.id,
+          component: def.component,
+          title: def.title,
+          position: refPanel ? { referencePanel: refPanel.id, direction: "within" } : undefined,
+        });
+      }
+    }
+    const panelApi = panel as unknown as { api?: { setActive?: () => void } };
+    panelApi.api?.setActive?.();
+  }, [panelFocusRequest]);
 
   const panelInfos = ALL_PANELS.map((p) => ({
     id: p.id,

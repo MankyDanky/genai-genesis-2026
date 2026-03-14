@@ -390,7 +390,14 @@ function TreeView({
 }
 
 export function CodePanel() {
-  const { projectFiles, pendingFileWrites, updateProjectFile, deleteProjectFile } = useGameForge();
+  const {
+    projectFiles,
+    pendingFileWrites,
+    activeCodePath,
+    setActiveCodePath,
+    updateProjectFile,
+    deleteProjectFile,
+  } = useGameForge();
   const codeFiles = useMemo(() => projectFiles.filter((file) => file.kind !== "asset"), [projectFiles]);
   const pendingByPath = useMemo(
     () => new Map(pendingFileWrites.map((entry) => [entry.path, entry.status])),
@@ -429,7 +436,6 @@ export function CodePanel() {
   const [isResizing, setIsResizing] = useState(false);
 
   const [virtualFolders, setVirtualFolders] = useState<string[]>([]);
-  const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [selectedFolderPath, setSelectedFolderPath] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set(["src", "styles", "assets"]));
   const [createState, setCreateState] = useState<CreateState | null>(null);
@@ -443,11 +449,22 @@ export function CodePanel() {
   );
 
   const effectiveSelectedFilePath =
-    selectedFilePath && previewCodeFiles.some((file) => file.path === selectedFilePath)
-      ? selectedFilePath
-      : (previewCodeFiles[0]?.path ?? null);
+    (activeCodePath && previewCodeFiles.some((file) => file.path === activeCodePath)
+      ? activeCodePath
+      : (previewCodeFiles[0]?.path ?? null));
 
   const selectedFile = previewCodeFiles.find((file) => file.path === effectiveSelectedFilePath) ?? null;
+  const expandedWithSelection = useMemo(() => {
+    const next = new Set(expanded);
+    if (!effectiveSelectedFilePath) return next;
+    const parts = effectiveSelectedFilePath.split("/").filter(Boolean);
+    let current = "";
+    for (let i = 0; i < parts.length - 1; i += 1) {
+      current = current ? `${current}/${parts[i]}` : (parts[i] ?? "");
+      if (current) next.add(current);
+    }
+    return next;
+  }, [effectiveSelectedFilePath, expanded]);
   const highlightCode = useCallback((code: string) => {
     const language = selectedFile ? getPrismLanguage(selectedFile.path) : "plain";
     const grammar = Prism.languages[language] ?? Prism.languages.plain ?? Prism.languages.plaintext;
@@ -509,7 +526,7 @@ export function CodePanel() {
     if (createState.kind === "folder") {
       setVirtualFolders((prev) => (prev.includes(fullPath) ? prev : [...prev, fullPath]));
       setSelectedFolderPath(fullPath);
-      setSelectedFilePath(null);
+      setActiveCodePath(null);
       setExpanded((prev) => {
         const next = new Set(prev);
         next.add(fullPath);
@@ -521,11 +538,11 @@ export function CodePanel() {
     }
 
     updateProjectFile(fullPath, "");
-    setSelectedFilePath(fullPath);
+    setActiveCodePath(fullPath);
     setSelectedFolderPath(null);
     expandParents(fullPath);
     cancelCreate();
-  }, [cancelCreate, createState, expandParents, updateProjectFile]);
+  }, [cancelCreate, createState, expandParents, setActiveCodePath, updateProjectFile]);
 
   const deleteFolder = useCallback(
     (folderPath: string) => {
@@ -550,22 +567,22 @@ export function CodePanel() {
         return next;
       });
 
-      if (selectedFilePath && selectedFilePath.startsWith(folderPrefix)) {
-        setSelectedFilePath(null);
+      if (activeCodePath && activeCodePath.startsWith(folderPrefix)) {
+        setActiveCodePath(null);
       }
       if (selectedFolderPath === folderPath || selectedFolderPath?.startsWith(folderPrefix)) {
         setSelectedFolderPath(null);
       }
     },
-    [codeFiles, deleteProjectFile, selectedFilePath, selectedFolderPath]
+    [activeCodePath, codeFiles, deleteProjectFile, selectedFolderPath, setActiveCodePath]
   );
 
   const deleteFile = useCallback(
     (filePath: string) => {
       deleteProjectFile(filePath);
-      if (selectedFilePath === filePath) setSelectedFilePath(null);
+      if (activeCodePath === filePath) setActiveCodePath(null);
     },
-    [deleteProjectFile, selectedFilePath]
+    [activeCodePath, deleteProjectFile, setActiveCodePath]
   );
 
   useEffect(() => {
@@ -660,17 +677,17 @@ export function CodePanel() {
 
       updateProjectFile(destinationPath, source.content);
       deleteProjectFile(sourceFilePath);
-      setSelectedFilePath(destinationPath);
       setSelectedFolderPath(normalizedTarget || null);
+      setActiveCodePath(destinationPath);
       expandParents(destinationPath);
     },
-    [codeFiles, deleteProjectFile, expandParents, updateProjectFile]
+    [codeFiles, deleteProjectFile, expandParents, setActiveCodePath, updateProjectFile]
   );
 
   const openContextMenu = (e: React.MouseEvent, target: ContextTarget) => {
     e.preventDefault();
     if (target.kind === "file") {
-      setSelectedFilePath(target.path);
+      setActiveCodePath(target.path);
       setSelectedFolderPath(null);
     }
     if (target.kind === "folder") {
@@ -727,7 +744,7 @@ export function CodePanel() {
             depth={0}
             selectedFilePath={effectiveSelectedFilePath}
             selectedFolderPath={selectedFolderPath}
-            expanded={expanded}
+            expanded={expandedWithSelection}
             createState={createState}
             setCreateValue={(value) => setCreateState((prev) => (prev ? { ...prev, value } : prev))}
             submitCreate={submitCreate}
@@ -739,7 +756,7 @@ export function CodePanel() {
             onToggleFolder={handleToggleFolder}
             onSelectFolder={setSelectedFolderPath}
             onSelectFile={(path) => {
-              setSelectedFilePath(path);
+              setActiveCodePath(path);
               setSelectedFolderPath(null);
             }}
             onContextMenu={openContextMenu}

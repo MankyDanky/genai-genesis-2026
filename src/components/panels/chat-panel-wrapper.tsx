@@ -22,6 +22,8 @@ export function ChatPanelWrapper() {
     onEngineUpdate,
     addImage,
     setControls,
+    focusCodeFile,
+    focusConsolePanel,
     setPendingFileWrites,
     clearPendingFileWrites,
   } = useGameForge();
@@ -44,6 +46,8 @@ export function ChatPanelWrapper() {
       onEngineUpdate={onEngineUpdate}
       addImage={addImage}
       setControls={setControls}
+      focusCodeFile={focusCodeFile}
+      focusConsolePanel={focusConsolePanel}
       setPendingFileWrites={setPendingFileWrites}
       clearPendingFileWrites={clearPendingFileWrites}
     />

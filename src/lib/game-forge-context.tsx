@@ -50,6 +50,13 @@ export interface GameControl {
   keys: string;
 }
 
+type FocusPanel = "code" | "console";
+
+export interface PanelFocusRequest {
+  id: number;
+  panel: FocusPanel;
+}
+
 export interface PendingFileWrite {
   path: string;
   status: "streaming" | "finalizing";
@@ -65,6 +72,9 @@ interface GameForgeContextValue {
   consoleLogs: ConsoleLogEntry[];
   generatedImages: GeneratedImage[];
   controls: GameControl[];
+  activeCodePath: string | null;
+  focusedCodePath: string | null;
+  panelFocusRequest: PanelFocusRequest | null;
   onCodeUpdate: (code: string, engine?: GameEngine) => void;
   onProjectFilesUpdate: (files: ProjectFile[], engine?: GameEngine, deletePaths?: string[]) => void;
   patchProjectFiles: (files: ProjectFile[], engine?: GameEngine) => void;
@@ -97,6 +107,9 @@ interface GameForgeContextValue {
   removeAudioTrack: (id: string) => void;
   addImage: (image: GeneratedImage) => void;
   setControls: (controls: GameControl[]) => void;
+  setActiveCodePath: (path: string | null) => void;
+  focusCodeFile: (path: string) => void;
+  focusConsolePanel: () => void;
   setPendingFileWrites: (
     entries: Array<{ path: string; status: "streaming" | "finalizing"; content?: string }>
   ) => void;
@@ -162,6 +175,9 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     { action: "Action", keys: "Space" },
     { action: "Pause", keys: "P / Esc" },
   ]);
+  const [focusedCodePath, setFocusedCodePath] = useState<string | null>(null);
+  const [activeCodePath, setActiveCodePath] = useState<string | null>(null);
+  const [panelFocusRequest, setPanelFocusRequest] = useState<PanelFocusRequest | null>(null);
 
   const onCodeUpdate = useCallback((code: string, engine?: GameEngine) => {
     setCurrentCode(code);
@@ -395,6 +411,17 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     setControlsState(normalized);
   }, []);
 
+  const focusCodeFile = useCallback((path: string) => {
+    if (!path) return;
+    setActiveCodePath(path);
+    setFocusedCodePath(path);
+    setPanelFocusRequest({ id: Date.now(), panel: "code" });
+  }, []);
+
+  const focusConsolePanel = useCallback(() => {
+    setPanelFocusRequest({ id: Date.now(), panel: "console" });
+  }, []);
+
   const setPendingFileWrites = useCallback((
     entries: Array<{ path: string; status: "streaming" | "finalizing"; content?: string }>
   ) => {
@@ -434,6 +461,9 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       consoleLogs,
       generatedImages,
       controls,
+      activeCodePath,
+      focusedCodePath,
+      panelFocusRequest,
       onCodeUpdate,
       onProjectFilesUpdate,
       patchProjectFiles,
@@ -453,6 +483,9 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       removeAudioTrack,
       addImage,
       setControls,
+      setActiveCodePath,
+      focusCodeFile,
+      focusConsolePanel,
       setPendingFileWrites,
       clearPendingFileWrites,
     }),
@@ -465,6 +498,9 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       consoleLogs,
       generatedImages,
       controls,
+      activeCodePath,
+      focusedCodePath,
+      panelFocusRequest,
       onCodeUpdate,
       onProjectFilesUpdate,
       patchProjectFiles,
@@ -484,6 +520,9 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       removeAudioTrack,
       addImage,
       setControls,
+      setActiveCodePath,
+      focusCodeFile,
+      focusConsolePanel,
       setPendingFileWrites,
       clearPendingFileWrites,
     ]

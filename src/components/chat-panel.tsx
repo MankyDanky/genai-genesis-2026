@@ -37,6 +37,8 @@ interface ChatPanelProps {
   onEngineUpdate: (engine: GameEngine) => void;
   addImage: (image: GeneratedImage) => void;
   setControls: (controls: GameControl[]) => void;
+  focusCodeFile: (path: string) => void;
+  focusConsolePanel: () => void;
   setPendingFileWrites: (
     entries: Array<{ path: string; status: "streaming" | "finalizing"; content?: string }>
   ) => void;
@@ -50,6 +52,11 @@ type MentionSuggestion = {
   value: string;
   label: string;
   insertText: string;
+};
+
+type InputMentionChip = {
+  kind: "file" | "console";
+  value: string;
 };
 
 const EXAMPLE_PROMPTS = [
@@ -414,6 +421,8 @@ export function ChatPanel({
   onEngineUpdate,
   addImage,
   setControls,
+  focusCodeFile,
+  focusConsolePanel,
   setPendingFileWrites,
   clearPendingFileWrites,
 }: ChatPanelProps) {
@@ -479,6 +488,57 @@ export function ChatPanel({
 
     return [...consoleSuggestion, ...fileSuggestions].slice(0, 8);
   }, [mentionQuery, mentionStart, pendingFileWrites, projectFiles]);
+
+  const inputMentionChips = useMemo(() => {
+    const seen = new Set<string>();
+    const chips: InputMentionChip[] = [];
+    const matches = input.matchAll(/(?:^|\s)@([^\s]+)/g);
+    for (const match of matches) {
+      const raw = (match[1] ?? "").trim();
+      if (!raw) continue;
+      const lower = raw.toLowerCase();
+      if (lower === "console") {
+        if (!seen.has("console")) {
+          chips.push({ kind: "console", value: "console" });
+          seen.add("console");
+        }
+        continue;
+      }
+      const normalized = lower.startsWith("file:") ? raw.slice(5) : raw;
+      if (!normalized) continue;
+      if (!projectFiles.some((file) => file.path === normalized)) continue;
+      const key = `file:${normalized}`;
+      if (seen.has(key)) continue;
+      chips.push({ kind: "file", value: normalized });
+      seen.add(key);
+    }
+    return chips;
+  }, [input, projectFiles]);
+
+  const removeMentionChip = useCallback((chip: InputMentionChip) => {
+    const token = chip.kind === "console" ? "@console" : `@${chip.value}`;
+    const fileToken = chip.kind === "file" ? `@file:${chip.value}` : "";
+    setInput((prev) => {
+      const patterns = [token, fileToken].filter(Boolean);
+      let next = prev;
+      for (const pattern of patterns) {
+        const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        next = next.replace(new RegExp(`(?:^|\\s)${escaped}(?=\\s|$)`), "");
+      }
+      return next.replace(/\s{2,}/g, " ").trimStart();
+    });
+    setMentionQuery("");
+    setMentionStart(null);
+    setMentionIndex(0);
+  }, []);
+
+  const handleChipClick = useCallback((chip: InputMentionChip) => {
+    if (chip.kind === "console") {
+      focusConsolePanel();
+      return;
+    }
+    focusCodeFile(chip.value);
+  }, [focusCodeFile, focusConsolePanel]);
 
   useEffect(() => {
     setSelectedEngine(currentEngine);
@@ -810,6 +870,8 @@ export function ChatPanel({
     setControls,
     setPendingFileWrites,
     clearPendingFileWrites,
+    focusCodeFile,
+    focusConsolePanel,
     selectedEngine,
     projectFiles,
   ]);
@@ -1418,6 +1480,35 @@ export function ChatPanel({
                 </button>
               ))}
             </div>
+          </div>
+        )}
+
+        {inputMentionChips.length > 0 && (
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            {inputMentionChips.map((chip) => (
+              <span
+                key={`${chip.kind}:${chip.value}`}
+                className="inline-flex items-center gap-1 border border-[var(--color-border-light)] bg-[var(--color-surface-light)] px-1.5 py-0.5 text-[9px] text-[var(--color-text-secondary)]"
+              >
+                <button
+                  type="button"
+                  onClick={() => handleChipClick(chip)}
+                  className="hover:text-[var(--color-accent)]"
+                  title={chip.kind === "console" ? "Open Console panel" : `Open ${chip.value} in Code panel`}
+                >
+                  @{chip.kind === "console" ? "console" : chip.value}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => removeMentionChip(chip)}
+                  className="text-[var(--color-text-muted)] hover:text-[var(--color-danger)]"
+                  title="Remove mention"
+                  aria-label="Remove mention"
+                >
+                  ×
+                </button>
+              </span>
+            ))}
           </div>
         )}
 
