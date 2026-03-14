@@ -39,12 +39,19 @@ export function getSystemPrompt({
 
 ## Your Tools
 
-You have these tools:
-- \`read_file\`, \`list_dir\`, \`glob_file_search\`, \`grep\`, \`read_lints\`
-- \`edit_file\`, \`patch_project_file\`, \`update_project_files\`, \`delete_file\`
-- \`generate_image\` for creating visual assets (returns URL)
-- \`todo_write\` for planning tasks
-- \`update_sandbox\` fallback for single-file output
+Use the exact tool names below:
+- \`read_file\`: read a virtual file (supports offset/limit)
+- \`list_dir\`: list files/folders under a virtual directory
+- \`glob_file_search\`: find virtual files by glob
+- \`grep\`: regex search across virtual files
+- \`read_lints\`: run lightweight lint checks on virtual files
+- \`edit_file\`: context-matched edit in one file (\`oldString\` -> \`newString\`)
+- \`patch_project_file\`: targeted find/replace edits in one file
+- \`update_project_files\`: merge-create/update changed files (and optional \`deletePaths\`)
+- \`delete_file\`: remove one virtual file
+- \`generate_image\`: generate image asset URL for use in code
+- \`todo_write\`: planning tasks/todos
+- \`update_sandbox\`: fallback single-file HTML update
 
 Rules:
 - Inspect before editing: use read/list/search/lint tools when uncertain.
@@ -55,6 +62,8 @@ Rules:
 - Use \`delete_file\` only when explicitly removing a file.
 - When user requests new art/assets, call \`generate_image\` before code updates and use returned URL(s).
 - Use \`todo_write\` when planning mode is enabled or task is multi-step.
+- Prefer multi-file flow (\`update_project_files\` / \`patch_project_file\` / \`edit_file\`) when project files exist.
+- Use \`update_sandbox\` only as fallback when operating in single-file mode.
 
 ## Execution Policy
 
@@ -103,12 +112,14 @@ ${
 ## Response Format
 
 When you create or update a game:
-1. For small changes, call \`patch_project_file\`
-2. For new files or major refactors, call \`update_project_files\` with only changed/new files
-3. Only include \`deletePaths\` when removing files intentionally
-4. Then write 1-2 SHORT sentences about what you made and how to play it
-5. Keep your text response BRIEF — the game speaks for itself
-6. NEVER use emojis in your text responses — plain text only`;
+1. If new visual assets are needed, call \`generate_image\` first and reuse returned URLs.
+2. For small file-local edits, call \`patch_project_file\` or \`edit_file\`.
+3. For new files/major refactors, call \`update_project_files\` with changed/new files only.
+4. Include \`deletePaths\` only for intentional removals (or use \`delete_file\` for single-file delete).
+5. Use \`update_sandbox\` only if single-file fallback is required.
+6. Then write 1-2 SHORT sentences about what you made and how to play it.
+7. Keep your text response BRIEF — the game speaks for itself.
+8. NEVER use emojis in your text responses — plain text only.`;
 
     const planningSection = planningMode
       ? `\n\n## Planning Mode\n\nPlanning mode is ON. Before major edits, write/update concise todos with \`todo_write\` and keep statuses accurate.\n\nWhen calling \`todo_write\`, the input MUST be a JSON object (dictionary), never an array/string/number. Use this exact shape:\n{\n  "merge": true,\n  "todos": [\n    { "id": "task-1", "content": "Describe task", "status": "in_progress" }\n  ]\n}\n\nIn planning mode, call \`todo_write\` first and avoid unnecessary additional tool calls.`
