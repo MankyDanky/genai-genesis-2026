@@ -19,6 +19,7 @@ export async function POST(req: Request) {
       messages?: unknown;
       currentCode?: unknown;
       currentProjectFiles?: unknown;
+      mentionedFiles?: unknown;
       gameEngine?: unknown;
     };
     const messages = parsed.messages;
@@ -26,12 +27,16 @@ export async function POST(req: Request) {
     const currentProjectFiles = Array.isArray(parsed.currentProjectFiles)
       ? normalizeProjectFiles(parsed.currentProjectFiles as Array<Partial<ProjectFile>>)
       : [];
+    const mentionedFiles = Array.isArray(parsed.mentionedFiles)
+      ? parsed.mentionedFiles.filter((v): v is string => typeof v === "string" && v.length > 0)
+      : [];
     const gameEngine: GameEngine = isGameEngine(parsed.gameEngine) ? parsed.gameEngine : "canvas2d";
 
     console.log("[API] Received request:", {
       messageCount: Array.isArray(messages) ? messages.length : 0,
       hasCurrentCode: !!currentCode,
       projectFileCount: currentProjectFiles.length,
+      mentionedFileCount: mentionedFiles.length,
       gameEngine,
     });
 
@@ -48,7 +53,7 @@ export async function POST(req: Request) {
 
     const result = streamText({
       model: anthropic("claude-sonnet-4-6"),
-      system: getSystemPrompt({ currentCode, currentProjectFiles, gameEngine }),
+      system: getSystemPrompt({ currentCode, currentProjectFiles, mentionedFiles, gameEngine }),
       messages: modelMessages,
       tools: {
         update_project_files: tool({

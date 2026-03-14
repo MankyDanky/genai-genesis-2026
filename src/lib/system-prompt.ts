@@ -5,12 +5,14 @@ import { projectFilesToPrompt } from "@/lib/project-files";
 interface PromptOptions {
     currentCode?: string | null;
     currentProjectFiles?: ProjectFile[];
+    mentionedFiles?: string[];
     gameEngine?: GameEngine;
 }
 
 export function getSystemPrompt({
     currentCode,
     currentProjectFiles = [],
+    mentionedFiles = [],
     gameEngine = "canvas2d",
 }: PromptOptions = {}): string {
     const isThreeJs = gameEngine === "threejs";
@@ -51,6 +53,7 @@ ${
 - Include \`index.html\` and split logic/styles into dedicated files when sensible (\`src/*.js\`, \`styles/*.css\`)
 - Keep files self-contained and runnable in browser
 - Keep assets as separate files in \`assets/\` when needed
+- In Three.js projects, keep mesh/object definitions in dedicated files (for example \`src/meshes/*.js\`) so they can be edited and previewed independently
 
 ## Visual Quality Standards (CRITICAL)
 
@@ -72,13 +75,20 @@ When you create or update a game:
 6. NEVER use emojis in your text responses — plain text only`;
 
     if (currentProjectFiles.length > 0) {
+        const mentionedSet = new Set(mentionedFiles);
+        const focusedFiles = currentProjectFiles.filter((file) => mentionedSet.has(file.path));
+        const focusedSection =
+            focusedFiles.length > 0
+                ? `\n\n## Focused Files (User Mentioned)\n\nPrioritize these files for this request:\n\n${projectFilesToPrompt(focusedFiles)}`
+                : "";
+
         return `${base}
 
 ## Current Project Files
 
 The project currently has these files. Modify existing files when possible instead of replacing everything.
 
-${projectFilesToPrompt(currentProjectFiles)}`;
+${projectFilesToPrompt(currentProjectFiles)}${focusedSection}`;
     }
 
     if (currentCode) {

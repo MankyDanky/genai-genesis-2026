@@ -292,7 +292,18 @@ export function ChatPanel({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const processedToolPayloadRef = useRef<Map<string, string>>(new Map());
   const [input, setInput] = useState("");
+  const [mentionQuery, setMentionQuery] = useState("");
+  const [mentionStart, setMentionStart] = useState<number | null>(null);
   const [selectedEngine, setSelectedEngine] = useState<GameEngine>(currentEngine);
+
+  const mentionSuggestions = useMemo(() => {
+    if (mentionStart === null) return [];
+    const query = mentionQuery.toLowerCase();
+    return projectFiles
+      .map((file) => file.path)
+      .filter((path) => path.toLowerCase().includes(query))
+      .slice(0, 8);
+  }, [mentionQuery, mentionStart, projectFiles]);
 
   useEffect(() => {
     setSelectedEngine(currentEngine);
@@ -415,8 +426,26 @@ export function ChatPanel({
   const doSubmit = () => {
     const text = input.trim();
     if (!text || isLoading) return;
+    const mentionedFiles = Array.from(
+      new Set(
+        [...text.matchAll(/@([^\s]+)/g)]
+          .map((match) => match[1] ?? "")
+          .filter((token) => projectFiles.some((file) => file.path === token))
+      )
+    );
     setInput("");
-    sendMessage({ text }, { body: { currentCode, currentProjectFiles: projectFiles, gameEngine: selectedEngine } })
+    setMentionQuery("");
+    setMentionStart(null);
+    sendMessage({
+      text,
+    }, {
+      body: {
+        currentCode,
+        currentProjectFiles: projectFiles,
+        mentionedFiles,
+        gameEngine: selectedEngine,
+      },
+    })
       .then(() => console.log("[Chat] sendMessage resolved"))
       .catch((err) => console.error("[Chat] sendMessage rejected:", err));
   };
@@ -427,10 +456,58 @@ export function ChatPanel({
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (mentionSuggestions.length > 0 && e.key === "Tab") {
+      e.preventDefault();
+      const first = mentionSuggestions[0];
+      if (!first) return;
+
+      const cursor = textareaRef.current?.selectionStart ?? input.length;
+      const start = mentionStart ?? cursor;
+      const next = `${input.slice(0, start)}@${first} ${input.slice(cursor)}`;
+      setInput(next);
+      setMentionQuery("");
+      setMentionStart(null);
+      requestAnimationFrame(() => {
+        const pos = start + first.length + 2;
+        textareaRef.current?.focus();
+        textareaRef.current?.setSelectionRange(pos, pos);
+      });
+      return;
+    }
+
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       doSubmit();
     }
+  };
+
+  const handleInputChange = (value: string) => {
+    setInput(value);
+    const cursor = textareaRef.current?.selectionStart ?? value.length;
+    const beforeCursor = value.slice(0, cursor);
+    const mentionMatch = beforeCursor.match(/(?:^|\s)@([a-zA-Z0-9_./-]*)$/);
+    if (!mentionMatch) {
+      setMentionQuery("");
+      setMentionStart(null);
+      return;
+    }
+    const query = mentionMatch[1] ?? "";
+    setMentionQuery(query);
+    setMentionStart(cursor - query.length - 1);
+  };
+
+  const applyMention = (path: string) => {
+    const cursor = textareaRef.current?.selectionStart ?? input.length;
+    const start = mentionStart ?? cursor;
+    const next = `${input.slice(0, start)}@${path} ${input.slice(cursor)}`;
+    setInput(next);
+    setMentionQuery("");
+    setMentionStart(null);
+    requestAnimationFrame(() => {
+      const pos = start + path.length + 2;
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(pos, pos);
+    });
   };
 
   const handleExampleClick = (prompt: string) => {
@@ -575,7 +652,7 @@ export function ChatPanel({
           <textarea
             ref={textareaRef}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => handleInputChange(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={isEmpty ? "Describe your game..." : "Ask for changes..."}
             disabled={isLoading}
@@ -593,10 +670,29 @@ export function ChatPanel({
             </svg>
           </button>
         </form>
+        {mentionSuggestions.length > 0 && (
+          <div className="mt-1 border border-[var(--color-border)] bg-[var(--color-surface)]">
+            <div className="px-2 py-1 text-[9px] uppercase tracking-[0.12em] text-[var(--color-text-muted)]">
+              Mention Files
+            </div>
+            <div className="max-h-28 overflow-y-auto border-t border-[var(--color-border)]">
+              {mentionSuggestions.map((path) => (
+                <button
+                  key={path}
+                  type="button"
+                  onClick={() => applyMention(path)}
+                  className="w-full text-left px-2 py-1.5 text-[10px] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-light)]"
+                >
+                  @{path}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="flex items-center justify-between px-1 pt-1">
           <span className="text-[9px] text-[var(--color-text-muted)]">
-            Enter to send, Shift+Enter for newline
+            Enter to send, Shift+Enter newline, @file mention
           </span>
           {currentCode && (
             <span className="text-[9px] text-[var(--color-success)] flex items-center gap-1">
