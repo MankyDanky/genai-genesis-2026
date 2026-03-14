@@ -177,6 +177,10 @@ Recommended helper shape:
 - Use per-player replication for rendering opponents:
   - publish local avatar data with \`updatePlayerState({ x, y, ... })\`
   - render remote avatars from \`getPlayers()\` / \`getPlayer(id)\` snapshots
+- Always keep multiplayer visuals consistent across clients:
+  - replicate opponent transforms/animation state (position, velocity, direction, action)
+  - replicate shared objects (projectiles, pickups, hazards, timers, score/state machines)
+  - apply remote updates every frame before rendering so each user sees the same world state
 - Always handle disconnect/reconnect gracefully and keep single-player fallback if connection fails.
 
 ## Response Format
