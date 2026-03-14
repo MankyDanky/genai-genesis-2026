@@ -290,6 +290,7 @@ export function ChatPanel({
 }: ChatPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const mentionItemRefs = useRef<Map<string, HTMLButtonElement | null>>(new Map());
   const processedToolPayloadRef = useRef<Map<string, string>>(new Map());
   const [input, setInput] = useState("");
   const [mentionQuery, setMentionQuery] = useState("");
@@ -309,6 +310,15 @@ export function ChatPanel({
   useEffect(() => {
     setSelectedEngine(currentEngine);
   }, [currentEngine]);
+
+  useEffect(() => {
+    if (mentionSuggestions.length === 0) return;
+    const activePath = mentionSuggestions[mentionIndex];
+    if (!activePath) return;
+    const activeEl = mentionItemRefs.current.get(activePath);
+    if (!activeEl) return;
+    activeEl.scrollIntoView({ block: "nearest" });
+  }, [mentionIndex, mentionSuggestions]);
 
   const transport = useMemo(
     () => new DefaultChatTransport({ api: "/api/chat" }),
@@ -696,6 +706,9 @@ export function ChatPanel({
               {mentionSuggestions.map((path) => (
                 <button
                   key={path}
+                  ref={(el) => {
+                    mentionItemRefs.current.set(path, el);
+                  }}
                   type="button"
                   onClick={() => applyMention(path)}
                   className={`w-full text-left px-2 py-1.5 text-[10px] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-light)] ${
