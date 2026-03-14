@@ -94,6 +94,7 @@ export interface PublishedGameDocument {
   multiplayer: boolean;
   multiplayerProvider: "partykit" | null;
   multiplayerRoomType: string | null;
+  runtimeEnv: Record<string, string>;
   compiledHtml: ArtifactRef;
   createdAt: Date;
 }

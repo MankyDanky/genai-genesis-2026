@@ -22,6 +22,7 @@ export async function GET(
       multiplayer: game.multiplayer ?? false,
       multiplayerProvider: game.multiplayerProvider ?? null,
       multiplayerRoomType: game.multiplayerRoomType ?? null,
+      runtimeEnv: game.runtimeEnv ?? {},
       createdAt: game.createdAt,
       revisionNumber: game.revisionNumber,
       projectId: game.projectId,
