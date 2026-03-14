@@ -17,10 +17,14 @@ interface SandboxProps {
 
 function ShareBar({
   code,
+  audioTracks,
+  generatedMeshes,
   containerRef,
   onReload,
 }: {
   code: string;
+  audioTracks: AudioTrack[];
+  generatedMeshes: GeneratedMesh[];
   containerRef: React.RefObject<HTMLDivElement | null>;
   onReload?: () => void;
 }) {
@@ -38,9 +42,10 @@ function ShareBar({
   }, [code, showToast]);
 
   const handleDownload = useCallback(() => {
-    const titleMatch = code.match(/<title>(.*?)<\/title>/i);
+    const full = injectSoundBridge(code, audioTracks, generatedMeshes);
+    const titleMatch = full.match(/<title>(.*?)<\/title>/i);
     const name = titleMatch?.[1]?.replace(/\s+/g, "-").toLowerCase() ?? "game";
-    const blob = new Blob([code], { type: "text/html" });
+    const blob = new Blob([full], { type: "text/html" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -48,13 +53,14 @@ function ShareBar({
     a.click();
     URL.revokeObjectURL(url);
     showToast("Downloaded");
-  }, [code, showToast]);
+  }, [code, audioTracks, generatedMeshes, showToast]);
 
   const handleOpen = useCallback(() => {
-    const blob = new Blob([code], { type: "text/html" });
+    const full = injectSoundBridge(code, audioTracks, generatedMeshes);
+    const blob = new Blob([full], { type: "text/html" });
     const url = URL.createObjectURL(blob);
     window.open(url, "_blank");
-  }, [code]);
+  }, [code, audioTracks, generatedMeshes]);
 
   const handleReload = useCallback(() => {
     onReload?.();
@@ -323,7 +329,7 @@ export function Sandbox({ code, audioTracks = [], generatedMeshes = [], onConsol
 
   return (
     <div ref={containerRef} className="relative h-full w-full bg-black">
-      <ShareBar code={code} containerRef={containerRef} onReload={handleReload} />
+      <ShareBar code={code} audioTracks={audioTracks ?? []} generatedMeshes={generatedMeshes ?? []} containerRef={containerRef} onReload={handleReload} />
       <iframe
         ref={iframeRef}
         key={`${code}:${reloadKey}`}
