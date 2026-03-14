@@ -24,6 +24,17 @@ type CreateState = {
   value: string;
 };
 
+type ContextTarget =
+  | { kind: "file"; path: string }
+  | { kind: "folder"; path: string }
+  | { kind: "root" };
+
+type ContextMenuState = {
+  x: number;
+  y: number;
+  target: ContextTarget;
+};
+
 function dirname(path: string): string {
   const idx = path.lastIndexOf("/");
   return idx >= 0 ? path.slice(0, idx) : "";
@@ -32,6 +43,10 @@ function dirname(path: string): string {
 function basename(path: string): string {
   const idx = path.lastIndexOf("/");
   return idx >= 0 ? path.slice(idx + 1) : path;
+}
+
+function normalizeUserPath(name: string): string {
+  return name.trim().replace(/^\.\//, "").replace(/\\/g, "/").replace(/^\/+/, "");
 }
 
 function insertFileNode(nodes: TreeNode[], parts: string[], fullPath: string, prefix = ""): TreeNode[] {
@@ -44,15 +59,15 @@ function insertFileNode(nodes: TreeNode[], parts: string[], fullPath: string, pr
     return [...nodes, { kind: "file", name: head, path: fullPath }];
   }
 
-  const existingIndex = nodes.findIndex((node) => node.kind === "folder" && node.name === head);
-  if (existingIndex >= 0) {
-    const folder = nodes[existingIndex] as FolderNode;
+  const idx = nodes.findIndex((node) => node.kind === "folder" && node.name === head);
+  if (idx >= 0) {
+    const folder = nodes[idx] as FolderNode;
     const updated: FolderNode = {
       ...folder,
       children: insertFileNode(folder.children, tail, fullPath, currentPath),
     };
     const copy = [...nodes];
-    copy[existingIndex] = updated;
+    copy[idx] = updated;
     return copy;
   }
 
@@ -72,27 +87,28 @@ function insertFolderNode(nodes: TreeNode[], parts: string[], prefix = ""): Tree
   const [head, ...tail] = parts;
   const currentPath = prefix ? `${prefix}/${head}` : head;
 
-  const existingIndex = nodes.findIndex((node) => node.kind === "folder" && node.name === head);
-  if (existingIndex >= 0) {
+  const idx = nodes.findIndex((node) => node.kind === "folder" && node.name === head);
+  if (idx >= 0) {
     if (tail.length === 0) return nodes;
-    const folder = nodes[existingIndex] as FolderNode;
+    const folder = nodes[idx] as FolderNode;
     const updated: FolderNode = {
       ...folder,
       children: insertFolderNode(folder.children, tail, currentPath),
     };
     const copy = [...nodes];
-    copy[existingIndex] = updated;
+    copy[idx] = updated;
     return copy;
   }
 
-  const created: FolderNode = {
-    kind: "folder",
-    name: head,
-    path: currentPath,
-    children: tail.length > 0 ? insertFolderNode([], tail, currentPath) : [],
-  };
-
-  return [...nodes, created];
+  return [
+    ...nodes,
+    {
+      kind: "folder",
+      name: head,
+      path: currentPath,
+      children: tail.length > 0 ? insertFolderNode([], tail, currentPath) : [],
+    },
+  ];
 }
 
 function buildTree(filePaths: string[], folderPaths: string[]): TreeNode[] {
@@ -119,7 +135,6 @@ function buildTree(filePaths: string[], folderPaths: string[]): TreeNode[] {
       if (a.kind !== b.kind) return a.kind === "folder" ? -1 : 1;
       return a.name.localeCompare(b.name);
     });
-
     return next;
   };
 
@@ -142,12 +157,11 @@ function CreateInlineRow({
   inputRef: React.RefObject<HTMLInputElement | null>;
 }) {
   const paddingLeft = 8 + depth * 12;
+
   return (
     <div style={{ paddingLeft }} className="py-1">
       <div className="flex items-center gap-1.5 text-[10px] text-[var(--color-text-muted)]">
-        <span className="inline-flex w-3 justify-center">
-          {createState.kind === "folder" ? "▸" : "+"}
-        </span>
+        <span className="inline-flex w-3 justify-center">{createState.kind === "folder" ? "▸" : "+"}</span>
         <input
           ref={inputRef}
           value={createState.value}
@@ -187,6 +201,7 @@ function TreeView({
   onToggleFolder,
   onSelectFolder,
   onSelectFile,
+  onContextMenu,
 }: {
   nodes: TreeNode[];
   depth: number;
@@ -204,6 +219,7 @@ function TreeView({
   onToggleFolder: (path: string) => void;
   onSelectFolder: (path: string) => void;
   onSelectFile: (path: string) => void;
+  onContextMenu: (e: React.MouseEvent, target: ContextTarget) => void;
 }) {
   const rootCreate = depth === 0 && createState?.parent === "" ? createState : null;
 
@@ -236,6 +252,7 @@ function TreeView({
                   onToggleFolder(node.path);
                   onSelectFolder(node.path);
                 }}
+                onContextMenu={(e) => onContextMenu(e, { kind: "folder", path: node.path })}
                 onDragOver={(e) => {
                   if (!draggedFilePath) return;
                   e.preventDefault();
@@ -286,6 +303,7 @@ function TreeView({
                     onToggleFolder={onToggleFolder}
                     onSelectFolder={onSelectFolder}
                     onSelectFile={onSelectFile}
+                    onContextMenu={onContextMenu}
                   />
                 </>
               ) : null}
@@ -311,9 +329,12 @@ function TreeView({
               moveFileToDirectory(draggedFilePath, dirname(node.path));
               setDraggedFilePath(null);
             }}
+            onContextMenu={(e) => onContextMenu(e, { kind: "file", path: node.path })}
             onClick={() => onSelectFile(node.path)}
             className={`w-full text-left py-1.5 text-[10px] tracking-wider hover:bg-[var(--color-surface-light)] ${
-              isSelected ? "text-[var(--color-accent)] bg-[var(--color-accent-glow)]" : "text-[var(--color-text-secondary)]"
+              isSelected
+                ? "text-[var(--color-accent)] bg-[var(--color-accent-glow)]"
+                : "text-[var(--color-text-secondary)]"
             }`}
             style={{ paddingLeft }}
           >
@@ -327,14 +348,15 @@ function TreeView({
 
 export function CodePanel() {
   const { projectFiles, updateProjectFile, deleteProjectFile } = useGameForge();
-  const codeFiles = useMemo(
-    () => projectFiles.filter((file) => file.kind !== "asset"),
-    [projectFiles]
-  );
+  const codeFiles = useMemo(() => projectFiles.filter((file) => file.kind !== "asset"), [projectFiles]);
 
   const explorerRef = useRef<HTMLDivElement>(null);
   const createInputRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const lastCreateSignatureRef = useRef<string>("");
+
+  const [sidebarWidth, setSidebarWidth] = useState(260);
+  const [isResizing, setIsResizing] = useState(false);
 
   const [virtualFolders, setVirtualFolders] = useState<string[]>([]);
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
@@ -342,6 +364,7 @@ export function CodePanel() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set(["src", "styles", "assets"]));
   const [createState, setCreateState] = useState<CreateState | null>(null);
   const [draggedFilePath, setDraggedFilePath] = useState<string | null>(null);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
 
   const tree = useMemo(
     () => buildTree(codeFiles.map((file) => file.path), virtualFolders),
@@ -354,6 +377,8 @@ export function CodePanel() {
       : (codeFiles[0]?.path ?? null);
 
   const selectedFile = codeFiles.find((file) => file.path === effectiveSelectedFilePath) ?? null;
+
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
 
   const handleToggleFolder = (path: string) => {
     setExpanded((prev) => {
@@ -385,22 +410,18 @@ export function CodePanel() {
     return dirname(effectiveSelectedFilePath);
   };
 
-  const startCreate = (kind: "file" | "folder") => {
-    const parent = getCreateParent();
+  const startCreate = (kind: "file" | "folder", forcedParent?: string) => {
+    const parent = forcedParent ?? getCreateParent();
     if (parent) setExpanded((prev) => new Set(prev).add(parent));
     setCreateState({ kind, parent, value: "" });
+    closeContextMenu();
   };
 
   const cancelCreate = useCallback(() => setCreateState(null), []);
 
   const submitCreate = useCallback(() => {
     if (!createState) return;
-
-    const name = createState.value
-      .trim()
-      .replace(/\.\//g, "")
-      .replace(/\\/g, "/")
-      .replace(/^\/+/, "");
+    const name = normalizeUserPath(createState.value);
 
     if (!name) {
       cancelCreate();
@@ -430,6 +451,47 @@ export function CodePanel() {
     cancelCreate();
   }, [cancelCreate, createState, expandParents, updateProjectFile]);
 
+  const deleteFolder = useCallback(
+    (folderPath: string) => {
+      const folderPrefix = `${folderPath}/`;
+      const filesToDelete = codeFiles
+        .map((file) => file.path)
+        .filter((path) => path.startsWith(folderPrefix));
+
+      for (const path of filesToDelete) {
+        deleteProjectFile(path);
+      }
+
+      setVirtualFolders((prev) =>
+        prev.filter((folder) => folder !== folderPath && !folder.startsWith(folderPrefix))
+      );
+      setExpanded((prev) => {
+        const next = new Set<string>();
+        for (const folder of prev) {
+          if (folder === folderPath || folder.startsWith(folderPrefix)) continue;
+          next.add(folder);
+        }
+        return next;
+      });
+
+      if (selectedFilePath && selectedFilePath.startsWith(folderPrefix)) {
+        setSelectedFilePath(null);
+      }
+      if (selectedFolderPath === folderPath || selectedFolderPath?.startsWith(folderPrefix)) {
+        setSelectedFolderPath(null);
+      }
+    },
+    [codeFiles, deleteProjectFile, selectedFilePath, selectedFolderPath]
+  );
+
+  const deleteFile = useCallback(
+    (filePath: string) => {
+      deleteProjectFile(filePath);
+      if (selectedFilePath === filePath) setSelectedFilePath(null);
+    },
+    [deleteProjectFile, selectedFilePath]
+  );
+
   useEffect(() => {
     if (!createState) return;
     const signature = `${createState.kind}:${createState.parent}`;
@@ -439,17 +501,49 @@ export function CodePanel() {
   }, [createState]);
 
   useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!isResizing || !containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const raw = e.clientX - rect.left;
+      const next = Math.max(180, Math.min(520, raw));
+      setSidebarWidth(next);
+    };
+
+    const onMouseUp = () => setIsResizing(false);
+
+    if (isResizing) {
+      document.addEventListener("mousemove", onMouseMove);
+      document.addEventListener("mouseup", onMouseUp);
+    }
+
+    return () => {
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+    };
+  }, [isResizing]);
+
+  useEffect(() => {
     if (!createState) return;
     const onClick = (e: MouseEvent) => {
       if (createInputRef.current?.contains(e.target as Node)) return;
       if (explorerRef.current?.contains(e.target as Node)) {
-        // clicked inside explorer but not on input: cancel like VS Code
         cancelCreate();
       }
     };
     document.addEventListener("mousedown", onClick);
     return () => document.removeEventListener("mousedown", onClick);
   }, [cancelCreate, createState]);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const onClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest("[data-context-menu='code-explorer']")) return;
+      closeContextMenu();
+    };
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, [closeContextMenu, contextMenu]);
 
   const moveFileToDirectory = useCallback(
     (sourceFilePath: string, targetDirPath: string) => {
@@ -472,51 +566,30 @@ export function CodePanel() {
     [codeFiles, deleteProjectFile, expandParents, updateProjectFile]
   );
 
-  const handleDeleteSelection = useCallback(() => {
-    if (selectedFolderPath) {
-      const folderPrefix = `${selectedFolderPath}/`;
-      const filesToDelete = codeFiles
-        .map((file) => file.path)
-        .filter((path) => path.startsWith(folderPrefix));
-
-      for (const path of filesToDelete) {
-        deleteProjectFile(path);
-      }
-
-      setVirtualFolders((prev) =>
-        prev.filter((folder) => folder !== selectedFolderPath && !folder.startsWith(folderPrefix))
-      );
-      setExpanded((prev) => {
-        const next = new Set<string>();
-        for (const folder of prev) {
-          if (folder === selectedFolderPath || folder.startsWith(folderPrefix)) continue;
-          next.add(folder);
-        }
-        return next;
-      });
-
-      if (selectedFilePath && selectedFilePath.startsWith(folderPrefix)) {
-        setSelectedFilePath(null);
-      }
+  const openContextMenu = (e: React.MouseEvent, target: ContextTarget) => {
+    e.preventDefault();
+    if (target.kind === "file") {
+      setSelectedFilePath(target.path);
       setSelectedFolderPath(null);
-      return;
     }
-
-    const filePath = selectedFilePath ?? effectiveSelectedFilePath;
-    if (!filePath) return;
-    deleteProjectFile(filePath);
-    if (selectedFilePath === filePath) setSelectedFilePath(null);
-  }, [
-    codeFiles,
-    deleteProjectFile,
-    effectiveSelectedFilePath,
-    selectedFilePath,
-    selectedFolderPath,
-  ]);
+    if (target.kind === "folder") {
+      setSelectedFolderPath(target.path);
+    }
+    setContextMenu({ x: e.clientX, y: e.clientY, target });
+  };
 
   return (
-    <div className="flex h-full bg-[var(--color-bg)]">
-      <div ref={explorerRef} className="w-56 border-r border-[var(--color-border)] overflow-y-auto py-1">
+    <div ref={containerRef} className="flex h-full bg-[var(--color-bg)]">
+      <div
+        ref={explorerRef}
+        style={{ width: sidebarWidth }}
+        className="border-r border-[var(--color-border)] overflow-y-auto py-1"
+        onContextMenu={(e) => {
+          if (e.target === explorerRef.current) {
+            openContextMenu(e, { kind: "root" });
+          }
+        }}
+      >
         <div className="px-2 pb-2 border-b border-[var(--color-border)]">
           <div className="flex items-center justify-between gap-2">
             <span className="text-[9px] uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Explorer</span>
@@ -534,14 +607,6 @@ export function CodePanel() {
                 className="px-1.5 py-0.5 text-[9px] uppercase tracking-wider border border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
               >
                 +Folder
-              </button>
-              <button
-                type="button"
-                onClick={handleDeleteSelection}
-                disabled={!selectedFolderPath && !effectiveSelectedFilePath}
-                className="px-1.5 py-0.5 text-[9px] uppercase tracking-wider border border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-danger)] disabled:opacity-40"
-              >
-                Delete
               </button>
             </div>
           </div>
@@ -570,25 +635,21 @@ export function CodePanel() {
               setSelectedFilePath(path);
               setSelectedFolderPath(null);
             }}
+            onContextMenu={openContextMenu}
           />
         )}
       </div>
 
-      <div className="flex-1 flex flex-col">
+      <div
+        className={`w-1 border-r border-[var(--color-border)] bg-[var(--color-surface)] hover:bg-[var(--color-accent-glow)] cursor-col-resize ${isResizing ? "bg-[var(--color-accent-glow)]" : ""}`}
+        onMouseDown={() => setIsResizing(true)}
+      />
+
+      <div className="flex-1 flex flex-col min-w-0">
         {selectedFile ? (
           <>
-            <div className="px-3 py-1.5 border-b border-[var(--color-border)] text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] flex items-center justify-between gap-2">
-              <span>{selectedFile.path}</span>
-              <button
-                type="button"
-                onClick={() => {
-                  deleteProjectFile(selectedFile.path);
-                  setSelectedFilePath(null);
-                }}
-                className="px-1.5 py-0.5 text-[9px] uppercase tracking-wider border border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-danger)]"
-              >
-                Delete
-              </button>
+            <div className="px-3 py-1.5 border-b border-[var(--color-border)] text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
+              {selectedFile.path}
             </div>
             <textarea
               value={selectedFile.content}
@@ -602,6 +663,76 @@ export function CodePanel() {
           </div>
         )}
       </div>
+
+      {contextMenu ? (
+        <div
+          data-context-menu="code-explorer"
+          className="fixed z-50 min-w-[140px] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[0_10px_24px_rgba(0,0,0,0.5)]"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          {contextMenu.target.kind === "folder" ? (
+            <>
+              <button
+                type="button"
+                onClick={() => startCreate("file", contextMenu.target.path)}
+                className="w-full text-left px-2 py-1.5 text-[10px] uppercase tracking-wider text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-light)]"
+              >
+                Add File
+              </button>
+              <button
+                type="button"
+                onClick={() => startCreate("folder", contextMenu.target.path)}
+                className="w-full text-left px-2 py-1.5 text-[10px] uppercase tracking-wider text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-light)]"
+              >
+                Add Folder
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  deleteFolder(contextMenu.target.path);
+                  closeContextMenu();
+                }}
+                className="w-full text-left px-2 py-1.5 text-[10px] uppercase tracking-wider text-[var(--color-danger)] hover:bg-[var(--color-surface-light)]"
+              >
+                Delete Folder
+              </button>
+            </>
+          ) : null}
+
+          {contextMenu.target.kind === "file" ? (
+            <button
+              type="button"
+              onClick={() => {
+                deleteFile(contextMenu.target.path);
+                closeContextMenu();
+              }}
+              className="w-full text-left px-2 py-1.5 text-[10px] uppercase tracking-wider text-[var(--color-danger)] hover:bg-[var(--color-surface-light)]"
+            >
+              Delete File
+            </button>
+          ) : null}
+
+          {contextMenu.target.kind === "root" ? (
+            <>
+              <button
+                type="button"
+                onClick={() => startCreate("file", "")}
+                className="w-full text-left px-2 py-1.5 text-[10px] uppercase tracking-wider text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-light)]"
+              >
+                Add File
+              </button>
+              <button
+                type="button"
+                onClick={() => startCreate("folder", "")}
+                className="w-full text-left px-2 py-1.5 text-[10px] uppercase tracking-wider text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-light)]"
+              >
+                Add Folder
+              </button>
+            </>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
