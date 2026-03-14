@@ -16,6 +16,7 @@ import { ConsolePanel } from "@/components/panels/console-panel";
 import { InspectorPanel } from "@/components/panels/inspector-panel";
 import { ImagesPanelWrapper } from "@/components/panels/images-panel-wrapper";
 import { AudioPanelWrapper } from "@/components/panels/audio-panel-wrapper";
+import { MeshesPanelWrapper } from "@/components/panels/meshes-panel-wrapper";
 import { Toolbar } from "@/components/toolbar";
 import { ShareModal } from "@/components/share-modal";
 import { OpenProjectModal } from "@/components/open-project-modal";
@@ -32,6 +33,7 @@ const components = {
   inspector: InspectorPanel,
   images: ImagesPanelWrapper,
   audio: AudioPanelWrapper,
+  meshes: MeshesPanelWrapper,
 };
 
 interface PanelDef {
@@ -48,6 +50,7 @@ const ALL_PANELS: PanelDef[] = [
   { id: "code", component: "code", title: "Code" },
   { id: "console", component: "console", title: "Console" },
   { id: "images", component: "images", title: "Images" },
+  { id: "meshes", component: "meshes", title: "Meshes" },
 ];
 
 function buildDefaultLayout(api: DockviewApi) {
@@ -103,6 +106,14 @@ function buildDefaultLayout(api: DockviewApi) {
     id: "audio",
     component: "audio",
     title: "Audio",
+    inactive: true,
+    position: { referencePanel: "images", direction: "within" },
+  });
+
+  api.addPanel({
+    id: "meshes",
+    component: "meshes",
+    title: "Meshes",
     inactive: true,
     position: { referencePanel: "images", direction: "within" },
   });

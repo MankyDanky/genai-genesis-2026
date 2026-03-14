@@ -54,7 +54,7 @@ export async function createTextArtifactRef(args: {
 }
 
 export async function storeBinaryArtifact(args: {
-  kind: Extract<ArtifactKind, "image-binary" | "audio-binary" | "compiled-html" | "chat-transcript">;
+  kind: Extract<ArtifactKind, "image-binary" | "audio-binary" | "mesh-binary" | "compiled-html" | "chat-transcript">;
   contentType: string;
   data: Buffer;
   filename: string;

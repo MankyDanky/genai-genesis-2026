@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useCallback, useRef, useMemo, useEffect } from "react";
-import type { AudioTrack } from "@/lib/game-forge-context";
+import type { AudioTrack, GeneratedMesh } from "@/lib/game-forge-context";
 
 interface SandboxProps {
   code: string | null;
   audioTracks?: AudioTrack[];
+  generatedMeshes?: GeneratedMesh[];
   onConsoleMessage?: (event: {
     level: "log" | "info" | "warn" | "error";
     args: string[];
@@ -16,10 +17,14 @@ interface SandboxProps {
 
 function ShareBar({
   code,
+  audioTracks,
+  generatedMeshes,
   containerRef,
   onReload,
 }: {
   code: string;
+  audioTracks: AudioTrack[];
+  generatedMeshes: GeneratedMesh[];
   containerRef: React.RefObject<HTMLDivElement | null>;
   onReload?: () => void;
 }) {
@@ -37,9 +42,10 @@ function ShareBar({
   }, [code, showToast]);
 
   const handleDownload = useCallback(() => {
-    const titleMatch = code.match(/<title>(.*?)<\/title>/i);
+    const full = injectSoundBridge(code, audioTracks, generatedMeshes);
+    const titleMatch = full.match(/<title>(.*?)<\/title>/i);
     const name = titleMatch?.[1]?.replace(/\s+/g, "-").toLowerCase() ?? "game";
-    const blob = new Blob([code], { type: "text/html" });
+    const blob = new Blob([full], { type: "text/html" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -47,13 +53,14 @@ function ShareBar({
     a.click();
     URL.revokeObjectURL(url);
     showToast("Downloaded");
-  }, [code, showToast]);
+  }, [code, audioTracks, generatedMeshes, showToast]);
 
   const handleOpen = useCallback(() => {
-    const blob = new Blob([code], { type: "text/html" });
+    const full = injectSoundBridge(code, audioTracks, generatedMeshes);
+    const blob = new Blob([full], { type: "text/html" });
     const url = URL.createObjectURL(blob);
     window.open(url, "_blank");
-  }, [code]);
+  }, [code, audioTracks, generatedMeshes]);
 
   const handleReload = useCallback(() => {
     onReload?.();
@@ -183,7 +190,19 @@ window.addEventListener('message', function(e) {
 });
 </script>`;
 
-function injectSoundBridge(html: string, tracks: AudioTrack[]): string {
+const MESH_BRIDGE_SCRIPT = `<script>
+window.__GAMEFORGE_MESHES__ = window.__GAMEFORGE_MESHES__ || {};
+window.addEventListener('message', function(e) {
+  if (!e.data || e.data.type !== 'gameforge-meshes-update') return;
+  var meshes = e.data.meshes || {};
+  for (var meshName in meshes) {
+    window.__GAMEFORGE_MESHES__[meshName] = meshes[meshName];
+  }
+  if (typeof window.__onMeshesUpdated === 'function') window.__onMeshesUpdated();
+});
+</script>`;
+
+function injectSoundBridge(html: string, tracks: AudioTrack[], meshes: GeneratedMesh[] = []): string {
   const readyTracks = tracks.filter((track) => track.status === "ready" && !!track.dataUrl);
   const soundMap: Record<string, string> = {};
   const musicMap: Record<string, string> = {};
@@ -196,27 +215,34 @@ function injectSoundBridge(html: string, tracks: AudioTrack[]): string {
     }
   }
 
+  const readyMeshes = meshes.filter((m) => m.status === "ready" && !!m.glbUrl);
+  const meshMap: Record<string, { glbUrl: string; name: string }> = {};
+  for (const mesh of readyMeshes) {
+    meshMap[mesh.name] = { glbUrl: mesh.glbUrl!, name: mesh.name };
+  }
+
   const initialScript = `<script>
 window.__GAMEFORGE_SOUNDS__ = ${JSON.stringify(soundMap)};
 window.__GAMEFORGE_MUSIC__ = ${JSON.stringify(musicMap)};
+window.__GAMEFORGE_MESHES__ = ${JSON.stringify(meshMap)};
 </script>`;
 
-  const combined = `${SOUND_BRIDGE_SCRIPT}${initialScript}`;
+  const combined = `${SOUND_BRIDGE_SCRIPT}${MESH_BRIDGE_SCRIPT}${initialScript}`;
   if (/<head[^>]*>/i.test(html)) {
     return html.replace(/<head([^>]*)>/i, `<head$1>${combined}`);
   }
   return `${combined}${html}`;
 }
 
-export function Sandbox({ code, audioTracks = [], onConsoleMessage, onReload }: SandboxProps) {
+export function Sandbox({ code, audioTracks = [], generatedMeshes = [], onConsoleMessage, onReload }: SandboxProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const srcDoc = useMemo(() => {
     if (!code) return null;
     const withConsole = buildInstrumentedSrcDoc(code);
-    return injectSoundBridge(withConsole, audioTracks);
-  }, [audioTracks, code]);
+    return injectSoundBridge(withConsole, audioTracks, generatedMeshes);
+  }, [audioTracks, code, generatedMeshes]);
 
   const handleReload = useCallback(() => {
     setReloadKey((prev) => prev + 1);
@@ -265,6 +291,21 @@ export function Sandbox({ code, audioTracks = [], onConsoleMessage, onReload }: 
     iframe.contentWindow.postMessage({ type: "gameforge-sounds-update", sounds, music }, "*");
   }, [audioTracks]);
 
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe?.contentWindow) return;
+
+    const readyMeshes = generatedMeshes.filter((m) => m.status === "ready" && !!m.glbUrl);
+    if (readyMeshes.length === 0) return;
+
+    const meshes: Record<string, { glbUrl: string; name: string }> = {};
+    for (const mesh of readyMeshes) {
+      meshes[mesh.name] = { glbUrl: mesh.glbUrl!, name: mesh.name };
+    }
+
+    iframe.contentWindow.postMessage({ type: "gameforge-meshes-update", meshes }, "*");
+  }, [generatedMeshes]);
+
   if (!code || !srcDoc) {
     return (
       <div className="relative flex h-full w-full items-center justify-center bg-[var(--color-bg)] overflow-hidden">
@@ -288,7 +329,7 @@ export function Sandbox({ code, audioTracks = [], onConsoleMessage, onReload }: 
 
   return (
     <div ref={containerRef} className="relative h-full w-full bg-black">
-      <ShareBar code={code} containerRef={containerRef} onReload={handleReload} />
+      <ShareBar code={code} audioTracks={audioTracks ?? []} generatedMeshes={generatedMeshes ?? []} containerRef={containerRef} onReload={handleReload} />
       <iframe
         ref={iframeRef}
         key={`${code}:${reloadKey}`}

@@ -6,6 +6,7 @@ import type {
   AudioTrack,
   GameControl,
   GeneratedImage,
+  GeneratedMesh,
   PlanningTodo,
 } from "@/lib/game-forge-context";
 
@@ -17,6 +18,7 @@ export const ArtifactKindSchema = z.enum([
   "chat-transcript",
   "image-binary",
   "audio-binary",
+  "mesh-binary",
 ]);
 
 export type ArtifactStorage = z.infer<typeof ArtifactStorageSchema>;
@@ -76,6 +78,7 @@ export interface ProjectRevisionDocument {
   controls: GameControl[];
   planningTodos: PlanningTodo[];
   generatedImages: GeneratedImage[];
+  generatedMeshes: GeneratedMesh[];
   audioTracks: AudioTrack[];
   compiledHtml: ArtifactRef;
   chatTranscript: ArtifactRef;
@@ -116,6 +119,17 @@ const GeneratedImageSchema = z.object({
   prompt: z.string().min(1).max(5000),
 });
 
+const GeneratedMeshSchema = z.object({
+  id: z.string().min(1).max(200),
+  name: z.string().min(1).max(200),
+  prompt: z.string().max(5000),
+  status: z.enum(["pending", "refining", "ready", "error"]),
+  glbUrl: z.string().nullable(),
+  thumbnailUrl: z.string().nullable(),
+  error: z.string().nullable().optional(),
+  createdAt: z.number(),
+});
+
 const AudioTrackSchema = z.object({
   id: z.string().min(1).max(200),
   name: z.string().min(1).max(200),
@@ -145,6 +159,7 @@ export const SaveProjectSnapshotRequestSchema = z.object({
   controls: z.array(GameControlSchema).max(50).default([]),
   planningTodos: z.array(PlanningTodoSchema).max(400).default([]),
   generatedImages: z.array(GeneratedImageSchema).max(200).default([]),
+  generatedMeshes: z.array(GeneratedMeshSchema).max(100).default([]),
   audioTracks: z.array(AudioTrackSchema).max(200).default([]),
   chatMessages: z.array(PersistedChatMessageSchema).max(2000).default([]),
 });

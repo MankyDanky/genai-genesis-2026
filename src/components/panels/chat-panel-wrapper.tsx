@@ -23,6 +23,9 @@ export function ChatPanelWrapper() {
     onEngineUpdate,
     addImage,
     addAudioTrack,
+    generatedMeshes,
+    addMesh,
+    updateMesh,
     setControls,
     chatMessages,
     chatSessionId,
@@ -31,6 +34,7 @@ export function ChatPanelWrapper() {
     focusConsolePanel,
     focusImagesPanel,
     focusAudioPanel,
+    focusMeshesPanel,
     setPendingFileWrites,
     clearPendingFileWrites,
   } = useGameForge();
@@ -54,6 +58,9 @@ export function ChatPanelWrapper() {
       onEngineUpdate={onEngineUpdate}
       addImage={addImage}
       addAudioTrack={addAudioTrack}
+      generatedMeshes={generatedMeshes}
+      addMesh={addMesh}
+      updateMesh={updateMesh}
       setControls={setControls}
       chatMessages={chatMessages}
       chatSessionId={chatSessionId}
@@ -62,6 +69,7 @@ export function ChatPanelWrapper() {
       focusConsolePanel={focusConsolePanel}
       focusImagesPanel={focusImagesPanel}
       focusAudioPanel={focusAudioPanel}
+      focusMeshesPanel={focusMeshesPanel}
       setPendingFileWrites={setPendingFileWrites}
       clearPendingFileWrites={clearPendingFileWrites}
     />

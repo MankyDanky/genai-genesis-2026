@@ -48,12 +48,23 @@ export interface GeneratedImage {
   prompt: string;
 }
 
+export interface GeneratedMesh {
+  id: string;
+  name: string;
+  prompt: string;
+  status: "pending" | "refining" | "ready" | "error";
+  glbUrl: string | null;
+  thumbnailUrl: string | null;
+  error?: string | null;
+  createdAt: number;
+}
+
 export interface GameControl {
   action: string;
   keys: string;
 }
 
-type FocusPanel = "code" | "console" | "images" | "audio";
+type FocusPanel = "code" | "console" | "images" | "audio" | "meshes";
 
 export interface PanelFocusRequest {
   id: number;
@@ -124,12 +135,17 @@ interface GameForgeContextValue {
   addAudioTrack: (track: AudioTrack) => void;
   removeAudioTrack: (id: string) => void;
   addImage: (image: GeneratedImage) => void;
+  generatedMeshes: GeneratedMesh[];
+  addMesh: (mesh: GeneratedMesh) => void;
+  updateMesh: (mesh: GeneratedMesh) => void;
+  removeMesh: (id: string) => void;
   setControls: (controls: GameControl[]) => void;
   setActiveCodePath: (path: string | null) => void;
   focusCodeFile: (path: string) => void;
   focusConsolePanel: () => void;
   focusImagesPanel: () => void;
   focusAudioPanel: () => void;
+  focusMeshesPanel: () => void;
   setPendingFileWrites: (
     entries: Array<{ path: string; status: "streaming" | "finalizing"; content?: string }>
   ) => void;
@@ -282,6 +298,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [audioTracks, setAudioTracks] = useState<AudioTrack[]>([]);
   const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>([]);
+  const [generatedMeshes, setGeneratedMeshes] = useState<GeneratedMesh[]>([]);
   const [controls, setControlsState] = useState<GameControl[]>(DEFAULT_CONTROLS);
   const [focusedCodePath, setFocusedCodePath] = useState<string | null>(null);
   const [activeCodePath, setActiveCodePath] = useState<string | null>(null);
@@ -525,6 +542,24 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const addMesh = useCallback((mesh: GeneratedMesh) => {
+    setGeneratedMeshes((prev) => {
+      const existing = prev.find((m) => m.id === mesh.id);
+      if (!existing) return [mesh, ...prev];
+      return prev.map((m) => (m.id === mesh.id ? { ...existing, ...mesh, createdAt: existing.createdAt } : m));
+    });
+  }, []);
+
+  const updateMesh = useCallback((mesh: GeneratedMesh) => {
+    setGeneratedMeshes((prev) =>
+      prev.map((m) => (m.id === mesh.id ? { ...m, ...mesh } : m))
+    );
+  }, []);
+
+  const removeMesh = useCallback((id: string) => {
+    setGeneratedMeshes((prev) => prev.filter((m) => m.id !== id));
+  }, []);
+
   const setControls = useCallback((next: GameControl[]) => {
     const normalized = next
       .filter((item) => item.action && item.keys)
@@ -555,6 +590,10 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
 
   const focusAudioPanel = useCallback(() => {
     setPanelFocusRequest({ id: Date.now(), panel: "audio" });
+  }, []);
+
+  const focusMeshesPanel = useCallback(() => {
+    setPanelFocusRequest({ id: Date.now(), panel: "meshes" });
   }, []);
 
   const setPendingFileWrites = useCallback((
@@ -601,6 +640,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     setAssets([]);
     setAudioTracks([]);
     setGeneratedImages([]);
+    setGeneratedMeshes([]);
     setControlsState(DEFAULT_CONTROLS);
     setFocusedCodePath(null);
     setActiveCodePath(null);
@@ -630,6 +670,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     controls: GameControl[];
     planningTodos: PlanningTodo[];
     generatedImages: GeneratedImage[];
+    generatedMeshes?: GeneratedMesh[];
     audioTracks: AudioTrack[];
     currentCode: string;
     chatMessages: PersistedChatMessage[];
@@ -644,6 +685,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     setAssets([]);
     setAudioTracks(snapshot.audioTracks);
     setGeneratedImages(snapshot.generatedImages);
+    setGeneratedMeshes(snapshot.generatedMeshes ?? []);
     setControlsState(snapshot.controls.length > 0 ? snapshot.controls : DEFAULT_CONTROLS);
     setFocusedCodePath(null);
     setActiveCodePath(normalizedFiles[0]?.path ?? null);
@@ -664,6 +706,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     controls,
     planningTodos,
     generatedImages,
+    generatedMeshes,
     audioTracks,
     chatMessages,
   }), [
@@ -673,6 +716,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     currentCode,
     currentEngine,
     generatedImages,
+    generatedMeshes,
     planningTodos,
     projectFiles,
   ]);
@@ -852,12 +896,17 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       addAudioTrack,
       removeAudioTrack,
       addImage,
+      generatedMeshes,
+      addMesh,
+      updateMesh,
+      removeMesh,
       setControls,
       setActiveCodePath,
       focusCodeFile,
       focusConsolePanel,
       focusImagesPanel,
       focusAudioPanel,
+      focusMeshesPanel,
       setPendingFileWrites,
       clearPendingFileWrites,
       setChatMessages,
@@ -906,11 +955,16 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       addAudioTrack,
       removeAudioTrack,
       addImage,
+      generatedMeshes,
+      addMesh,
+      updateMesh,
+      removeMesh,
       setControls,
       setActiveCodePath,
       focusCodeFile,
       focusConsolePanel,
       focusImagesPanel,
+      focusMeshesPanel,
       focusAudioPanel,
       setPendingFileWrites,
       clearPendingFileWrites,
