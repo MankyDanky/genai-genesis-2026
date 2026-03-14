@@ -938,9 +938,9 @@ export function ChatPanel({
         )}
       </div>
 
-      <div className="shrink-0 border-t border-[var(--color-border)] p-2">
-        {(composerMode === "plan" || planningTodos.length > 0) && (
-          <div className="mb-2 border border-[var(--color-border)] bg-[var(--color-surface)]">
+      {(composerMode === "plan" || planningTodos.length > 0) && (
+        <div className="shrink-0 border-t border-[var(--color-border)] p-2">
+          <div className="border border-[var(--color-border)] bg-[var(--color-surface)]">
             <div className="px-2.5 py-2 border-b border-[var(--color-border)] flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <span className="text-[9px] uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Plan</span>
@@ -1012,8 +1012,10 @@ export function ChatPanel({
               </div>
             )}
           </div>
-        )}
+        </div>
+      )}
 
+      <div className="shrink-0 border-t border-[var(--color-border)] p-2">
         <div className="mb-2 flex items-center gap-2">
           <span className="text-[9px] uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Mode</span>
           <div ref={modeMenuRef} className="relative">
