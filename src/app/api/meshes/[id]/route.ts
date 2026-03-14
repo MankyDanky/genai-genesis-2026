@@ -55,10 +55,11 @@ async function finalizeMesh(id: string, mesh: StoredMesh, origin: string) {
     return getMesh(id);
   }
 
-  let localGlbUrl = glbUrl;
-  let localThumbnailUrl = task.thumbnail_url ?? null;
+  const encodedId = encodeURIComponent(id);
   let artifactId: string | null = null;
   let thumbnailArtifactId: string | null = null;
+  let localGlbUrl: string | null = null;
+  let localThumbnailUrl: string | null = null;
 
   try {
     const glbData = await downloadBuffer(glbUrl);
@@ -68,9 +69,14 @@ async function finalizeMesh(id: string, mesh: StoredMesh, origin: string) {
       data: glbData.buffer,
       filename: `${id}.glb`,
     });
-    localGlbUrl = `${origin}/api/meshes/${id}/file`;
+    localGlbUrl = `${origin}/api/meshes/${encodedId}/file`;
   } catch (error) {
     logOptionalDbFailure("Mesh GLB artifact persistence", error);
+  }
+
+  if (!localGlbUrl || !artifactId) {
+    await putMesh(id, { ...mesh, status: "error", error: "Failed to download and store GLB file" });
+    return getMesh(id);
   }
 
   if (task.thumbnail_url) {
@@ -82,7 +88,7 @@ async function finalizeMesh(id: string, mesh: StoredMesh, origin: string) {
         data: thumbData.buffer,
         filename: `${id}-thumb.png`,
       });
-      localThumbnailUrl = `${origin}/api/meshes/${id}/thumbnail`;
+      localThumbnailUrl = `${origin}/api/meshes/${encodedId}/thumbnail`;
     } catch (error) {
       logOptionalDbFailure("Mesh thumbnail artifact persistence", error);
     }
