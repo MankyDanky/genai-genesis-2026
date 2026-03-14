@@ -110,7 +110,7 @@ export function Toolbar({ panels, onTogglePanel, onResetLayout }: ToolbarProps) 
     <div
       className="h-[32px] flex items-center border-b border-[var(--color-border)] select-none shrink-0"
       style={{
-        background: "linear-gradient(180deg, var(--color-surface-light) 0%, var(--color-surface) 100%)",
+        background: "var(--color-surface)",
       }}
     >
       {/* App title */}
@@ -152,19 +152,7 @@ export function Toolbar({ panels, onTogglePanel, onResetLayout }: ToolbarProps) 
         />
       </DropdownMenu>
 
-      {/* Spacer */}
       <div className="flex-1" />
-
-      {/* Status indicator */}
-      <div className="px-4 flex items-center gap-2 h-full">
-        <div
-          className="w-2 h-2 bg-[var(--color-success)] rounded-full"
-          style={{ animation: "statusPulse 3s ease-in-out infinite" }}
-        />
-        <span className="text-[10px] text-[var(--color-text-muted)] uppercase tracking-wider font-medium">
-          Ready
-        </span>
-      </div>
     </div>
   );
 }

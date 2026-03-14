@@ -133,13 +133,7 @@ function StreamingIndicator({ phase, timer, message }: {
       className="mx-1 my-2 border border-[var(--color-border-light)] bg-[var(--color-surface)] overflow-hidden"
       style={{ animation: "fadeIn 0.3s ease-out" }}
     >
-      {/* Shimmer bar */}
-      <div className="h-[2px] w-full bg-[var(--color-border)] relative overflow-hidden">
-        <div
-          className="absolute inset-0 h-full w-1/3 bg-gradient-to-r from-transparent via-[var(--color-accent)] to-transparent"
-          style={{ animation: "shimmer 1.5s ease-in-out infinite" }}
-        />
-      </div>
+      <div className="h-[2px] w-full bg-[var(--color-accent)] opacity-40" />
 
       <div className="px-3 py-2.5 space-y-1.5">
         {/* Phase label + timer */}
@@ -507,7 +501,7 @@ export function ChatPanel({ currentCode, onCodeUpdate }: ChatPanelProps) {
 
       {/* ── Input bar (pinned to bottom) ── */}
       <div className="shrink-0 border-t border-[var(--color-border)] p-2">
-        <form onSubmit={handleSubmit} className="relative">
+        <form onSubmit={handleSubmit} className="flex items-center gap-2">
           <textarea
             ref={textareaRef}
             value={input}
@@ -516,16 +510,16 @@ export function ChatPanel({ currentCode, onCodeUpdate }: ChatPanelProps) {
             placeholder={isEmpty ? "Describe your game..." : "Ask for changes..."}
             disabled={isLoading}
             rows={1}
-            className="gf-input w-full bg-[var(--color-surface)] text-[var(--color-text)] text-[12px] leading-relaxed pl-3 pr-9 py-2 border border-[var(--color-border-light)] outline-none placeholder:text-[var(--color-text-muted)] disabled:opacity-50 resize-none overflow-hidden"
+            className="gf-input flex-1 bg-[var(--color-surface)] text-[var(--color-text)] text-[12px] leading-relaxed px-3 py-2 border border-[var(--color-border-light)] outline-none placeholder:text-[var(--color-text-muted)] disabled:opacity-50 resize-none overflow-hidden"
           />
           <button
             type="submit"
             disabled={!canSend}
-            className="absolute right-2 bottom-2 w-6 h-6 flex items-center justify-center text-[var(--color-bg)] bg-[var(--color-accent)] rounded disabled:opacity-20 disabled:cursor-default hover:bg-[var(--color-accent-dim)] transition-colors"
+            className="shrink-0 self-stretch px-2.5 flex items-center justify-center bg-[var(--color-accent)] text-[var(--color-bg)] border border-[var(--color-accent)] disabled:opacity-20 disabled:cursor-default hover:brightness-110 transition-all"
             aria-label="Send"
           >
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-              <path d="M2 10L10 6L2 2V5L7 6L2 7Z" fill="currentColor" />
+            <svg width="10" height="12" viewBox="0 0 10 12" fill="currentColor">
+              <path d="M0 0l10 6-10 6z" />
             </svg>
           </button>
         </form>

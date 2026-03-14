@@ -31,7 +31,7 @@ function InfoRow({ label, value, accent }: { label: string; value: string; accen
 }
 
 export function InspectorPanel() {
-  const { currentCode, assets, audioTracks } = useGameForge();
+  const { currentCode } = useGameForge();
 
   if (!currentCode) {
     return (
@@ -64,57 +64,6 @@ export function InspectorPanel() {
           <InfoRow label="Status" value="Running" accent />
           <InfoRow label="Size" value={`${currentCode.length} chars`} />
           <InfoRow label="Type" value="HTML5 Canvas" />
-        </Section>
-
-        <Section title="Assets">
-          {assets.length === 0 ? (
-            <p className="text-[10px] text-[var(--color-text-muted)] opacity-60 py-1">
-              No assets attached
-            </p>
-          ) : (
-            <div className="space-y-1.5">
-              {assets.map((asset) => (
-                <div key={asset.id} className="gf-list-row flex items-center gap-2 px-1 py-1 -mx-1">
-                  <div className="w-5 h-5 bg-[var(--color-surface-light)] border border-[var(--color-border)] shrink-0 flex items-center justify-center">
-                    <div className="w-2 h-2 bg-[var(--color-accent)] opacity-30" />
-                  </div>
-                  <span className="text-[10px] text-[var(--color-text)] uppercase tracking-wider truncate font-medium">
-                    {asset.name}
-                  </span>
-                  <span className="text-[9px] text-[var(--color-text-muted)] uppercase ml-auto shrink-0">
-                    {asset.type}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </Section>
-
-        <Section title="Audio">
-          {audioTracks.length === 0 ? (
-            <p className="text-[10px] text-[var(--color-text-muted)] opacity-60 py-1">
-              No audio attached
-            </p>
-          ) : (
-            <div className="space-y-1.5">
-              {audioTracks.map((track) => (
-                <div key={track.id} className="gf-list-row flex items-center gap-2 px-1 py-1 -mx-1">
-                  <span className="text-[10px] text-[var(--color-text)] uppercase tracking-wider truncate font-medium">
-                    {track.name}
-                  </span>
-                  <span
-                    className={`text-[9px] uppercase ml-auto shrink-0 font-semibold ${
-                      track.type === "music"
-                        ? "text-[var(--color-accent)]"
-                        : "text-[var(--color-success)]"
-                    }`}
-                  >
-                    {track.type}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
         </Section>
 
         <Section title="Controls">

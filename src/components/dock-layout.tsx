@@ -9,8 +9,6 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { gameForgeTheme } from "@/lib/dock-theme";
 import { SandboxPanel } from "@/components/panels/sandbox-panel";
 import { ChatPanelWrapper } from "@/components/panels/chat-panel-wrapper";
-import { AssetsPanel } from "@/components/panels/assets-panel";
-import { MusicPanel } from "@/components/panels/music-panel";
 import { CodePanel } from "@/components/panels/code-panel";
 import { InspectorPanel } from "@/components/panels/inspector-panel";
 import { Toolbar } from "@/components/toolbar";
@@ -20,8 +18,6 @@ import "dockview/dist/styles/dockview.css";
 const components = {
   sandbox: SandboxPanel,
   composer: ChatPanelWrapper,
-  assets: AssetsPanel,
-  music: MusicPanel,
   code: CodePanel,
   inspector: InspectorPanel,
 };
@@ -33,11 +29,9 @@ interface PanelDef {
 }
 
 const ALL_PANELS: PanelDef[] = [
-  { id: "sandbox", component: "sandbox", title: "Scene View" },
+  { id: "sandbox", component: "sandbox", title: "Game View" },
   { id: "composer", component: "composer", title: "Composer" },
   { id: "inspector", component: "inspector", title: "Inspector" },
-  { id: "assets", component: "assets", title: "Assets" },
-  { id: "music", component: "music", title: "Audio" },
   { id: "code", component: "code", title: "Code" },
 ];
 
@@ -45,23 +39,20 @@ function buildDefaultLayout(api: DockviewApi) {
   const w = window.innerWidth;
   const h = window.innerHeight;
 
-  // Scene View — center, main viewport
   api.addPanel({
     id: "sandbox",
     component: "sandbox",
-    title: "Scene View",
+    title: "Game View",
   });
 
-  // Composer — left sidebar
   api.addPanel({
     id: "composer",
     component: "composer",
     title: "Composer",
     position: { referencePanel: "sandbox", direction: "left" },
-    initialWidth: w * 0.20,
+    initialWidth: w * 0.22,
   });
 
-  // Inspector — right sidebar
   api.addPanel({
     id: "inspector",
     component: "inspector",
@@ -70,29 +61,12 @@ function buildDefaultLayout(api: DockviewApi) {
     initialWidth: w * 0.18,
   });
 
-  // Assets — bottom of scene view
-  api.addPanel({
-    id: "assets",
-    component: "assets",
-    title: "Assets",
-    position: { referencePanel: "sandbox", direction: "below" },
-    initialHeight: h * 0.28,
-  });
-
-  // Audio — tab next to Assets
-  api.addPanel({
-    id: "music",
-    component: "music",
-    title: "Audio",
-    position: { referencePanel: "assets", direction: "within" },
-  });
-
-  // Code — tab next to Assets/Audio
   api.addPanel({
     id: "code",
     component: "code",
     title: "Code",
-    position: { referencePanel: "assets", direction: "within" },
+    position: { referencePanel: "sandbox", direction: "below" },
+    initialHeight: h * 0.28,
   });
 }
 
