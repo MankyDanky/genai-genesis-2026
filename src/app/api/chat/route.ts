@@ -391,7 +391,8 @@ export async function POST(req: Request) {
           }),
         }),
         todo_write: tool({
-          description: "Create or update planning todos.",
+          description:
+            "Create or update planning todos. Input must be an object with keys merge:boolean and todos:array.",
           inputSchema: z.object({
             merge: z.boolean(),
             todos: z.array(
@@ -410,7 +411,7 @@ export async function POST(req: Request) {
           thinking: { type: "enabled", budgetTokens: 10000 },
         },
       },
-      stopWhen: stepCountIs(5),
+      stopWhen: stepCountIs(planningMode ? 1 : 5),
       onError: ({ error }) => {
         console.error("[API] streamText error:", error);
       },

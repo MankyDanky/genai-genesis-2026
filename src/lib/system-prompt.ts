@@ -93,7 +93,7 @@ When you create or update a game:
 6. NEVER use emojis in your text responses — plain text only`;
 
     const planningSection = planningMode
-      ? `\n\n## Planning Mode\n\nPlanning mode is ON. Before major edits, write/update concise todos with \`todo_write\` and keep statuses accurate.`
+      ? `\n\n## Planning Mode\n\nPlanning mode is ON. Before major edits, write/update concise todos with \`todo_write\` and keep statuses accurate.\n\nWhen calling \`todo_write\`, the input MUST be a JSON object (dictionary), never an array/string/number. Use this exact shape:\n{\n  "merge": true,\n  "todos": [\n    { "id": "task-1", "content": "Describe task", "status": "in_progress" }\n  ]\n}\n\nIn planning mode, call \`todo_write\` first and avoid unnecessary additional tool calls.`
       : "";
     const baseWithPlanning = `${base}${planningSection}`;
 
