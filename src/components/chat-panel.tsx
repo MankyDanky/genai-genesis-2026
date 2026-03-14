@@ -737,7 +737,7 @@ export function ChatPanel({
   );
 
   const estimatedTokens = useMemo(() => {
-    const transcriptTokens = estimateTokensFromJson(messages);
+    const transcriptTokens = estimateTokensFromJson(chatMessages);
     const contextTokens = estimateTokensFromJson({
       currentProjectFiles: projectFiles,
       currentCode,
@@ -759,7 +759,7 @@ export function ChatPanel({
     composerMode,
     currentCode,
     generatedImages,
-    messages,
+    chatMessages,
     planningTodos,
     projectFiles,
     runtimeEnv,
