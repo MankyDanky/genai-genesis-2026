@@ -15,6 +15,7 @@ import { CodePanel } from "@/components/panels/code-panel";
 import { ConsolePanel } from "@/components/panels/console-panel";
 import { InspectorPanel } from "@/components/panels/inspector-panel";
 import { ImagesPanelWrapper } from "@/components/panels/images-panel-wrapper";
+import { AudioPanelWrapper } from "@/components/panels/audio-panel-wrapper";
 import { Toolbar } from "@/components/toolbar";
 
 import "dockview/dist/styles/dockview.css";
@@ -26,6 +27,7 @@ const components = {
   console: ConsolePanel,
   inspector: InspectorPanel,
   images: ImagesPanelWrapper,
+  audio: AudioPanelWrapper,
 };
 
 interface PanelDef {
@@ -41,6 +43,7 @@ const ALL_PANELS: PanelDef[] = [
   { id: "code", component: "code", title: "Code" },
   { id: "console", component: "console", title: "Console" },
   { id: "images", component: "images", title: "Images" },
+  { id: "audio", component: "audio", title: "Audio" },
 ];
 
 function buildDefaultLayout(api: DockviewApi) {
@@ -90,6 +93,13 @@ function buildDefaultLayout(api: DockviewApi) {
     title: "Images",
     position: { referencePanel: "inspector", direction: "below" },
     initialHeight: h * 0.35,
+  });
+
+  api.addPanel({
+    id: "audio",
+    component: "audio",
+    title: "Audio",
+    position: { referencePanel: "images", direction: "within" },
   });
 
   const apiAny = api as unknown as {

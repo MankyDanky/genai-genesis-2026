@@ -1417,21 +1417,51 @@ export function ChatPanel({
         </div>
 
         <form onSubmit={handleSubmit} className="flex gap-2">
-          <textarea
-            ref={textareaRef}
-            value={input}
-            onChange={(e) => handleInputChange(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={
-              composerMode === "ask"
-                ? "Ask about the project..."
-                : isEmpty
-                  ? "Describe your game..."
-                  : "Ask for changes..."
-            }
-            rows={1}
-            className="gf-input flex-1 min-w-0 bg-[var(--color-surface)] text-[var(--color-text)] text-[12px] leading-relaxed px-3 py-2 border border-[var(--color-border-light)] outline-none placeholder:text-[var(--color-text-muted)] resize-none overflow-hidden"
-          />
+          <div className="gf-input flex-1 min-w-0 border border-[var(--color-border-light)] bg-[var(--color-surface)]">
+            {inputMentionChips.length > 0 && (
+              <div className="px-2 pt-2 pb-1 flex flex-wrap gap-1.5 border-b border-[var(--color-border)]">
+                {inputMentionChips.map((chip) => (
+                  <span
+                    key={`${chip.kind}:${chip.value}`}
+                    className="inline-flex items-center gap-1.5 rounded-sm border border-[var(--color-border-light)] bg-[var(--color-surface-light)] px-1.5 py-1 text-[9px] text-[var(--color-text-secondary)]"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => handleChipClick(chip)}
+                      className="hover:text-[var(--color-accent)]"
+                      title={chip.kind === "console" ? "Open Console panel" : `Open ${chip.value} in Code panel`}
+                    >
+                      @{chip.kind === "console" ? "console" : chip.value}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => removeMentionChip(chip)}
+                      className="text-[var(--color-text-muted)] hover:text-[var(--color-danger)]"
+                      title="Remove mention"
+                      aria-label="Remove mention"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <textarea
+              ref={textareaRef}
+              value={input}
+              onChange={(e) => handleInputChange(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={
+                composerMode === "ask"
+                  ? "Ask about the project..."
+                  : isEmpty
+                    ? "Describe your game..."
+                    : "Ask for changes..."
+              }
+              rows={1}
+              className="w-full bg-transparent text-[var(--color-text)] text-[12px] leading-relaxed px-3 py-2 outline-none placeholder:text-[var(--color-text-muted)] resize-none overflow-y-auto max-h-[150px]"
+            />
+          </div>
           <button
             type="submit"
             disabled={!canSend}
@@ -1480,35 +1510,6 @@ export function ChatPanel({
                 </button>
               ))}
             </div>
-          </div>
-        )}
-
-        {inputMentionChips.length > 0 && (
-          <div className="mt-1 flex flex-wrap gap-1.5">
-            {inputMentionChips.map((chip) => (
-              <span
-                key={`${chip.kind}:${chip.value}`}
-                className="inline-flex items-center gap-1 border border-[var(--color-border-light)] bg-[var(--color-surface-light)] px-1.5 py-0.5 text-[9px] text-[var(--color-text-secondary)]"
-              >
-                <button
-                  type="button"
-                  onClick={() => handleChipClick(chip)}
-                  className="hover:text-[var(--color-accent)]"
-                  title={chip.kind === "console" ? "Open Console panel" : `Open ${chip.value} in Code panel`}
-                >
-                  @{chip.kind === "console" ? "console" : chip.value}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => removeMentionChip(chip)}
-                  className="text-[var(--color-text-muted)] hover:text-[var(--color-danger)]"
-                  title="Remove mention"
-                  aria-label="Remove mention"
-                >
-                  ×
-                </button>
-              </span>
-            ))}
           </div>
         )}
 
