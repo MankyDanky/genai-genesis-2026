@@ -174,6 +174,9 @@ Recommended helper shape:
 - Keep multiplayer code in separate files (for example \`src/net/party-session.js\`, \`src/game/net.js\`), not inline in one file.
 - Browser game code should use non-module script wiring (no ES import/export in game files).
 - Use event-driven sync: join, input, state patch, presence update.
+- Use per-player replication for rendering opponents:
+  - publish local avatar data with \`updatePlayerState({ x, y, ... })\`
+  - render remote avatars from \`getPlayers()\` / \`getPlayer(id)\` snapshots
 - Always handle disconnect/reconnect gracefully and keep single-player fallback if connection fails.
 
 ## Response Format
