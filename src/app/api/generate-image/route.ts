@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { generateImage } from "@/lib/fal";
+import { storeImage } from "@/lib/image-store";
 
 export const maxDuration = 60;
 
@@ -33,12 +34,24 @@ export async function POST(request: Request) {
       ? `${ASSET_TYPE_PREFIXES[assetType]} ${prompt}`
       : prompt;
 
-    const url = await generateImage(enhancedPrompt);
+    const sourceUrl = await generateImage(enhancedPrompt);
+    const sourceResponse = await fetch(sourceUrl);
+
+    if (!sourceResponse.ok) {
+      throw new Error(`Failed to fetch generated image (${sourceResponse.status})`);
+    }
+
+    const buffer = Buffer.from(await sourceResponse.arrayBuffer());
+    const mimeType = sourceResponse.headers.get("content-type") || "image/png";
+    const artifactId = await storeImage(mimeType, buffer.toString("base64"));
+    const origin = new URL(request.url).origin;
+    const url = `${origin}/api/images/${artifactId}`;
 
     return NextResponse.json({ url });
-  } catch {
+  } catch (error) {
+    console.error("[Generate Image] Failed", error);
     return NextResponse.json(
-      { error: "Failed to generate image" },
+      { error: error instanceof Error ? error.message : "Failed to generate image" },
       { status: 500 },
     );
   }

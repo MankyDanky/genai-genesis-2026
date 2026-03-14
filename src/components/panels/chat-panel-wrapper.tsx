@@ -24,6 +24,9 @@ export function ChatPanelWrapper() {
     addImage,
     addAudioTrack,
     setControls,
+    chatMessages,
+    chatSessionId,
+    setChatMessages,
     focusCodeFile,
     focusConsolePanel,
     focusImagesPanel,
@@ -52,6 +55,9 @@ export function ChatPanelWrapper() {
       addImage={addImage}
       addAudioTrack={addAudioTrack}
       setControls={setControls}
+      chatMessages={chatMessages}
+      chatSessionId={chatSessionId}
+      setChatMessages={setChatMessages}
       focusCodeFile={focusCodeFile}
       focusConsolePanel={focusConsolePanel}
       focusImagesPanel={focusImagesPanel}

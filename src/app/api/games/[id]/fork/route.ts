@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
-import { getPublishedGame } from "@/lib/db/projects";
+import { forkPublishedGame } from "@/lib/db/projects";
 
-export async function GET(
+export async function POST(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
@@ -13,24 +13,21 @@ export async function GET(
       return NextResponse.json({ error: "Invalid game ID" }, { status: 400 });
     }
 
-    const game = await getPublishedGame(id);
+    const result = await forkPublishedGame(id);
 
-    if (!game) {
+    if (!result) {
       return NextResponse.json({ error: "Game not found" }, { status: 404 });
     }
 
     return NextResponse.json({
-      id: game.id,
-      code: game.code,
-      title: game.title,
-      createdAt: game.createdAt,
-      revisionNumber: game.revisionNumber,
-      projectId: game.projectId,
+      projectId: result.projectId,
+      revisionNumber: result.revisionNumber,
+      title: result.title,
     });
   } catch (error) {
-    console.error("[Games] Failed to retrieve game", error);
+    console.error("[Fork] Failed to fork game", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to retrieve game" },
+      { error: error instanceof Error ? error.message : "Failed to fork game" },
       { status: 500 },
     );
   }

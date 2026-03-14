@@ -1,4 +1,6 @@
 import { randomUUID } from "crypto";
+import { logOptionalDbFailure } from "@/lib/db/client";
+import { readArtifactBuffer, storeBinaryArtifact } from "@/lib/db/artifacts";
 
 interface StoredImage {
   mimeType: string;
@@ -10,30 +12,47 @@ const globalStore = globalThis as unknown as { __imageStore?: Map<string, Stored
 if (!globalStore.__imageStore) {
   globalStore.__imageStore = new Map();
 }
-const store = globalStore.__imageStore;
+const memoryStore = globalStore.__imageStore;
 
-const MAX_AGE_MS = 30 * 60 * 1000; // 30 minutes
+export async function storeImage(mimeType: string, base64Data: string): Promise<string> {
+  const buffer = Buffer.from(base64Data, "base64");
 
-function pruneExpired() {
-  const now = Date.now();
-  for (const [id, img] of store) {
-    if (now - img.createdAt > MAX_AGE_MS) {
-      store.delete(id);
-    }
+  try {
+    return await storeBinaryArtifact({
+      kind: "image-binary",
+      contentType: mimeType,
+      data: buffer,
+      filename: `image-${Date.now()}.bin`,
+    });
+  } catch (error) {
+    logOptionalDbFailure("Image store persistence", error);
+    const id = randomUUID();
+    memoryStore.set(id, {
+      mimeType,
+      data: buffer,
+      createdAt: Date.now(),
+    });
+    return id;
   }
 }
 
-export function storeImage(mimeType: string, base64Data: string): string {
-  pruneExpired();
-  const id = randomUUID();
-  store.set(id, {
-    mimeType,
-    data: Buffer.from(base64Data, "base64"),
-    createdAt: Date.now(),
-  });
-  return id;
-}
+export async function getImage(id: string): Promise<StoredImage | undefined> {
+  const memoryHit = memoryStore.get(id);
+  if (memoryHit) {
+    return memoryHit;
+  }
 
-export function getImage(id: string): StoredImage | undefined {
-  return store.get(id);
+  try {
+    const artifact = await readArtifactBuffer(id);
+    if (!artifact) return undefined;
+
+    return {
+      mimeType: artifact.doc.contentType,
+      data: artifact.buffer,
+      createdAt: artifact.doc.createdAt.getTime(),
+    };
+  } catch (error) {
+    logOptionalDbFailure("Image store reads", error);
+    return undefined;
+  }
 }
