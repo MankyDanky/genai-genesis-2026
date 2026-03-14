@@ -20,6 +20,7 @@
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-markdown": "^10.1.0",
+    "react-mentions": "^4.4.10",
     "react-simple-code-editor": "^0.14.1",
     "remark-gfm": "^4.0.1",
     "zod": "^4.3.6"

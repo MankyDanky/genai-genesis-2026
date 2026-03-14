@@ -267,6 +267,147 @@ body {
   color: var(--color-text);
 }
 
+.composer-mentions {
+  width: 100%;
+}
+
+.composer-mentions__control {
+  position: relative;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.25rem;
+  min-height: 34px;
+  max-height: 150px;
+  overflow: hidden;
+}
+
+.composer-mentions__highlighter {
+  position: absolute !important;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: transparent;
+  padding: 6px 12px;
+  color: transparent;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: hidden !important;
+}
+
+.composer-mentions__input {
+  position: relative;
+  display: block;
+  z-index: 2;
+  margin: 0;
+  border: 0;
+  outline: none;
+  width: 100%;
+  background: transparent;
+  color: var(--color-text);
+  -webkit-text-fill-color: var(--color-text);
+  caret-color: var(--color-text);
+  padding: 6px 12px;
+  min-height: 34px;
+  max-height: 150px;
+  overflow-y: auto;
+  overflow-x: hidden !important;
+  scrollbar-gutter: stable;
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: auto;
+  resize: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.composer-mentions__suggestions {
+  margin-top: 6px;
+  z-index: 60 !important;
+}
+
+.composer-mentions-panel {
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.composer-mentions-panel-title {
+  padding: 4px 8px;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--color-text-muted);
+}
+
+.composer-mentions-panel-list {
+  border-top: 1px solid var(--color-border);
+}
+
+.composer-mentions__suggestions__list {
+  background: transparent;
+  border: 0;
+  max-height: 160px;
+  overflow-y: auto;
+  box-shadow: none;
+}
+
+.composer-mentions__suggestions__item {
+  padding: 0;
+  background: transparent;
+}
+
+.composer-mentions__suggestions__item--focused {
+  background: var(--color-surface-light);
+}
+
+.composer-mentions-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-secondary);
+}
+
+.composer-mentions-row-icon {
+  width: 10px;
+  text-align: center;
+  opacity: 0.85;
+}
+
+.composer-mentions-row-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-mentions-row-meta {
+  margin-left: auto;
+  color: var(--color-text-muted);
+  letter-spacing: 0.06em;
+}
+
+.composer-mentions__suggestions__item--focused .composer-mentions-row {
+  color: var(--color-accent);
+}
+
+.composer-mentions__input::placeholder {
+  color: var(--color-text-muted);
+  -webkit-text-fill-color: var(--color-text-muted);
+}
+
+.composer-mention {
+  display: inline-block;
+  transform: translate(-3px, -1px);
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  font-weight: 600;
+  background: var(--color-accent);
+  border-radius: 3px;
+  padding: 0 2px;
+}
+
 /* ── Animations ── */
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(4px); }

@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 import { useState, useEffect, useRef, useMemo, useCallback, type FormEvent, type KeyboardEvent } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { Mention, MentionsInput } from "react-mentions";
 import type { GameEngine } from "@/lib/game-engine";
 import type { ProjectFile } from "@/lib/project-files";
 import type { PlanningTodo, ConsoleLogEntry, GeneratedImage, PendingFileWrite, GameControl } from "@/lib/game-forge-context";
@@ -46,18 +47,6 @@ interface ChatPanelProps {
 }
 
 type ComposerMode = "agent" | "plan" | "debug" | "ask";
-type MentionSuggestion = {
-  id: string;
-  kind: "console" | "file";
-  value: string;
-  label: string;
-  insertText: string;
-};
-
-type InputMentionChip = {
-  kind: "file" | "console";
-  value: string;
-};
 
 const EXAMPLE_PROMPTS = [
   "Space Invaders",
@@ -191,6 +180,47 @@ function useRotatingMessage(phase: GenerationPhase, isActive: boolean) {
   if (phase === "done" || phase === "thinking") return "";
   const msgs = PHASE_MESSAGES[phase];
   return msgs[count % msgs.length];
+}
+
+function useComposerAutoHeight(
+  inputRef: { current: HTMLTextAreaElement | null },
+  value: string
+) {
+  useEffect(() => {
+    const inputEl = inputRef.current;
+    if (!inputEl) return;
+    const rootEl = inputEl.parentElement as HTMLDivElement | null;
+    const highlighter = rootEl?.querySelector<HTMLDivElement>(".composer-mentions__highlighter") ?? null;
+
+    inputEl.style.height = "auto";
+    if (rootEl) rootEl.style.height = "auto";
+    const nextHeight = Math.max(34, Math.min(inputEl.scrollHeight, 150));
+    inputEl.style.height = `${nextHeight}px`;
+    inputEl.style.overflowY = inputEl.scrollHeight > 150 ? "auto" : "hidden";
+    if (rootEl) {
+      rootEl.style.height = `${nextHeight}px`;
+    }
+    if (highlighter) {
+      highlighter.style.height = `${nextHeight}px`;
+    }
+  }, [inputRef, value]);
+}
+
+function isMentionQueryActive(value: string, cursor: number) {
+  const beforeCursor = value.slice(0, cursor);
+  return /(?:^|\s)@([a-zA-Z0-9_./:-]*)$/.test(beforeCursor);
+}
+
+function getMentionAtCursor(text: string, cursor: number) {
+  const safeCursor = Math.max(0, Math.min(cursor, text.length));
+  const left = text.slice(0, safeCursor);
+  const right = text.slice(safeCursor);
+  const leftToken = left.match(/@([^\s@]+)$/);
+  if (!leftToken) return null;
+  const rightToken = right.match(/^([^\s@]*)/);
+  const token = `${leftToken[1] ?? ""}${rightToken?.[1] ?? ""}`.trim();
+  if (!token) return null;
+  return `@${token}`;
 }
 
 function StreamingIndicator({ phase, timer, message }: {
@@ -394,15 +424,6 @@ function ReasoningBlock({ text, isStreaming }: { text: string; isStreaming: bool
   );
 }
 
-function useAutoResize(textareaRef: React.RefObject<HTMLTextAreaElement | null>, value: string) {
-  useEffect(() => {
-    const el = textareaRef.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 150)}px`;
-  }, [textareaRef, value]);
-}
-
 export function ChatPanel({
   currentCode,
   currentEngine,
@@ -432,14 +453,9 @@ export function ChatPanel({
   const modeMenuPopupRef = useRef<HTMLDivElement>(null);
   const modeMenuButtonRef = useRef<HTMLButtonElement>(null);
   const planListRef = useRef<HTMLDivElement>(null);
-  const inputOverlayRef = useRef<HTMLDivElement>(null);
   const lastPlanAutoScrollRef = useRef(0);
-  const mentionItemRefs = useRef<Map<string, HTMLButtonElement | null>>(new Map());
   const processedToolPayloadRef = useRef<Map<string, string>>(new Map());
   const [input, setInput] = useState("");
-  const [mentionQuery, setMentionQuery] = useState("");
-  const [mentionStart, setMentionStart] = useState<number | null>(null);
-  const [mentionIndex, setMentionIndex] = useState(0);
   const [selectedEngine, setSelectedEngine] = useState<GameEngine>(currentEngine);
   const [composerMode, setComposerMode] = useState<ComposerMode>("agent");
   const [isModeMenuOpen, setIsModeMenuOpen] = useState(false);
@@ -450,91 +466,39 @@ export function ChatPanel({
   const planningMode = composerMode === "plan";
   const canPortal = typeof document !== "undefined";
 
-  const mentionSuggestions = useMemo(() => {
-    if (mentionStart === null) return [] as MentionSuggestion[];
-    const rawQuery = mentionQuery.toLowerCase();
-    const fileQuery = rawQuery.startsWith("file:") ? rawQuery.slice(5) : rawQuery;
+  const mentionItems = useMemo(
+    () => [
+      { id: "console", display: "console" },
+      ...Array.from(
+        new Set(
+          projectFiles
+            .map((file) => file.path)
+            .concat(pendingFileWrites.map((entry) => entry.path))
+            .filter((path): path is string => isStableProjectPath(path))
+        )
+      ).map((path) => ({ id: path, display: path })),
+    ],
+    [pendingFileWrites, projectFiles]
+  );
 
-    const fileSuggestions: MentionSuggestion[] = projectFiles
-      .map((file) => file.path)
-      .concat(pendingFileWrites.map((entry) => entry.path))
-      .filter((value, index, all) => all.indexOf(value) === index)
-      .filter((path) => path.toLowerCase().includes(fileQuery))
-      .slice(0, 7)
-      .map((path) => {
-        const needsFilePrefix = path.toLowerCase() === "console";
-        return {
-          id: `file:${path}`,
-          kind: "file" as const,
-          value: path,
-          label: path,
-          insertText: needsFilePrefix ? `file:${path}` : path,
-        };
-      });
-
-    const includeConsoleSuggestion =
-      "console".includes(rawQuery) || "runtime".includes(rawQuery) || rawQuery.length === 0;
-
-    const consoleSuggestion: MentionSuggestion[] = includeConsoleSuggestion
-      ? [
-          {
-            id: "console",
-            kind: "console",
-            value: "console",
-            label: "Runtime Console",
-            insertText: "console",
-          },
-        ]
-      : [];
-
-    return [...consoleSuggestion, ...fileSuggestions].slice(0, 8);
-  }, [mentionQuery, mentionStart, pendingFileWrites, projectFiles]);
-
-  const inlineInputSegments = useMemo(() => {
-    const parts = input.split(/(@[^\s]+)/g);
-    return parts.map((part, idx) => {
-      if (!part.startsWith("@")) {
-        return { key: `text-${idx}`, type: "text" as const, text: part };
+  const handleMentionChipClick = useCallback(
+    (label: string) => {
+      const token = label.replace(/^@/, "").trim();
+      if (!token) return;
+      if (token.toLowerCase() === "console") {
+        focusConsolePanel();
+        return;
       }
-      const raw = part.slice(1);
-      const lower = raw.toLowerCase();
-      if (lower === "console") {
-        return { key: `chip-${idx}`, type: "chip" as const, chip: { kind: "console" as const, value: "console" } };
-      }
-      const normalized = lower.startsWith("file:") ? raw.slice(5) : raw;
-      if (projectFiles.some((file) => file.path === normalized)) {
-        return { key: `chip-${idx}`, type: "chip" as const, chip: { kind: "file" as const, value: normalized } };
-      }
-      return { key: `text-${idx}`, type: "text" as const, text: part };
-    });
-  }, [input, projectFiles]);
-
-  const handleChipClick = useCallback((chip: InputMentionChip) => {
-    if (chip.kind === "console") {
-      focusConsolePanel();
-      return;
-    }
-    focusCodeFile(chip.value);
-  }, [focusCodeFile, focusConsolePanel]);
-
-  const syncInputOverlayScroll = useCallback(() => {
-    if (!textareaRef.current || !inputOverlayRef.current) return;
-    inputOverlayRef.current.scrollTop = textareaRef.current.scrollTop;
-    inputOverlayRef.current.scrollLeft = textareaRef.current.scrollLeft;
-  }, []);
+      const normalized = token.toLowerCase().startsWith("file:") ? token.slice(5) : token;
+      if (!projectFiles.some((file) => file.path === normalized)) return;
+      focusCodeFile(normalized);
+    },
+    [focusCodeFile, focusConsolePanel, projectFiles]
+  );
 
   useEffect(() => {
     setSelectedEngine(currentEngine);
   }, [currentEngine]);
-
-  useEffect(() => {
-    if (mentionSuggestions.length === 0) return;
-    const active = mentionSuggestions[mentionIndex];
-    if (!active) return;
-    const activeEl = mentionItemRefs.current.get(active.id);
-    if (!activeEl) return;
-    activeEl.scrollIntoView({ block: "nearest" });
-  }, [mentionIndex, mentionSuggestions]);
 
   useEffect(() => {
     if (!isModeMenuOpen) return;
@@ -853,8 +817,6 @@ export function ChatPanel({
     setControls,
     setPendingFileWrites,
     clearPendingFileWrites,
-    focusCodeFile,
-    focusConsolePanel,
     selectedEngine,
     projectFiles,
   ]);
@@ -874,11 +836,11 @@ export function ChatPanel({
 
   const timer = useElapsedTimer(isLoading);
   const quirkyMessage = useRotatingMessage(phase, isLoading);
-
-  useAutoResize(textareaRef, input);
+  useComposerAutoHeight(textareaRef, input);
 
   const doSubmit = () => {
-    const text = input.trim();
+    const visibleText = textareaRef.current?.value ?? input;
+    const text = visibleText.trim();
     if (!text || isLoading) return;
     const isFirstUserPrompt = messages.filter((m) => m.role === "user").length === 0;
     const effectiveEngine = isFirstUserPrompt ? inferEngineFromPrompt(text) : selectedEngine;
@@ -919,9 +881,6 @@ export function ChatPanel({
       : [];
     clearPendingFileWrites();
     setInput("");
-    setMentionQuery("");
-    setMentionStart(null);
-    setMentionIndex(0);
     sendMessage({
       text,
     }, {
@@ -947,75 +906,27 @@ export function ChatPanel({
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (mentionSuggestions.length > 0 && e.key === "ArrowDown") {
-      e.preventDefault();
-      setMentionIndex((prev) => (prev + 1) % mentionSuggestions.length);
-      return;
-    }
-
-    if (mentionSuggestions.length > 0 && e.key === "ArrowUp") {
-      e.preventDefault();
-      setMentionIndex((prev) => (prev - 1 + mentionSuggestions.length) % mentionSuggestions.length);
-      return;
-    }
-
-    if (mentionSuggestions.length > 0 && (e.key === "Tab" || e.key === "Enter")) {
-      e.preventDefault();
-      const selected = mentionSuggestions[mentionIndex] ?? mentionSuggestions[0];
-      if (!selected) return;
-
-      const cursor = textareaRef.current?.selectionStart ?? input.length;
-      const start = mentionStart ?? cursor;
-      const next = `${input.slice(0, start)}@${selected.insertText} ${input.slice(cursor)}`;
-      setInput(next);
-      setMentionQuery("");
-      setMentionStart(null);
-      setMentionIndex(0);
-      requestAnimationFrame(() => {
-        const pos = start + selected.insertText.length + 2;
-        textareaRef.current?.focus();
-        textareaRef.current?.setSelectionRange(pos, pos);
-      });
-      return;
-    }
-
     if (e.key === "Enter" && !e.shiftKey) {
+      const cursor = textareaRef.current?.selectionStart ?? input.length;
+      if (isMentionQueryActive(input, cursor)) return;
       e.preventDefault();
       doSubmit();
     }
   };
 
-  const handleInputChange = (value: string) => {
-    setInput(value);
-    const cursor = textareaRef.current?.selectionStart ?? value.length;
-    const beforeCursor = value.slice(0, cursor);
-    const mentionMatch = beforeCursor.match(/(?:^|\s)@([a-zA-Z0-9_./:-]*)$/);
-    if (!mentionMatch) {
-      setMentionQuery("");
-      setMentionStart(null);
-      setMentionIndex(0);
-      return;
-    }
-    const query = mentionMatch[1] ?? "";
-    setMentionQuery(query);
-    setMentionStart(cursor - query.length - 1);
-    setMentionIndex(0);
-  };
-
-  const applyMention = (suggestion: MentionSuggestion) => {
-    const cursor = textareaRef.current?.selectionStart ?? input.length;
-    const start = mentionStart ?? cursor;
-    const next = `${input.slice(0, start)}@${suggestion.insertText} ${input.slice(cursor)}`;
-    setInput(next);
-    setMentionQuery("");
-    setMentionStart(null);
-    setMentionIndex(0);
-    requestAnimationFrame(() => {
-      const pos = start + suggestion.insertText.length + 2;
-      textareaRef.current?.focus();
-      textareaRef.current?.setSelectionRange(pos, pos);
-    });
-  };
+  const handleComposerScroll = useCallback(() => {
+    const inputEl = textareaRef.current;
+    if (!inputEl) return;
+    const rootEl = inputEl.parentElement;
+    const highlighter = rootEl?.querySelector<HTMLDivElement>(".composer-mentions__highlighter") ?? null;
+    if (!highlighter) return;
+    const maxTop = Math.max(0, inputEl.scrollHeight - inputEl.clientHeight);
+    const maxLeft = Math.max(0, inputEl.scrollWidth - inputEl.clientWidth);
+    const top = Math.min(maxTop, Math.max(0, inputEl.scrollTop));
+    const left = Math.min(maxLeft, Math.max(0, inputEl.scrollLeft));
+    highlighter.scrollTop = top;
+    highlighter.scrollLeft = left;
+  }, []);
 
   const handleExampleClick = (prompt: string) => {
     setInput(prompt.toLowerCase());
@@ -1401,34 +1312,33 @@ export function ChatPanel({
 
         <form onSubmit={handleSubmit} className="flex gap-2">
           <div className="gf-input relative flex-1 min-w-0 border border-[var(--color-border-light)] bg-[var(--color-surface)]">
-            <div
-              ref={inputOverlayRef}
-              aria-hidden
-              className="absolute inset-0 px-3 py-2 font-[var(--font-mono)] text-[12px] leading-[1.4rem] whitespace-pre-wrap break-words overflow-y-auto pointer-events-none"
-            >
-              {inlineInputSegments.map((segment) => (
-                segment.type === "text" ? (
-                  <span key={segment.key} className="text-[var(--color-text)]">{segment.text}</span>
-                ) : (
-                  <button
-                    key={segment.key}
-                    type="button"
-                    tabIndex={-1}
-                    onClick={() => handleChipClick(segment.chip)}
-                    className="pointer-events-auto inline align-baseline rounded-[4px] bg-[var(--color-accent-glow)] text-[12px] leading-[1.4rem] text-[var(--color-accent)] shadow-[inset_0_0_0_1px_rgba(88,166,255,0.35)]"
-                    title={segment.chip.kind === "console" ? "Open Console panel" : `Open ${segment.chip.value} in Code panel`}
-                  >
-                    @{segment.chip.kind === "console" ? "console" : segment.chip.value}
-                  </button>
-                )
-              ))}
-            </div>
-            <textarea
-              ref={textareaRef}
+            <MentionsInput
               value={input}
-              onChange={(e) => handleInputChange(e.target.value)}
+              onChange={(_, newValue) => setInput(newValue)}
               onKeyDown={handleKeyDown}
-              onScroll={syncInputOverlayScroll}
+              onScroll={handleComposerScroll}
+              onMouseUp={() => {
+                const inputEl = textareaRef.current;
+                if (!inputEl) return;
+                if (inputEl.selectionStart !== inputEl.selectionEnd) return;
+                const mention = getMentionAtCursor(inputEl.value, inputEl.selectionStart);
+                if (!mention) return;
+                handleMentionChipClick(mention);
+                requestAnimationFrame(() => inputEl.focus());
+              }}
+              onMouseDown={(e) => {
+                const target = e.target as HTMLElement;
+                const chip = target.closest(".composer-mention") as HTMLElement | null;
+                if (chip) {
+                  e.preventDefault();
+                  handleMentionChipClick(chip.innerText || chip.textContent || "");
+                  requestAnimationFrame(() => textareaRef.current?.focus());
+                  return;
+                }
+              }}
+              inputRef={textareaRef}
+              a11ySuggestionsListLabel="File and console mentions"
+              className="composer-mentions"
               placeholder={
                 composerMode === "ask"
                   ? "Ask about the project..."
@@ -1436,14 +1346,36 @@ export function ChatPanel({
                     ? "Describe your game..."
                     : "Ask for changes..."
               }
-              rows={1}
-              className="relative z-10 w-full bg-transparent font-[var(--font-mono)] text-[12px] leading-[1.4rem] px-3 py-2 outline-none placeholder:text-[var(--color-text-muted)] resize-none overflow-y-auto max-h-[150px]"
-              style={{
-                color: input.length === 0 ? "var(--color-text)" : "transparent",
-                WebkitTextFillColor: input.length === 0 ? "var(--color-text)" : "transparent",
-                caretColor: "var(--color-text)",
-              }}
-            />
+              allowSuggestionsAboveCursor
+              forceSuggestionsAboveCursor={false}
+              customSuggestionsContainer={(children) => (
+                <div className="composer-mentions-panel">
+                  <div className="composer-mentions-panel-title">Mentions</div>
+                  <div className="composer-mentions-panel-list">{children}</div>
+                </div>
+              )}
+              spellCheck={false}
+            >
+              <Mention
+                trigger="@"
+                data={mentionItems}
+                markup="@[__display__](__id__)"
+                appendSpaceOnAdd
+                displayTransform={(_, display) => `@${display}`}
+                className="composer-mention"
+                renderSuggestion={(entry, _search, highlightedDisplay) => (
+                  <span className="composer-mentions-row">
+                    <span className="composer-mentions-row-icon">{entry.id === "console" ? ">" : "#"}</span>
+                    <span className="composer-mentions-row-label">
+                      @{highlightedDisplay}
+                    </span>
+                    <span className="composer-mentions-row-meta">
+                      {entry.id === "console" ? "runtime" : "file"}
+                    </span>
+                  </span>
+                )}
+              />
+            </MentionsInput>
           </div>
           <button
             type="submit"
@@ -1456,45 +1388,6 @@ export function ChatPanel({
             </svg>
           </button>
         </form>
-        {mentionSuggestions.length > 0 && (
-          <div className="mt-1 border border-[var(--color-border)] bg-[var(--color-surface)]">
-            <div className="px-2 py-1 text-[9px] uppercase tracking-[0.12em] text-[var(--color-text-muted)]">
-              Mentions
-            </div>
-            <div className="max-h-28 overflow-y-auto border-t border-[var(--color-border)]">
-              {mentionSuggestions.map((suggestion) => (
-                <button
-                  key={suggestion.id}
-                  ref={(el) => {
-                    mentionItemRefs.current.set(suggestion.id, el);
-                  }}
-                  type="button"
-                  onClick={() => applyMention(suggestion)}
-                  className={`w-full text-left px-2 py-1.5 text-[10px] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-light)] ${
-                    mentionSuggestions[mentionIndex]?.id === suggestion.id ? "bg-[var(--color-surface-light)]" : ""
-                  }`}
-                >
-                  <span className="inline-flex items-center gap-1.5">
-                    {suggestion.kind === "console" ? (
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                        <polyline points="4 17 10 11 4 5" />
-                        <line x1="12" y1="19" x2="20" y2="19" />
-                      </svg>
-                    ) : (
-                      <span className="text-[9px] opacity-70">#</span>
-                    )}
-                    <span>
-                      @{suggestion.insertText}
-                      <span className="ml-1 text-[var(--color-text-muted)]">
-                        {suggestion.kind === "console" ? "(runtime)" : "(file)"}
-                      </span>
-                    </span>
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
 
         <div className="flex items-center justify-between px-1 pt-1">
           <span className="text-[9px] text-[var(--color-text-muted)]">
