@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Editor from "react-simple-code-editor";
 import Prism from "prismjs";
 import "prismjs/components/prism-markup";
@@ -43,6 +44,8 @@ type ContextTarget =
 type ContextMenuState = {
   x: number;
   y: number;
+  anchorX: number;
+  anchorY: number;
   target: ContextTarget;
 };
 
@@ -382,6 +385,7 @@ export function CodePanel() {
   const explorerRef = useRef<HTMLDivElement>(null);
   const createInputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
   const lastCreateSignatureRef = useRef<string>("");
 
   const [sidebarWidth, setSidebarWidth] = useState(260);
@@ -394,6 +398,7 @@ export function CodePanel() {
   const [createState, setCreateState] = useState<CreateState | null>(null);
   const [draggedFilePath, setDraggedFilePath] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const canPortal = typeof document !== "undefined";
 
   const tree = useMemo(
     () => buildTree(codeFiles.map((file) => file.path), virtualFolders),
@@ -579,6 +584,31 @@ export function CodePanel() {
     return () => document.removeEventListener("mousedown", onClickOutside);
   }, [closeContextMenu, contextMenu]);
 
+  useEffect(() => {
+    if (!contextMenu || !contextMenuRef.current) return;
+    const rect = contextMenuRef.current.getBoundingClientRect();
+    const pad = 8;
+    const viewportW = window.innerWidth;
+    const viewportH = window.innerHeight;
+
+    let nextX = contextMenu.anchorX;
+    let nextY = contextMenu.anchorY;
+
+    if (nextX + rect.width > viewportW - pad) {
+      nextX = Math.max(pad, contextMenu.anchorX - rect.width);
+    }
+    if (nextY + rect.height > viewportH - pad) {
+      nextY = Math.max(pad, contextMenu.anchorY - rect.height);
+    }
+
+    nextX = Math.min(Math.max(nextX, pad), Math.max(pad, viewportW - rect.width - pad));
+    nextY = Math.min(Math.max(nextY, pad), Math.max(pad, viewportH - rect.height - pad));
+
+    if (nextX !== contextMenu.x || nextY !== contextMenu.y) {
+      setContextMenu((prev) => (prev ? { ...prev, x: nextX, y: nextY } : prev));
+    }
+  }, [contextMenu]);
+
   const moveFileToDirectory = useCallback(
     (sourceFilePath: string, targetDirPath: string) => {
       if (!sourceFilePath) return;
@@ -609,7 +639,13 @@ export function CodePanel() {
     if (target.kind === "folder") {
       setSelectedFolderPath(target.path);
     }
-    setContextMenu({ x: e.clientX, y: e.clientY, target });
+    setContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      anchorX: e.clientX,
+      anchorY: e.clientY,
+      target,
+    });
   };
 
   return (
@@ -713,8 +749,10 @@ export function CodePanel() {
         )}
       </div>
 
-      {contextMenu ? (
+      {canPortal && contextMenu
+        ? createPortal(
         <div
+          ref={contextMenuRef}
           data-context-menu="code-explorer"
           className="fixed z-50 min-w-[140px] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[0_10px_24px_rgba(0,0,0,0.5)]"
           style={{ left: contextMenu.x, top: contextMenu.y }}
@@ -797,7 +835,10 @@ export function CodePanel() {
             </>
           ) : null}
         </div>
-      ) : null}
+          ,
+          document.body
+        )
+        : null}
     </div>
   );
 }
