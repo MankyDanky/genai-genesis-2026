@@ -104,6 +104,18 @@ function hasMeaningfulContent(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
 }
 
+const IMMUTABLE_PROJECT_PATHS = new Set<string>([
+  "src/net/party-session.js",
+]);
+
+function normalizeProjectPath(path: string) {
+  return path.trim().replace(/^\.\//, "").replace(/\\/g, "/").replace(/^\/+/, "");
+}
+
+function isImmutableProjectPath(path: string) {
+  return IMMUTABLE_PROJECT_PATHS.has(normalizeProjectPath(path));
+}
+
 type GenerationPhase = "connecting" | "thinking" | "coding" | "executing" | "done";
 
 const PHASE_MESSAGES: Record<"connecting" | "coding" | "executing", readonly string[]> = {
@@ -1019,10 +1031,15 @@ export function ChatPanel({
           const existingPaths = new Set(projectFiles.map((file) => file.path));
           const files = rawFiles.filter((file) => {
             if (!isStableProjectPath(file?.path)) return false;
+            if (isImmutableProjectPath(file.path)) return false;
             if (existingPaths.has(file.path)) return true;
             return hasMeaningfulContent(file?.content);
           });
-          const deletePaths = Array.isArray(toolPart.input?.deletePaths) ? toolPart.input.deletePaths : [];
+          const deletePaths = Array.isArray(toolPart.input?.deletePaths)
+            ? toolPart.input.deletePaths.filter((path): path is string =>
+                typeof path === "string" && !isImmutableProjectPath(path)
+              )
+            : [];
           const filePaths = files.map((file) => file.path);
           const pendingEntries = files.map((file) => ({
             path: file.path,
@@ -1066,6 +1083,7 @@ export function ChatPanel({
             };
           };
           if (!toolPart.input?.path || !Array.isArray(toolPart.input.edits) || toolPart.input.edits.length === 0) continue;
+          if (isImmutableProjectPath(toolPart.input.path)) continue;
           if (toolPart.state === "input-streaming" || toolPart.state === "input-available") {
             if (isStableProjectPath(toolPart.input.path)) {
               setPendingFileWrites([
@@ -1102,6 +1120,7 @@ export function ChatPanel({
           };
           if (toolPart.state === "input-streaming" || toolPart.state === "input-available") {
             if (isStableProjectPath(toolPart.input?.targetFile)) {
+              if (isImmutableProjectPath(toolPart.input.targetFile)) continue;
               setPendingFileWrites(
                 [{
                   path: toolPart.input.targetFile,
@@ -1113,6 +1132,7 @@ export function ChatPanel({
           }
           if (toolPart.state !== "output-available") continue;
           if (!isStableProjectPath(toolPart.input?.targetFile) || typeof toolPart.input.newString !== "string") continue;
+          if (isImmutableProjectPath(toolPart.input.targetFile)) continue;
 
           const signature = JSON.stringify(toolPart.input);
           const key = `${message.id}:${partType}:${toolPart.input.targetFile}`;
@@ -1133,6 +1153,7 @@ export function ChatPanel({
           const toolPart = part as { state: string; input?: { targetFile?: string } };
           if (toolPart.state !== "output-available") continue;
           if (!toolPart.input?.targetFile) continue;
+          if (isImmutableProjectPath(toolPart.input.targetFile)) continue;
           const key = `${message.id}:${partType}:${toolPart.input.targetFile}`;
           if (processedToolPayloadRef.current.get(key) === "1") continue;
           processedToolPayloadRef.current.set(key, "1");

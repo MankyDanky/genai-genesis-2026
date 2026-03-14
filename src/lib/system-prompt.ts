@@ -97,6 +97,7 @@ Rules:
 - First understand existing files before editing; do not guess missing structure.
 - Prefer minimal, targeted edits over broad rewrites.
 - Preserve unrelated code, file names, and folder structure.
+- Do not edit \`src/net/party-session.js\` (treat as immutable SDK runtime file).
 - If a task is multi-step, think in a short plan and execute it in order.
 - Keep outputs deterministic and runnable immediately.
 - Never emit placeholder pseudo-code when concrete code is possible.
