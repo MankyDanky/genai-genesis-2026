@@ -281,19 +281,189 @@ function StreamingIndicator({ phase, timer, message }: {
   );
 }
 
-function ToolCallCard({ part }: {
+function GeneratedAudioPlayer({
+  audioId,
+  audioName,
+  audioKind,
+  onStatusChange,
+}: {
+  audioId: string;
+  audioName: string;
+  audioKind: "sfx" | "music";
+  onStatusChange?: (data: {
+    status: "ready" | "error";
+    dataUrl?: string;
+    duration?: number;
+    error?: string | null;
+  }) => void;
+}) {
+  const [status, setStatus] = useState<"pending" | "ready" | "error">("pending");
+  const [dataUrl, setDataUrl] = useState<string | null>(null);
+  const [errorText, setErrorText] = useState<string | null>(null);
+  const [duration, setDuration] = useState<number | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const stopPlayback = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.pause();
+    audio.onplay = null;
+    audio.onpause = null;
+    audio.onended = null;
+    audioRef.current = null;
+    setIsPlaying(false);
+  }, []);
+
+  useEffect(() => {
+    return () => stopPlayback();
+  }, [stopPlayback]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timerId: ReturnType<typeof setTimeout> | null = null;
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/sounds/${encodeURIComponent(audioId)}`);
+        if (!res.ok) {
+          throw new Error(`Audio status request failed (${res.status})`);
+        }
+        const payload = (await res.json()) as {
+          status?: "pending" | "ready" | "error";
+          dataUrl?: string | null;
+          duration?: number | null;
+          error?: string | null;
+        };
+        if (cancelled) return;
+
+        const nextStatus = payload.status ?? "pending";
+        setStatus(nextStatus);
+        setDataUrl(typeof payload.dataUrl === "string" ? payload.dataUrl : null);
+        setDuration(typeof payload.duration === "number" ? payload.duration : null);
+        setErrorText(typeof payload.error === "string" ? payload.error : null);
+
+        if (nextStatus === "ready" && payload.dataUrl) {
+          onStatusChange?.({
+            status: "ready",
+            dataUrl: payload.dataUrl,
+            duration: typeof payload.duration === "number" ? payload.duration : undefined,
+          });
+          return;
+        }
+
+        if (nextStatus === "error") {
+          onStatusChange?.({
+            status: "error",
+            error: typeof payload.error === "string" ? payload.error : "Audio generation failed",
+          });
+          return;
+        }
+
+        timerId = setTimeout(poll, 2200);
+      } catch (error) {
+        if (cancelled) return;
+        const message = error instanceof Error ? error.message : "Audio generation failed";
+        setStatus("error");
+        setErrorText(message);
+        onStatusChange?.({ status: "error", error: message });
+      }
+    };
+
+    void poll();
+
+    return () => {
+      cancelled = true;
+      if (timerId) clearTimeout(timerId);
+    };
+  }, [audioId, onStatusChange]);
+
+  const togglePlayback = useCallback(() => {
+    if (status !== "ready" || !dataUrl) return;
+    const current = audioRef.current;
+    if (current) {
+      if (current.paused) {
+        current.play().then(() => setIsPlaying(true)).catch(() => {});
+      } else {
+        current.pause();
+        setIsPlaying(false);
+      }
+      return;
+    }
+
+    const next = new Audio(dataUrl);
+    next.onplay = () => setIsPlaying(true);
+    next.onpause = () => setIsPlaying(false);
+    next.onended = () => {
+      setIsPlaying(false);
+      audioRef.current = null;
+    };
+    audioRef.current = next;
+    next.play().then(() => setIsPlaying(true)).catch(() => {});
+  }, [dataUrl, status]);
+
+  return (
+    <div className="px-3 py-2 border-t border-[var(--color-border)] bg-[var(--color-bg)]">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] text-[var(--color-text-muted)] uppercase tracking-[0.1em]">
+          {audioKind === "music" ? "Music" : "SFX"}: {audioName}
+        </span>
+        {status === "pending" ? (
+          <span className="text-[10px] text-[var(--color-accent)] flex items-center gap-1">
+            <svg width="9" height="9" viewBox="0 0 10 10" className="animate-spin">
+              <circle cx="5" cy="5" r="4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeDasharray="18" strokeLinecap="round" />
+            </svg>
+            Generating
+          </span>
+        ) : status === "ready" ? (
+          <button
+            type="button"
+            onClick={togglePlayback}
+            className="gf-btn-chip text-[10px] px-2 py-1 border border-[var(--color-border-light)] bg-[var(--color-surface-light)] text-[var(--color-accent)]"
+          >
+            {isPlaying ? "Pause preview" : "Preview"}
+          </button>
+        ) : (
+          <span className="text-[10px] text-[var(--color-danger)]">Error</span>
+        )}
+      </div>
+      {status === "error" && errorText ? (
+        <p className="mt-1 text-[10px] text-[var(--color-danger)]">{errorText}</p>
+      ) : null}
+      {status === "ready" && duration ? (
+        <p className="mt-1 text-[10px] text-[var(--color-text-muted)]">Duration: {Math.round(duration * 10) / 10}s</p>
+      ) : null}
+    </div>
+  );
+}
+
+function ToolCallCard({ part, onAudioStatusChange }: {
   part: {
     type: string;
     state?: string;
     input?: Record<string, unknown>;
     output?: Record<string, unknown>;
   };
+  onAudioStatusChange?: (
+    name: string,
+    kind: "sfx" | "music",
+    data: {
+      status: "ready" | "error";
+      dataUrl?: string;
+      duration?: number;
+      error?: string | null;
+    }
+  ) => void;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const rawToolName = part.type.replace("tool-", "");
   const toolName = rawToolName.toUpperCase().replace(/_/g, "_");
   const state = part.state;
   const input = part.input ?? {};
+  const isAudioTool = rawToolName === "generate_sound_effect" || rawToolName === "generate_music";
+  const audioKind: "sfx" | "music" = rawToolName === "generate_music" ? "music" : "sfx";
+  const audioName = typeof input.name === "string" ? input.name : null;
+  const audioId = audioName ? getGeneratedAudioId(audioKind, audioName) : null;
 
   const summarizeToolChange = () => {
     if (rawToolName === "patch_project_file") {
@@ -428,6 +598,14 @@ function ToolCallCard({ part }: {
           </div>
         </div>
       </div>
+      {isAudioTool && state === "output-available" && audioId && audioName ? (
+        <GeneratedAudioPlayer
+          audioId={audioId}
+          audioName={audioName}
+          audioKind={audioKind}
+          onStatusChange={(data) => onAudioStatusChange?.(audioName, audioKind, data)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -574,6 +752,28 @@ export function ChatPanel({
       );
     });
   }, [handleMentionChipClick, projectFiles]);
+
+  const handleAudioStatusChange = useCallback(
+    (
+      name: string,
+      kind: "sfx" | "music",
+      data: { status: "ready" | "error"; dataUrl?: string; duration?: number; error?: string | null }
+    ) => {
+      const id = getGeneratedAudioId(kind, name);
+      addAudioTrack({
+        id,
+        name,
+        type: kind === "music" ? "music" : "sfx",
+        description: "",
+        dataUrl: data.dataUrl ?? null,
+        status: data.status,
+        error: data.error ?? null,
+        duration: typeof data.duration === "number" ? data.duration : null,
+        createdAt: Date.now(),
+      });
+    },
+    [addAudioTrack]
+  );
 
   useEffect(() => {
     setSelectedEngine(currentEngine);
@@ -1192,6 +1392,7 @@ export function ChatPanel({
                               input?: Record<string, unknown>;
                               output?: Record<string, unknown>;
                             }}
+                            onAudioStatusChange={handleAudioStatusChange}
                           />
                         ))}
                       </div>

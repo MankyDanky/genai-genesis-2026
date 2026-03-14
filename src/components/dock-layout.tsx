@@ -10,7 +10,6 @@ import { gameForgeTheme } from "@/lib/dock-theme";
 import { useGameForge } from "@/lib/game-forge-context";
 import { getEngineLabel } from "@/lib/game-engine";
 import { SandboxPanel } from "@/components/panels/sandbox-panel";
-import { AudioPanel } from "@/components/panels/audio-panel";
 import { ChatPanelWrapper } from "@/components/panels/chat-panel-wrapper";
 import { CodePanel } from "@/components/panels/code-panel";
 import { ConsolePanel } from "@/components/panels/console-panel";
@@ -23,7 +22,6 @@ import "dockview/dist/styles/dockview.css";
 
 const components = {
   sandbox: SandboxPanel,
-  audio: AudioPanel,
   composer: ChatPanelWrapper,
   code: CodePanel,
   console: ConsolePanel,
@@ -46,7 +44,6 @@ const ALL_PANELS: PanelDef[] = [
   { id: "code", component: "code", title: "Code" },
   { id: "console", component: "console", title: "Console" },
   { id: "images", component: "images", title: "Images" },
-  { id: "audio", component: "audio", title: "Audio" },
 ];
 
 function buildDefaultLayout(api: DockviewApi) {
@@ -104,13 +101,6 @@ function buildDefaultLayout(api: DockviewApi) {
     title: "Images",
     position: { referencePanel: "inspector", direction: "below" },
     initialHeight: h * 0.35,
-  });
-
-  api.addPanel({
-    id: "audio",
-    component: "audio",
-    title: "Audio",
-    position: { referencePanel: "images", direction: "within" },
   });
 
   const apiAny = api as unknown as {

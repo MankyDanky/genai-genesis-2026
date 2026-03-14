@@ -37,7 +37,7 @@ function AudioRow({
           aria-label={isActive && isPlaying ? `Pause ${track.name}` : `Play ${track.name}`}
           className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center border border-[var(--color-border-light)] transition-all ${
             canPlay
-              ? "bg-[var(--color-surface-light)] text-[var(--color-accent)] opacity-0 group-hover:opacity-100 hover:bg-[var(--color-accent-glow)]"
+              ? "bg-[var(--color-surface-light)] text-[var(--color-accent)] opacity-100 hover:bg-[var(--color-accent-glow)]"
               : "cursor-default bg-transparent text-[var(--color-text-muted)] opacity-40"
           } ${isActive ? "opacity-100" : ""}`}
         >
