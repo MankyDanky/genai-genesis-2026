@@ -90,7 +90,6 @@ export function ChatPanel({
     onFinish,
   });
 
-  // Extract code from tool invocations
   useEffect(() => {
     for (const message of messages) {
       if (message.role !== "assistant") continue;
@@ -101,27 +100,15 @@ export function ChatPanel({
         }
         if (partType === "tool-update_sandbox") {
           const toolPart = part as { state: string; input?: { code?: string } };
-          if (toolPart.state === "output-available") {
-            if (toolPart.input?.code && toolPart.input.code !== currentCode) {
-              console.log("[Chat] Updating sandbox code, length:", toolPart.input.code.length);
-              onCodeUpdate(toolPart.input.code, selectedEngine);
-            }
+          if (toolPart.state === "output-available" && toolPart.input?.code && toolPart.input.code !== currentCode) {
+            console.log("[Chat] Updating sandbox code, length:", toolPart.input.code.length);
+            onCodeUpdate(toolPart.input.code, selectedEngine);
           }
         }
       }
     }
   }, [messages, currentCode, onCodeUpdate, selectedEngine]);
 
-  // Log status changes
-  useEffect(() => {
-    console.log("[Chat] Status:", status, "| Messages:", messages.length, "| Error:", error?.message ?? "none");
-    if (messages.length > 0) {
-      const lastMsg = messages[messages.length - 1];
-      console.log("[Chat] Last message role:", lastMsg.role, "parts:", lastMsg.parts.map(p => (p as { type: string }).type));
-    }
-  }, [status, messages, error]);
-
-  // Auto-scroll
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -138,10 +125,8 @@ export function ChatPanel({
   const doSubmit = () => {
     const text = input.trim();
     if (!text || isLoading) return;
-    console.log("[Chat] Submitting:", text, "| engine:", selectedEngine);
     setInput("");
     sendMessage({ text }, { body: { currentCode, gameEngine: selectedEngine } })
-      .then(() => console.log("[Chat] sendMessage resolved"))
       .catch((err) => console.error("[Chat] sendMessage rejected:", err));
   };
 
@@ -159,7 +144,6 @@ export function ChatPanel({
 
   return (
     <div className="flex h-full flex-col bg-[var(--color-bg)]">
-      {/* Describe section */}
       <div className="p-3 space-y-3 border-b border-[var(--color-border)]">
         <div className="gf-section-header px-3 py-1.5">
           <p className="text-[11px] text-[var(--color-text-secondary)] uppercase tracking-[0.12em] font-bold">
@@ -202,7 +186,6 @@ export function ChatPanel({
           />
         </form>
 
-        {/* Tag chips */}
         <div className="flex flex-wrap gap-1.5">
           {EXAMPLE_PROMPTS.map((prompt) => (
             <button
@@ -216,7 +199,6 @@ export function ChatPanel({
           ))}
         </div>
 
-        {/* Full-width CTA */}
         <button
           type="button"
           onClick={doSubmit}
@@ -227,7 +209,6 @@ export function ChatPanel({
         </button>
       </div>
 
-      {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
         {messages.map((message) => {
           const textParts = message.parts.filter(

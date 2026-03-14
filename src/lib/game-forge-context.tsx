@@ -47,9 +47,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
 
   const onCodeUpdate = useCallback((code: string, engine?: GameEngine) => {
     setCurrentCode(code);
-    if (engine) {
-      setCurrentEngine(engine);
-    }
+    if (engine) setCurrentEngine(engine);
   }, []);
 
   const onEngineUpdate = useCallback((engine: GameEngine) => {
