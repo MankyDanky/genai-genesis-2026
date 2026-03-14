@@ -1404,7 +1404,7 @@ export function ChatPanel({
             <div
               ref={inputOverlayRef}
               aria-hidden
-              className="absolute inset-0 px-3 py-2 text-[12px] leading-relaxed whitespace-pre-wrap break-words overflow-y-auto pointer-events-none"
+              className="absolute inset-0 px-3 py-2 font-[var(--font-mono)] text-[12px] leading-[1.4rem] whitespace-pre-wrap break-words overflow-y-auto pointer-events-none"
             >
               {inlineInputSegments.map((segment) => (
                 segment.type === "text" ? (
@@ -1415,7 +1415,7 @@ export function ChatPanel({
                     type="button"
                     tabIndex={-1}
                     onClick={() => handleChipClick(segment.chip)}
-                    className="pointer-events-auto inline-flex align-baseline items-center rounded-md border border-[var(--color-accent)]/35 bg-[var(--color-accent-glow)] px-1.5 py-[1px] text-[10px] leading-4 text-[var(--color-accent)] shadow-[inset_0_0_0_1px_rgba(88,166,255,0.2)]"
+                    className="pointer-events-auto inline align-baseline rounded-[4px] bg-[var(--color-accent-glow)] text-[12px] leading-[1.4rem] text-[var(--color-accent)] shadow-[inset_0_0_0_1px_rgba(88,166,255,0.35)]"
                     title={segment.chip.kind === "console" ? "Open Console panel" : `Open ${segment.chip.value} in Code panel`}
                   >
                     @{segment.chip.kind === "console" ? "console" : segment.chip.value}
@@ -1437,7 +1437,7 @@ export function ChatPanel({
                     : "Ask for changes..."
               }
               rows={1}
-              className="relative z-10 w-full bg-transparent text-[12px] leading-relaxed px-3 py-2 outline-none placeholder:text-[var(--color-text-muted)] resize-none overflow-y-auto max-h-[150px]"
+              className="relative z-10 w-full bg-transparent font-[var(--font-mono)] text-[12px] leading-[1.4rem] px-3 py-2 outline-none placeholder:text-[var(--color-text-muted)] resize-none overflow-y-auto max-h-[150px]"
               style={{
                 color: input.length === 0 ? "var(--color-text)" : "transparent",
                 WebkitTextFillColor: input.length === 0 ? "var(--color-text)" : "transparent",
