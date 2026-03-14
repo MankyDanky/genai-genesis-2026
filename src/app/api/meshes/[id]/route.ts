@@ -28,6 +28,32 @@ async function fetchMeshyTask(meshyTaskId: string) {
   }>;
 }
 
+async function createRefineTask(previewTaskId: string): Promise<string> {
+  const key = process.env.MESHY_API_KEY;
+  if (!key) throw new Error("MESHY_API_KEY is not set");
+
+  const res = await fetch(`${MESHY_API_BASE}/openapi/v2/text-to-3d`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      mode: "refine",
+      preview_task_id: previewTaskId,
+      enable_pbr: true,
+    }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Meshy refine API error (${res.status}): ${text}`);
+  }
+
+  const data = (await res.json()) as { result: string };
+  return data.result;
+}
+
 async function downloadBuffer(url: string): Promise<{ buffer: Buffer; contentType: string }> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Download failed (${res.status}): ${url}`);
@@ -36,8 +62,15 @@ async function downloadBuffer(url: string): Promise<{ buffer: Buffer; contentTyp
   return { buffer: Buffer.from(arrayBuffer), contentType };
 }
 
+/**
+ * Two-stage Meshy workflow:
+ *   pending  → preview task running
+ *   refining → preview done, refine (texture) task running
+ *   ready    → refine done, textured GLB stored
+ */
 async function finalizeMesh(id: string, mesh: StoredMesh, origin: string) {
-  const task = await fetchMeshyTask(mesh.meshyTaskId);
+  const activeTaskId = mesh.refineTaskId ?? mesh.meshyTaskId;
+  const task = await fetchMeshyTask(activeTaskId);
 
   if (task.status === "FAILED" || task.status === "CANCELED") {
     const errorMsg = task.task_error?.message || `Mesh generation ${task.status.toLowerCase()}`;
@@ -49,9 +82,23 @@ async function finalizeMesh(id: string, mesh: StoredMesh, origin: string) {
     return mesh;
   }
 
+  // --- Preview just succeeded → kick off refine ---
+  if (mesh.status === "pending") {
+    try {
+      const refineTaskId = await createRefineTask(mesh.meshyTaskId);
+      await putMesh(id, { ...mesh, status: "refining", refineTaskId });
+      return getMesh(id);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "Failed to start texture refinement";
+      await putMesh(id, { ...mesh, status: "error", error: msg });
+      return getMesh(id);
+    }
+  }
+
+  // --- Refine just succeeded → download textured GLB and finalize ---
   const glbUrl = task.model_urls?.glb;
   if (!glbUrl) {
-    await putMesh(id, { ...mesh, status: "error", error: "No GLB URL in completed task" });
+    await putMesh(id, { ...mesh, status: "error", error: "No GLB URL in completed refine task" });
     return getMesh(id);
   }
 
@@ -75,7 +122,7 @@ async function finalizeMesh(id: string, mesh: StoredMesh, origin: string) {
   }
 
   if (!localGlbUrl || !artifactId) {
-    await putMesh(id, { ...mesh, status: "error", error: "Failed to download and store GLB file" });
+    await putMesh(id, { ...mesh, status: "error", error: "Failed to download and store textured GLB file" });
     return getMesh(id);
   }
 
@@ -118,7 +165,7 @@ export async function GET(
     return NextResponse.json({ error: "Mesh not found" }, { status: 404 });
   }
 
-  if (mesh.status !== "pending") {
+  if (mesh.status === "ready" || mesh.status === "error") {
     return NextResponse.json({
       id,
       status: mesh.status,
@@ -134,10 +181,10 @@ export async function GET(
     const origin = new URL(request.url).origin;
     const latest = await finalizeMesh(id, mesh, origin);
 
-    if (!latest || latest.status === "pending") {
+    if (!latest || latest.status === "pending" || latest.status === "refining") {
       return NextResponse.json({
         id,
-        status: "pending",
+        status: latest?.status ?? "pending",
         name: mesh.name,
         prompt: mesh.prompt,
         glbUrl: null,

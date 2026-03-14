@@ -915,7 +915,7 @@ export async function POST(req: Request) {
         }),
         generate_mesh: tool({
           description:
-            "Generate a 3D mesh model from a text description using the Meshy API. Returns a mesh id/name and schedules async generation. The mesh will be available as a GLB file once generation completes.",
+            "Generate a textured 3D mesh model from a text description using the Meshy API. The mesh goes through two stages: geometry generation (preview) then automatic texturing (refine). Returns a mesh id/name and schedules async generation. The mesh will be available as a textured GLB file once both stages complete.",
           inputSchema: z.object({
             prompt: z.string().min(1).max(600),
             name: z.string().min(1),
@@ -952,6 +952,7 @@ export async function POST(req: Request) {
                 prompt,
                 status: "pending",
                 meshyTaskId: data.result,
+                refineTaskId: null,
                 glbUrl: null,
                 thumbnailUrl: null,
                 artifactId: null,
@@ -967,6 +968,7 @@ export async function POST(req: Request) {
                 prompt,
                 status: "error",
                 meshyTaskId: "",
+                refineTaskId: null,
                 glbUrl: null,
                 thumbnailUrl: null,
                 artifactId: null,
@@ -981,7 +983,7 @@ export async function POST(req: Request) {
         list_mesh_assets: tool({
           description: "List known generated 3D mesh assets with prompt descriptions and statuses.",
           inputSchema: z.object({
-            status: z.enum(["pending", "ready", "error"]).optional(),
+            status: z.enum(["pending", "refining", "ready", "error"]).optional(),
             limit: z.number().int().positive().max(100).optional(),
           }),
           execute: async ({ status, limit }) => {

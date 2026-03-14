@@ -3,8 +3,9 @@ import { ensureDbSetup, getDb, logOptionalDbFailure } from "@/lib/db/client";
 export interface StoredMesh {
   name: string;
   prompt: string;
-  status: "pending" | "ready" | "error";
+  status: "pending" | "refining" | "ready" | "error";
   meshyTaskId: string;
+  refineTaskId: string | null;
   glbUrl: string | null;
   thumbnailUrl: string | null;
   artifactId: string | null;
@@ -17,8 +18,9 @@ interface StoredMeshDocument {
   _id: string;
   name: string;
   prompt: string;
-  status: "pending" | "ready" | "error";
+  status: "pending" | "refining" | "ready" | "error";
   meshyTaskId: string;
+  refineTaskId: string | null;
   glbUrl: string | null;
   thumbnailUrl: string | null;
   artifactId: string | null;
@@ -51,6 +53,7 @@ export async function putMesh(id: string, mesh: StoredMesh) {
       {
         $set: {
           ...mesh,
+          refineTaskId: mesh.refineTaskId ?? null,
           artifactId: mesh.artifactId ?? null,
           thumbnailArtifactId: mesh.thumbnailArtifactId ?? null,
           error: mesh.error ?? null,
@@ -79,6 +82,7 @@ export async function getMesh(id: string): Promise<StoredMesh | null> {
       prompt: doc.prompt,
       status: doc.status,
       meshyTaskId: doc.meshyTaskId,
+      refineTaskId: doc.refineTaskId ?? null,
       glbUrl: doc.glbUrl,
       thumbnailUrl: doc.thumbnailUrl,
       artifactId: doc.artifactId ?? null,

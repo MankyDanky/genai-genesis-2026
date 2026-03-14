@@ -52,7 +52,7 @@ export interface GeneratedMesh {
   id: string;
   name: string;
   prompt: string;
-  status: "pending" | "ready" | "error";
+  status: "pending" | "refining" | "ready" | "error";
   glbUrl: string | null;
   thumbnailUrl: string | null;
   error?: string | null;

@@ -918,7 +918,7 @@ export function ChatPanel({
   const pendingMeshIdsKey = useMemo(
     () =>
       generatedMeshes
-        .filter((mesh) => mesh.status === "pending")
+        .filter((mesh) => mesh.status === "pending" || mesh.status === "refining")
         .map((mesh) => mesh.id)
         .sort()
         .join("|"),
@@ -935,14 +935,14 @@ export function ChatPanel({
     }
 
     let cancelled = false;
-    const maxRounds = 60;
+    const maxRounds = 120;
     let round = 0;
 
     const pollRound = async () => {
       if (cancelled || meshPollInFlightRef.current) return;
 
       const currentPending = Array.from(meshById.values()).filter(
-        (mesh) => mesh.status === "pending"
+        (mesh) => mesh.status === "pending" || mesh.status === "refining"
       );
       if (currentPending.length === 0) return;
 
@@ -952,10 +952,10 @@ export function ChatPanel({
         const results = await Promise.all(
           currentPending.map(async (mesh) => {
             const res = await fetch(`/api/meshes/${encodeURIComponent(mesh.id)}`);
-            if (!res.ok) return { id: mesh.id, status: "pending" as const };
+            if (!res.ok) return { id: mesh.id, status: mesh.status };
             return res.json() as Promise<{
               id: string;
-              status: "pending" | "ready" | "error";
+              status: "pending" | "refining" | "ready" | "error";
               name: string;
               prompt: string;
               glbUrl: string | null;
@@ -965,13 +965,16 @@ export function ChatPanel({
           })
         );
 
-        let hasPending = false;
+        let stillProcessing = false;
         for (const result of results) {
           if (cancelled) break;
           const existing = meshById.get(result.id);
           if (!existing) continue;
-          if (result.status === "pending") {
-            hasPending = true;
+          if (result.status === "pending" || result.status === "refining") {
+            stillProcessing = true;
+            if (result.status !== existing.status) {
+              updateMesh({ ...existing, status: result.status });
+            }
             continue;
           }
           updateMesh({
@@ -983,14 +986,14 @@ export function ChatPanel({
           });
         }
 
-        if (!cancelled && hasPending && round < maxRounds) {
+        if (!cancelled && stillProcessing && round < maxRounds) {
           meshPollTimerRef.current = setTimeout(() => {
             meshPollTimerRef.current = null;
             void pollRound();
           }, 4000);
-        } else if (!cancelled && hasPending && round >= maxRounds) {
+        } else if (!cancelled && stillProcessing && round >= maxRounds) {
           for (const mesh of currentPending) {
-            if (mesh.status !== "pending") continue;
+            if (mesh.status !== "pending" && mesh.status !== "refining") continue;
             updateMesh({
               ...mesh,
               status: "error",

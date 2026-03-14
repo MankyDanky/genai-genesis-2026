@@ -82,7 +82,7 @@ Use the exact tool names below:
 - \`todo_read\`: read current planning tasks/todos
 - \`list_audio_assets\`: list generated audio assets (name/type/description/status)
 - \`list_image_assets\`: list generated image assets (url/description)
-- \`generate_mesh\`: generate a 3D mesh model (GLB) from text description via Meshy API
+- \`generate_mesh\`: generate a textured 3D mesh model (GLB) from text description via Meshy API (two-stage: geometry then texturing)
 - \`list_mesh_assets\`: list generated 3D mesh assets (name/status/glbUrl)
 - \`todo_write\`: planning tasks/todos
 - \`update_sandbox\`: fallback single-file HTML update
@@ -124,7 +124,35 @@ ${
 - Use primitive geometry (BoxGeometry, SphereGeometry, PlaneGeometry, etc.) for simple objects
 - For complex models (characters, creatures, weapons, vehicles), use \`generate_mesh\` to create AI-generated GLB models
 - Load generated meshes via \`window.__GAMEFORGE_MESHES__\` (see 3D Meshes section below)
-- External dependencies are allowed only for Three.js-related scripts from trusted CDNs (including GLTFLoader)`
+
+### Three.js Loading (CRITICAL — follow exactly)
+
+Game code runs inside an \`about:srcdoc\` iframe. Bare module specifiers like \`from 'three'\` do NOT work without an import map. You MUST include an import map in \`index.html\` BEFORE any \`<script type="module">\` tag. Use this exact pattern:
+
+\`\`\`html
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.163.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.163.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+// ... game code using THREE.*, OrbitControls, GLTFLoader ...
+</script>
+\`\`\`
+
+Rules:
+- The import map MUST appear before any \`<script type="module">\` tag.
+- Always pin to \`three@0.163.0\` — do NOT use other versions or unversioned URLs.
+- Use \`new GLTFLoader()\` (NOT \`new THREE.GLTFLoader()\`).
+- Use \`new OrbitControls(camera, renderer.domElement)\` (NOT \`new THREE.OrbitControls(...)\`).
+- NEVER use the old UMD build (\`build/three.js\` or \`build/three.min.js\`).
+- NEVER use bare specifiers without the import map — they will fail silently in the iframe.`
         : `When in Canvas mode:
 - Use HTML5 Canvas for ALL rendering
 - NO external dependencies — no CDN links, no imports, no fetch calls`
@@ -179,6 +207,7 @@ Recommended helper shape:
 ## 3D Meshes
 
 - Mesh generation via \`generate_mesh\` is asynchronous (powered by Meshy API); do not block code generation waiting for completion.
+- Meshes go through two stages automatically: geometry generation (preview) then texturing (refine). The final GLB is fully textured with PBR materials.
 - \`generate_mesh\` accepts: \`prompt\` (description of the 3D model, max 600 chars), \`name\` (unique identifier), and optional \`modelType\` ("standard" or "lowpoly").
 - After requesting mesh generation, wire mesh loading into game code in the same response using GLTFLoader.
 - In game code, read generated meshes from \`window.__GAMEFORGE_MESHES__\`:
@@ -188,17 +217,19 @@ Recommended helper shape:
   };
   \`\`\`
 - Register an optional update hook: \`window.__onMeshesUpdated = () => { ... }\`
-- Gracefully handle missing meshes (mesh may still be generating). If a mesh name is not found, show a placeholder primitive.
+- Gracefully handle missing meshes (mesh may still be generating or texturing). If a mesh name is not found, show a placeholder primitive.
 
 Mesh integration pattern (Three.js):
-- Import GLTFLoader from CDN or Three.js addons: \`import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'\`
+- The import map (see Three.js Loading section) already maps \`'three/addons/'\` so you can import GLTFLoader normally:
+  \`import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';\`
 - Create a \`loadMesh(name)\` helper that checks \`window.__GAMEFORGE_MESHES__[name]\` and loads the GLB:
   \`\`\`
+  const gltfLoader = new GLTFLoader();
+
   function loadMesh(name, scene, options = {}) {
     const meshData = (window.__GAMEFORGE_MESHES__ || {})[name];
     if (!meshData || !meshData.glbUrl) return null;
-    const loader = new THREE.GLTFLoader();
-    loader.load(meshData.glbUrl, (gltf) => {
+    gltfLoader.load(meshData.glbUrl, (gltf) => {
       const model = gltf.scene;
       if (options.scale) model.scale.setScalar(options.scale);
       if (options.position) model.position.copy(options.position);
@@ -208,7 +239,8 @@ Mesh integration pattern (Three.js):
   }
   \`\`\`
 - In \`window.__onMeshesUpdated\`, refresh or reload meshes that were previously missing.
-- ALWAYS include GLTFLoader when using generated meshes. Use the Three.js addons import map or CDN.
+- ALWAYS include \`import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';\` when using generated meshes.
+- NEVER use \`new THREE.GLTFLoader()\` — GLTFLoader is a named import, not on the THREE namespace.
 
 ## Response Format
 

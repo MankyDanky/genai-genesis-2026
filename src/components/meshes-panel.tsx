@@ -14,17 +14,20 @@ interface MeshesPanelProps {
 }
 
 function StatusBadge({ status }: { status: GeneratedMesh["status"] }) {
-  const colors = {
-    pending: "text-[var(--color-accent)] border-[var(--color-accent)]",
-    ready: "text-[var(--color-success,#4ade80)] border-[var(--color-success,#4ade80)]",
-    error: "text-[var(--color-danger)] border-[var(--color-danger)]",
+  const config: Record<GeneratedMesh["status"], { color: string; label: string }> = {
+    pending: { color: "text-[var(--color-accent)] border-[var(--color-accent)]", label: "Generating" },
+    refining: { color: "text-[#f0ab3d] border-[#f0ab3d]", label: "Texturing" },
+    ready: { color: "text-[var(--color-success,#4ade80)] border-[var(--color-success,#4ade80)]", label: "Ready" },
+    error: { color: "text-[var(--color-danger)] border-[var(--color-danger)]", label: "Error" },
   };
+
+  const { color, label } = config[status];
 
   return (
     <span
-      className={`text-[8px] uppercase tracking-[0.1em] font-bold border px-1 py-0.5 ${colors[status]}`}
+      className={`text-[8px] uppercase tracking-[0.1em] font-bold border px-1 py-0.5 ${color}`}
     >
-      {status}
+      {label}
     </span>
   );
 }
@@ -99,7 +102,7 @@ export function MeshesPanel({ meshes, onRemoveMesh }: MeshesPanelProps) {
               style={{ animation: "fadeIn 0.2s ease-out" }}
             >
               <div className="aspect-square overflow-hidden bg-black/50 flex items-center justify-center">
-                {mesh.status === "pending" && <SpinnerIcon />}
+                {(mesh.status === "pending" || mesh.status === "refining") && <SpinnerIcon />}
                 {mesh.status === "error" && (
                   <svg
                     width="24"

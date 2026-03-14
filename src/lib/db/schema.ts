@@ -123,7 +123,7 @@ const GeneratedMeshSchema = z.object({
   id: z.string().min(1).max(200),
   name: z.string().min(1).max(200),
   prompt: z.string().max(5000),
-  status: z.enum(["pending", "ready", "error"]),
+  status: z.enum(["pending", "refining", "ready", "error"]),
   glbUrl: z.string().nullable(),
   thumbnailUrl: z.string().nullable(),
   error: z.string().nullable().optional(),
