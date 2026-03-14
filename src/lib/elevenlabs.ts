@@ -6,6 +6,12 @@ const ELEVENLABS_SOUND_MODEL = "eleven_text_to_sound_v2";
 const ELEVENLABS_MUSIC_MODEL = "music_v1";
 const ELEVENLABS_SOUND_TIMEOUT_MS = 45_000;
 const ELEVENLABS_MUSIC_TIMEOUT_MS = 90_000;
+const ELEVENLABS_SOUND_DURATION_MIN_SECONDS = 0.5;
+const ELEVENLABS_SOUND_DURATION_MAX_SECONDS = 10;
+const ELEVENLABS_SOUND_DURATION_DEFAULT_SECONDS = 2;
+const ELEVENLABS_MUSIC_DURATION_MIN_SECONDS = 10;
+const ELEVENLABS_MUSIC_DURATION_MAX_SECONDS = 120;
+const ELEVENLABS_MUSIC_DURATION_DEFAULT_SECONDS = 30;
 
 interface ElevenLabsErrorPayload {
   detail?: {
@@ -28,6 +34,11 @@ function buildErrorMessage(
   }
 
   return `ElevenLabs ${label} generation failed (${status})`;
+}
+
+function clampDuration(value: number, min: number, max: number, fallback: number): number {
+  const numericValue = Number.isFinite(value) ? value : fallback;
+  return Math.min(max, Math.max(min, numericValue));
 }
 
 async function generateAudioDataUrl({
@@ -96,13 +107,20 @@ export async function generateSoundEffectDataUrl(
   prompt: string,
   duration: number,
 ): Promise<string> {
+  const safeDuration = clampDuration(
+    duration,
+    ELEVENLABS_SOUND_DURATION_MIN_SECONDS,
+    ELEVENLABS_SOUND_DURATION_MAX_SECONDS,
+    ELEVENLABS_SOUND_DURATION_DEFAULT_SECONDS,
+  );
+
   return generateAudioDataUrl({
     endpoint: ELEVENLABS_SOUND_ENDPOINT,
     label: "sound",
     timeoutMs: ELEVENLABS_SOUND_TIMEOUT_MS,
     body: {
       text: prompt,
-      duration_seconds: duration,
+      duration_seconds: safeDuration,
       prompt_influence: 0.3,
       loop: false,
       model_id: ELEVENLABS_SOUND_MODEL,
@@ -168,13 +186,20 @@ export async function generateMusicTrackDataUrl(
   prompt: string,
   duration: number,
 ): Promise<string> {
+  const safeDuration = clampDuration(
+    duration,
+    ELEVENLABS_MUSIC_DURATION_MIN_SECONDS,
+    ELEVENLABS_MUSIC_DURATION_MAX_SECONDS,
+    ELEVENLABS_MUSIC_DURATION_DEFAULT_SECONDS,
+  );
+
   return generateAudioDataUrl({
     endpoint: ELEVENLABS_MUSIC_ENDPOINT,
     label: "music",
     timeoutMs: ELEVENLABS_MUSIC_TIMEOUT_MS,
     body: {
       prompt: sanitizeMusicPrompt(prompt),
-      music_length_ms: Math.round(duration * 1000),
+      music_length_ms: Math.round(safeDuration * 1000),
       model_id: ELEVENLABS_MUSIC_MODEL,
       force_instrumental: true,
     },

@@ -7,10 +7,35 @@ import type { ProjectFile } from "@/lib/project-files";
 import { normalizeProjectFiles } from "@/lib/project-files";
 import { getGeneratedAudioId, type GeneratedAudioKind } from "@/lib/generated-audio";
 import { storeImage } from "@/lib/image-store";
-import { soundStore, soundGenerationInflight, soundPromptCache, promptCacheKey } from "@/lib/sound-store";
-import { startAudioGeneration } from "@/lib/audio-generation";
+import { soundStore, soundGenerationInflight, soundPromptCache, promptCacheKey, putSound } from "@/lib/sound-store";
 
 export const maxDuration = 60;
+
+const SFX_DURATION_MIN_SECONDS = 0.5;
+const SFX_DURATION_MAX_SECONDS = 10;
+const SFX_DURATION_DEFAULT_SECONDS = 2;
+const MUSIC_DURATION_MIN_SECONDS = 10;
+const MUSIC_DURATION_MAX_SECONDS = 120;
+const MUSIC_DURATION_DEFAULT_SECONDS = 30;
+
+function clampDuration(value: unknown, min: number, max: number, fallback: number) {
+  const numericValue =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && value.trim().length > 0
+        ? Number(value)
+        : Number.NaN;
+
+  if (!Number.isFinite(numericValue)) {
+    return fallback;
+  }
+
+  return Math.min(max, Math.max(min, numericValue));
+}
+
+function createDurationSchema(min: number, max: number, fallback: number) {
+  return z.preprocess((value) => clampDuration(value, min, max, fallback), z.number());
+}
 
 function scheduleGeneratedAudio({
   kind,
@@ -57,8 +82,10 @@ function scheduleGeneratedAudio({
     status: "pending" as const,
     createdAt: Date.now(),
   };
-  soundStore.set(audioId, sound);
-  startAudioGeneration(audioId, sound); // fire immediately, don't wait
+  soundStore.set(audioId, sound); // sync write for immediate dedup visibility
+  void putSound(audioId, sound).catch((error) => {
+    console.error("[Audio] Failed to persist scheduled audio", error);
+  });
   return audioId;
 }
 
@@ -72,6 +99,16 @@ interface ConsoleLogPayload {
 interface GeneratedImagePayload {
   url: string;
   prompt: string;
+}
+
+interface AudioTrackPayload {
+  id: string;
+  name: string;
+  type: "music" | "sfx";
+  description: string;
+  status: "pending" | "ready" | "error";
+  duration: number | null;
+  error?: string | null;
 }
 
 interface PlanningTodoPayload {
@@ -462,7 +499,7 @@ async function removeBg(imageBuffer: Buffer, mimeType: string): Promise<{ data: 
     );
   }
 
-  const blob = new Blob([imageBuffer], { type: mimeType });
+  const blob = new Blob([new Uint8Array(imageBuffer)], { type: mimeType });
   const resultBlob = await removeBackgroundFn(blob, { model: "small", output: { format: "image/png" } });
   const arrayBuffer = await resultBlob.arrayBuffer();
   const b64 = Buffer.from(arrayBuffer).toString("base64");
@@ -502,7 +539,7 @@ async function generateImage(prompt: string, origin: string, shouldRemoveBg: boo
         mimeType = result.mimeType;
       }
 
-      const id = storeImage(mimeType, b64);
+      const id = await storeImage(mimeType, b64);
       return { url: `${origin}/api/images/${id}` };
     }
   }
@@ -522,6 +559,7 @@ export async function POST(req: Request) {
       mentionedFiles?: unknown;
       consoleLogs?: unknown;
       generatedImages?: unknown;
+      audioTracks?: unknown;
       composerMode?: unknown;
       planningMode?: unknown;
       gameEngine?: unknown;
@@ -575,6 +613,22 @@ export async function POST(req: Request) {
           })
           .slice(-120)
       : [];
+    const audioTracks: AudioTrackPayload[] = Array.isArray(parsed.audioTracks)
+      ? parsed.audioTracks
+          .filter((v): v is AudioTrackPayload => {
+            if (!v || typeof v !== "object") return false;
+            const candidate = v as Partial<AudioTrackPayload>;
+            return (
+              typeof candidate.id === "string" &&
+              typeof candidate.name === "string" &&
+              (candidate.type === "music" || candidate.type === "sfx") &&
+              typeof candidate.description === "string" &&
+              (candidate.status === "pending" || candidate.status === "ready" || candidate.status === "error") &&
+              (typeof candidate.duration === "number" || candidate.duration === null)
+            );
+          })
+          .slice(-240)
+      : [];
     const composerMode: ComposerMode = isComposerMode(parsed.composerMode)
       ? parsed.composerMode
       : parsed.planningMode === true
@@ -619,6 +673,7 @@ export async function POST(req: Request) {
         mentionedFiles,
         consoleLogs,
         generatedImages,
+        currentAudioTracks: audioTracks,
         composerMode,
         gameEngine,
         planningMode,
@@ -635,6 +690,8 @@ export async function POST(req: Request) {
             "generate_sound_effect",
             "generate_music",
             "todo_read",
+            "list_audio_assets",
+            "list_image_assets",
             "read_file",
             "list_dir",
             "dir_tree",
@@ -741,14 +798,18 @@ export async function POST(req: Request) {
           inputSchema: z.object({
             prompt: z.string().min(1),
             name: z.string().min(1),
-            duration: z.number().min(0.5).max(10).default(2),
+            duration: createDurationSchema(
+              SFX_DURATION_MIN_SECONDS,
+              SFX_DURATION_MAX_SECONDS,
+              SFX_DURATION_DEFAULT_SECONDS,
+            ),
           }),
           execute: async ({ prompt, name, duration }) => {
             try {
               scheduleGeneratedAudio({ kind: "sfx", name, prompt, duration });
               return { soundId: name, name, duration, status: "pending" };
             } catch (error) {
-              soundStore.set(getGeneratedAudioId("sfx", name), {
+              await putSound(getGeneratedAudioId("sfx", name), {
                 dataUrl: null,
                 name,
                 prompt,
@@ -767,14 +828,18 @@ export async function POST(req: Request) {
           inputSchema: z.object({
             prompt: z.string().min(1),
             name: z.string().min(1),
-            duration: z.number().min(10).max(120).default(30),
+            duration: createDurationSchema(
+              MUSIC_DURATION_MIN_SECONDS,
+              MUSIC_DURATION_MAX_SECONDS,
+              MUSIC_DURATION_DEFAULT_SECONDS,
+            ),
           }),
           execute: async ({ prompt, name, duration }) => {
             try {
               scheduleGeneratedAudio({ kind: "music", name, prompt, duration });
               return { musicId: name, name, duration, status: "pending" };
             } catch (error) {
-              soundStore.set(getGeneratedAudioId("music", name), {
+              await putSound(getGeneratedAudioId("music", name), {
                 dataUrl: null,
                 name,
                 prompt,
@@ -798,6 +863,49 @@ export async function POST(req: Request) {
             const filtered = status ? planningTodos.filter((todo) => todo.status === status) : planningTodos;
             const items = typeof limit === "number" ? filtered.slice(0, limit) : filtered;
             return { count: items.length, todos: items };
+          },
+        }),
+        list_audio_assets: tool({
+          description: "List known generated audio tracks with descriptions and statuses.",
+          inputSchema: z.object({
+            status: z.enum(["pending", "ready", "error"]).optional(),
+            type: z.enum(["music", "sfx"]).optional(),
+            limit: z.number().int().positive().max(200).optional(),
+          }),
+          execute: async ({ status, type, limit }) => {
+            let items = [...audioTracks];
+            if (status) items = items.filter((track) => track.status === status);
+            if (type) items = items.filter((track) => track.type === type);
+            if (typeof limit === "number") items = items.slice(0, limit);
+            return {
+              count: items.length,
+              tracks: items.map((track) => ({
+                id: track.id,
+                name: track.name,
+                type: track.type,
+                description: track.description,
+                status: track.status,
+                duration: track.duration,
+                error: track.error ?? null,
+              })),
+            };
+          },
+        }),
+        list_image_assets: tool({
+          description: "List known generated image assets with prompt descriptions and URLs.",
+          inputSchema: z.object({
+            limit: z.number().int().positive().max(200).optional(),
+          }),
+          execute: async ({ limit }) => {
+            const items = typeof limit === "number" ? generatedImages.slice(0, limit) : generatedImages;
+            return {
+              count: items.length,
+              images: items.map((image, index) => ({
+                id: `image:${index + 1}`,
+                url: image.url,
+                description: image.prompt,
+              })),
+            };
           },
         }),
         read_file: tool({

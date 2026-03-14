@@ -4,6 +4,7 @@ import { createContext, useContext, useState, useCallback, type ReactNode, useMe
 import type { GameEngine } from "@/lib/game-engine";
 import type { ProjectFile, ProjectFileKind } from "@/lib/project-files";
 import { compileProjectToHtml, normalizeProjectFiles } from "@/lib/project-files";
+import type { PersistedChatMessage } from "@/lib/db/schema";
 
 export interface PlanningTodo {
   id: string;
@@ -52,7 +53,7 @@ export interface GameControl {
   keys: string;
 }
 
-type FocusPanel = "code" | "console";
+type FocusPanel = "code" | "console" | "images" | "audio";
 
 export interface PanelFocusRequest {
   id: number;
@@ -64,6 +65,12 @@ export interface PendingFileWrite {
   status: "streaming" | "finalizing";
   content?: string;
 }
+
+const DEFAULT_CONTROLS: GameControl[] = [
+  { action: "Move", keys: "Arrow Keys / WASD" },
+  { action: "Action", keys: "Space" },
+  { action: "Pause", keys: "P / Esc" },
+];
 
 interface GameForgeContextValue {
   currentCode: string | null;
@@ -77,6 +84,15 @@ interface GameForgeContextValue {
   activeCodePath: string | null;
   focusedCodePath: string | null;
   panelFocusRequest: PanelFocusRequest | null;
+  projectId: string | null;
+  currentRevisionNumber: number | null;
+  lastPublishedGameId: string | null;
+  lastPublishedPlayPath: string | null;
+  projectStatusMessage: string | null;
+  projectError: string | null;
+  projectBusyAction: "save" | "load" | "publish" | null;
+  chatMessages: PersistedChatMessage[];
+  chatSessionId: string;
   onCodeUpdate: (code: string, engine?: GameEngine) => void;
   onProjectFilesUpdate: (files: ProjectFile[], engine?: GameEngine, deletePaths?: string[]) => void;
   patchProjectFiles: (files: ProjectFile[], engine?: GameEngine) => void;
@@ -112,10 +128,32 @@ interface GameForgeContextValue {
   setActiveCodePath: (path: string | null) => void;
   focusCodeFile: (path: string) => void;
   focusConsolePanel: () => void;
+  focusImagesPanel: () => void;
+  focusAudioPanel: () => void;
   setPendingFileWrites: (
     entries: Array<{ path: string; status: "streaming" | "finalizing"; content?: string }>
   ) => void;
   clearPendingFileWrites: (paths?: string[]) => void;
+  setChatMessages: (messages: PersistedChatMessage[]) => void;
+  saveProjectRevision: () => Promise<{
+    projectId: string;
+    revisionNumber: number;
+    title: string;
+    engine: GameEngine;
+  }>;
+  publishProject: () => Promise<{
+    publishId: string;
+    projectId: string;
+    revisionNumber: number;
+    playPath: string;
+  }>;
+  loadProject: (projectId: string) => Promise<{
+    projectId: string;
+    revisionNumber: number;
+    title: string;
+  }>;
+  resetWorkspace: () => void;
+  clearProjectFeedback: () => void;
 }
 
 const GameForgeContext = createContext<GameForgeContextValue | null>(null);
@@ -162,6 +200,78 @@ function mergeTodos(prev: PlanningTodo[], nextTodos: PlanningTodo[]): PlanningTo
   return merged;
 }
 
+function createChatSessionId() {
+  return `chat-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function extractProjectTitle(currentCode: string | null, projectFiles: ProjectFile[]) {
+  const html =
+    currentCode ??
+    projectFiles.find((file) => file.path === "index.html")?.content ??
+    projectFiles.find((file) => file.kind === "html")?.content ??
+    "";
+  const titleMatch = html.match(/<title>(.*?)<\/title>/i);
+  return titleMatch?.[1]?.trim() || "Untitled Game";
+}
+
+function normalizeChatMessages(messages: PersistedChatMessage[]) {
+  return messages
+    .filter(
+      (message): message is PersistedChatMessage =>
+        !!message && typeof message.id === "string" && typeof message.role === "string"
+    )
+    .slice(-2000);
+}
+
+function areUnknownValuesEqual(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+
+  if (typeof a !== typeof b) return false;
+  if (a == null || b == null) return false;
+
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i += 1) {
+      if (!areUnknownValuesEqual(a[i], b[i])) return false;
+    }
+    return true;
+  }
+
+  if (typeof a !== "object" || typeof b !== "object") return false;
+
+  const aObj = a as Record<string, unknown>;
+  const bObj = b as Record<string, unknown>;
+  const aKeys = Object.keys(aObj);
+  const bKeys = Object.keys(bObj);
+
+  if (aKeys.length !== bKeys.length) return false;
+  for (const key of aKeys) {
+    if (!(key in bObj)) return false;
+    if (!areUnknownValuesEqual(aObj[key], bObj[key])) return false;
+  }
+  return true;
+}
+
+function areChatMessagesEqual(a: PersistedChatMessage[], b: PersistedChatMessage[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (!areUnknownValuesEqual(a[i], b[i])) return false;
+  }
+  return true;
+}
+
+async function parseJsonResponse<T>(response: Response): Promise<T> {
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error =
+      payload && typeof payload === "object" && "error" in payload && typeof payload.error === "string"
+        ? payload.error
+        : `Request failed (${response.status})`;
+    throw new Error(error);
+  }
+  return payload as T;
+}
+
 export function GameForgeProvider({ children }: { children: ReactNode }) {
   const [currentCode, setCurrentCode] = useState<string | null>(null);
   const [currentEngine, setCurrentEngine] = useState<GameEngine>("canvas2d");
@@ -172,14 +282,19 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [audioTracks, setAudioTracks] = useState<AudioTrack[]>([]);
   const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>([]);
-  const [controls, setControlsState] = useState<GameControl[]>([
-    { action: "Move", keys: "Arrow Keys / WASD" },
-    { action: "Action", keys: "Space" },
-    { action: "Pause", keys: "P / Esc" },
-  ]);
+  const [controls, setControlsState] = useState<GameControl[]>(DEFAULT_CONTROLS);
   const [focusedCodePath, setFocusedCodePath] = useState<string | null>(null);
   const [activeCodePath, setActiveCodePath] = useState<string | null>(null);
   const [panelFocusRequest, setPanelFocusRequest] = useState<PanelFocusRequest | null>(null);
+  const [projectId, setProjectId] = useState<string | null>(null);
+  const [currentRevisionNumber, setCurrentRevisionNumber] = useState<number | null>(null);
+  const [lastPublishedGameId, setLastPublishedGameId] = useState<string | null>(null);
+  const [lastPublishedPlayPath, setLastPublishedPlayPath] = useState<string | null>(null);
+  const [projectStatusMessage, setProjectStatusMessage] = useState<string | null>(null);
+  const [projectError, setProjectError] = useState<string | null>(null);
+  const [projectBusyAction, setProjectBusyAction] = useState<"save" | "load" | "publish" | null>(null);
+  const [chatMessages, setChatMessagesState] = useState<PersistedChatMessage[]>([]);
+  const [chatSessionId, setChatSessionId] = useState<string>(() => createChatSessionId());
 
   const onCodeUpdate = useCallback((code: string, engine?: GameEngine) => {
     setCurrentCode(code);
@@ -434,6 +549,14 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     setPanelFocusRequest({ id: Date.now(), panel: "console" });
   }, []);
 
+  const focusImagesPanel = useCallback(() => {
+    setPanelFocusRequest({ id: Date.now(), panel: "images" });
+  }, []);
+
+  const focusAudioPanel = useCallback(() => {
+    setPanelFocusRequest({ id: Date.now(), panel: "audio" });
+  }, []);
+
   const setPendingFileWrites = useCallback((
     entries: Array<{ path: string; status: "streaming" | "finalizing"; content?: string }>
   ) => {
@@ -463,6 +586,232 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     setPendingFileWritesState((prev) => prev.filter((entry) => !remove.has(entry.path)));
   }, []);
 
+  const setChatMessages = useCallback((messages: PersistedChatMessage[]) => {
+    const normalized = normalizeChatMessages(messages);
+    setChatMessagesState((prev) => (areChatMessagesEqual(prev, normalized) ? prev : normalized));
+  }, []);
+
+  const resetWorkspace = useCallback(() => {
+    setCurrentCode(null);
+    setCurrentEngine("canvas2d");
+    setProjectFiles([]);
+    setPendingFileWritesState([]);
+    setConsoleLogs([]);
+    setPlanningTodos([]);
+    setAssets([]);
+    setAudioTracks([]);
+    setGeneratedImages([]);
+    setControlsState(DEFAULT_CONTROLS);
+    setFocusedCodePath(null);
+    setActiveCodePath(null);
+    setPanelFocusRequest(null);
+    setProjectId(null);
+    setCurrentRevisionNumber(null);
+    setLastPublishedGameId(null);
+    setLastPublishedPlayPath(null);
+    setProjectStatusMessage(null);
+    setProjectError(null);
+    setProjectBusyAction(null);
+    setChatMessagesState([]);
+    setChatSessionId(createChatSessionId());
+  }, []);
+
+  const clearProjectFeedback = useCallback(() => {
+    setProjectStatusMessage(null);
+    setProjectError(null);
+  }, []);
+
+  const applyLoadedProject = useCallback((snapshot: {
+    projectId: string;
+    revisionNumber: number;
+    title: string;
+    engine: GameEngine;
+    projectFiles: ProjectFile[];
+    controls: GameControl[];
+    planningTodos: PlanningTodo[];
+    generatedImages: GeneratedImage[];
+    audioTracks: AudioTrack[];
+    currentCode: string;
+    chatMessages: PersistedChatMessage[];
+  }) => {
+    const normalizedFiles = normalizeProjectFiles(snapshot.projectFiles);
+    setCurrentCode(snapshot.currentCode || compileProjectToHtml(normalizedFiles));
+    setCurrentEngine(snapshot.engine);
+    setProjectFiles(normalizedFiles);
+    setPendingFileWritesState([]);
+    setConsoleLogs([]);
+    setPlanningTodos(snapshot.planningTodos);
+    setAssets([]);
+    setAudioTracks(snapshot.audioTracks);
+    setGeneratedImages(snapshot.generatedImages);
+    setControlsState(snapshot.controls.length > 0 ? snapshot.controls : DEFAULT_CONTROLS);
+    setFocusedCodePath(null);
+    setActiveCodePath(normalizedFiles[0]?.path ?? null);
+    setPanelFocusRequest(null);
+    setProjectId(snapshot.projectId);
+    setCurrentRevisionNumber(snapshot.revisionNumber);
+    setLastPublishedGameId(null);
+    setLastPublishedPlayPath(null);
+    setChatMessagesState(normalizeChatMessages(snapshot.chatMessages));
+    setChatSessionId(createChatSessionId());
+  }, []);
+
+  const buildSnapshotPayload = useCallback(() => ({
+    title: extractProjectTitle(currentCode, projectFiles),
+    engine: currentEngine,
+    currentCode: currentCode ?? compileProjectToHtml(projectFiles),
+    projectFiles,
+    controls,
+    planningTodos,
+    generatedImages,
+    audioTracks,
+    chatMessages,
+  }), [
+    audioTracks,
+    chatMessages,
+    controls,
+    currentCode,
+    currentEngine,
+    generatedImages,
+    planningTodos,
+    projectFiles,
+  ]);
+
+  const persistSnapshot = useCallback(async () => {
+    const payload = buildSnapshotPayload();
+    if (!payload.currentCode && payload.projectFiles.length === 0) {
+      throw new Error("Nothing to save");
+    }
+
+    const request = projectId
+      ? fetch(`/api/projects/${projectId}/revisions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        })
+      : fetch("/api/projects", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+    return parseJsonResponse<{
+      projectId: string;
+      revisionNumber: number;
+      revisionId?: string;
+      title: string;
+      engine: GameEngine;
+    }>(await request);
+  }, [buildSnapshotPayload, projectId]);
+
+  const saveProjectRevision = useCallback(async () => {
+    setProjectBusyAction("save");
+    setProjectError(null);
+
+    try {
+      const result = await persistSnapshot();
+      setProjectId(result.projectId);
+      setCurrentRevisionNumber(result.revisionNumber);
+      setProjectStatusMessage(
+        `Saved ${result.title} as revision ${result.revisionNumber}`
+      );
+      return result;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to save project";
+      setProjectError(message);
+      throw error;
+    } finally {
+      setProjectBusyAction(null);
+    }
+  }, [persistSnapshot]);
+
+  const publishProject = useCallback(async () => {
+    setProjectBusyAction("publish");
+    setProjectError(null);
+
+    try {
+      const saved = await persistSnapshot();
+      setProjectId(saved.projectId);
+      setCurrentRevisionNumber(saved.revisionNumber);
+
+      const publishResponse = await fetch(`/api/projects/${saved.projectId}/publish`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ revisionNumber: saved.revisionNumber }),
+      });
+      const published = await parseJsonResponse<{
+        publishId: string;
+        projectId: string;
+        revisionNumber: number;
+        playPath: string;
+      }>(publishResponse);
+
+      setLastPublishedGameId(published.publishId);
+      setLastPublishedPlayPath(published.playPath);
+      setProjectStatusMessage(
+        `Published revision ${published.revisionNumber} to ${published.playPath}`
+      );
+      return published;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to publish project";
+      setProjectError(message);
+      throw error;
+    } finally {
+      setProjectBusyAction(null);
+    }
+  }, [persistSnapshot]);
+
+  const loadProject = useCallback(async (nextProjectId: string) => {
+    setProjectBusyAction("load");
+    setProjectError(null);
+
+    try {
+      const project = await parseJsonResponse<{
+        projectId: string;
+        title: string;
+        latestRevisionNumber: number;
+      }>(await fetch(`/api/projects/${nextProjectId}`));
+
+      if (!project.latestRevisionNumber) {
+        throw new Error("Project has no revisions");
+      }
+
+      const revision = await parseJsonResponse<{
+        projectId: string;
+        revisionNumber: number;
+        title: string;
+        engine: GameEngine;
+        projectFiles: ProjectFile[];
+        controls: GameControl[];
+        planningTodos: PlanningTodo[];
+        generatedImages: GeneratedImage[];
+        audioTracks: AudioTrack[];
+        currentCode: string;
+        chatMessages: PersistedChatMessage[];
+      }>(
+        await fetch(
+          `/api/projects/${nextProjectId}/revisions/${project.latestRevisionNumber}`
+        )
+      );
+
+      applyLoadedProject(revision);
+      setProjectStatusMessage(
+        `Loaded ${revision.title} revision ${revision.revisionNumber}`
+      );
+      return {
+        projectId: revision.projectId,
+        revisionNumber: revision.revisionNumber,
+        title: revision.title,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to load project";
+      setProjectError(message);
+      throw error;
+    } finally {
+      setProjectBusyAction(null);
+    }
+  }, [applyLoadedProject]);
+
   const value = useMemo(
     () => ({
       currentCode,
@@ -476,6 +825,15 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       activeCodePath,
       focusedCodePath,
       panelFocusRequest,
+      projectId,
+      currentRevisionNumber,
+      lastPublishedGameId,
+      lastPublishedPlayPath,
+      projectStatusMessage,
+      projectError,
+      projectBusyAction,
+      chatMessages,
+      chatSessionId,
       onCodeUpdate,
       onProjectFilesUpdate,
       patchProjectFiles,
@@ -498,8 +856,16 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       setActiveCodePath,
       focusCodeFile,
       focusConsolePanel,
+      focusImagesPanel,
+      focusAudioPanel,
       setPendingFileWrites,
       clearPendingFileWrites,
+      setChatMessages,
+      saveProjectRevision,
+      publishProject,
+      loadProject,
+      resetWorkspace,
+      clearProjectFeedback,
     }),
     [
       currentCode,
@@ -513,6 +879,15 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       activeCodePath,
       focusedCodePath,
       panelFocusRequest,
+      projectId,
+      currentRevisionNumber,
+      lastPublishedGameId,
+      lastPublishedPlayPath,
+      projectStatusMessage,
+      projectError,
+      projectBusyAction,
+      chatMessages,
+      chatSessionId,
       onCodeUpdate,
       onProjectFilesUpdate,
       patchProjectFiles,
@@ -535,8 +910,16 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       setActiveCodePath,
       focusCodeFile,
       focusConsolePanel,
+      focusImagesPanel,
+      focusAudioPanel,
       setPendingFileWrites,
       clearPendingFileWrites,
+      setChatMessages,
+      saveProjectRevision,
+      publishProject,
+      loadProject,
+      resetWorkspace,
+      clearProjectFeedback,
     ]
   );
 

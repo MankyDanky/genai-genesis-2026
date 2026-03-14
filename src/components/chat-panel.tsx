@@ -1,7 +1,7 @@
 "use client";
 
 import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport } from "ai";
+import { DefaultChatTransport, type UIMessage } from "ai";
 import { createPortal } from "react-dom";
 import { useState, useEffect, useRef, useMemo, useCallback, type FormEvent, type KeyboardEvent } from "react";
 import Markdown from "react-markdown";
@@ -9,10 +9,10 @@ import remarkGfm from "remark-gfm";
 import { Mention, MentionsInput } from "react-mentions";
 import type { GameEngine } from "@/lib/game-engine";
 import type { ProjectFile } from "@/lib/project-files";
-import { useGameForge } from "@/lib/game-forge-context";
 import type { PlanningTodo, ConsoleLogEntry, GeneratedImage, PendingFileWrite, GameControl, AudioTrack } from "@/lib/game-forge-context";
 import { getGeneratedAudioId } from "@/lib/generated-audio";
 import { audioPoller } from "@/lib/audio-poller";
+import type { PersistedChatMessage } from "@/lib/db/schema";
 
 interface ChatPanelProps {
   currentCode: string | null;
@@ -22,6 +22,7 @@ interface ChatPanelProps {
   planningTodos: PlanningTodo[];
   consoleLogs: ConsoleLogEntry[];
   generatedImages: GeneratedImage[];
+  audioTracks: AudioTrack[];
   onCodeUpdate: (code: string, engine?: GameEngine) => void;
   onProjectFilesUpdate: (files: ProjectFile[], engine?: GameEngine, deletePaths?: string[]) => void;
   patchProjectFiles: (files: ProjectFile[], engine?: GameEngine) => void;
@@ -42,8 +43,13 @@ interface ChatPanelProps {
   addImage: (image: GeneratedImage) => void;
   addAudioTrack: (track: AudioTrack) => void;
   setControls: (controls: GameControl[]) => void;
+  chatMessages: PersistedChatMessage[];
+  chatSessionId: string;
+  setChatMessages: (messages: PersistedChatMessage[]) => void;
   focusCodeFile: (path: string) => void;
   focusConsolePanel: () => void;
+  focusImagesPanel: () => void;
+  focusAudioPanel: () => void;
   setPendingFileWrites: (
     entries: Array<{ path: string; status: "streaming" | "finalizing"; content?: string }>
   ) => void;
@@ -58,6 +64,15 @@ const EXAMPLE_PROMPTS = [
   "Snake Game",
   "Breakout",
 ];
+
+function toMentionSlug(value: string): string {
+  return value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+}
 
 function inferEngineFromPrompt(prompt: string): GameEngine {
   const text = prompt.toLowerCase();
@@ -246,6 +261,17 @@ function normalizeMentionToken(raw: string) {
   const token = raw.replace(/^@/, "").trim();
   if (!token) return null;
   if (token.toLowerCase() === "console") return { kind: "console" as const, value: "console" };
+  if (token.toLowerCase().startsWith("image:")) {
+    return { kind: "images" as const, value: token };
+  }
+  if (token.toLowerCase().startsWith("audio:")) {
+    return { kind: "audio" as const, value: token };
+  }
+  if (token.toLowerCase().startsWith("code:")) {
+    const path = token.slice(5).trim();
+    if (!path) return null;
+    return { kind: "file" as const, value: path };
+  }
   const normalized = token.toLowerCase().startsWith("file:") ? token.slice(5) : token;
   if (!normalized) return null;
   return { kind: "file" as const, value: normalized };
@@ -298,21 +324,22 @@ function StreamingIndicator({ phase, timer, message }: {
   );
 }
 
-/// Purely presentational — reads from context, no polling
-function GeneratedAudioPlayer({ audioId, audioName, audioKind }: {
-  audioId: string;
+// Purely presentational — audioTrack passed from ToolCallCard via audioTrackById Map
+function GeneratedAudioPlayer({
+  audioName,
+  audioKind,
+  audioTrack,
+}: {
   audioName: string;
   audioKind: "sfx" | "music";
+  audioTrack?: AudioTrack;
 }) {
-  const { audioTracks } = useGameForge();
-  const track = audioTracks.find((t) => t.id === audioId);
-  const status = track?.status ?? "pending";
-  const dataUrl = track?.dataUrl ?? null;
-  const duration = track?.duration ?? null;
-  const errorText = track?.error ?? null;
-
   const [isPlaying, setIsPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const status = audioTrack?.status ?? "pending";
+  const dataUrl = audioTrack?.dataUrl ?? null;
+  const errorText = audioTrack?.error ?? null;
+  const duration = audioTrack?.duration ?? null;
 
   useEffect(() => {
     return () => {
@@ -366,13 +393,14 @@ function GeneratedAudioPlayer({ audioId, audioName, audioKind }: {
   );
 }
 
-function ToolCallCard({ part }: {
+function ToolCallCard({ part, audioTrack }: {
   part: {
     type: string;
     state?: string;
     input?: Record<string, unknown>;
     output?: Record<string, unknown>;
   };
+  audioTrack?: AudioTrack;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const rawToolName = part.type.replace("tool-", "");
@@ -452,6 +480,9 @@ function ToolCallCard({ part }: {
   if (state === "input-streaming") {
     statusText = "Preparing tool payload...";
     statusColor = "var(--color-accent)";
+  } else if (state === "output-error") {
+    statusText = (part as { errorText?: string }).errorText ?? "Tool execution failed";
+    statusColor = "var(--color-danger)";
   } else if (state === "input-available" || state === "output-available") {
     statusText = changeSummary ?? "Tool update complete";
     statusColor = "var(--color-success)";
@@ -517,11 +548,11 @@ function ToolCallCard({ part }: {
           </div>
         </div>
       </div>
-      {isAudioTool && state === "output-available" && audioId && audioName ? (
+      {isAudioTool && (state === "output-available" || state === "output-error") && audioId && audioName ? (
         <GeneratedAudioPlayer
-          audioId={audioId}
           audioName={audioName}
           audioKind={audioKind}
+          audioTrack={audioTrack}
         />
       ) : null}
     </div>
@@ -578,6 +609,7 @@ export function ChatPanel({
   planningTodos,
   consoleLogs,
   generatedImages,
+  audioTracks,
   onCodeUpdate,
   onProjectFilesUpdate,
   patchProjectFiles,
@@ -589,12 +621,18 @@ export function ChatPanel({
   addImage,
   addAudioTrack,
   setControls,
+  chatMessages,
+  chatSessionId,
+  setChatMessages,
   focusCodeFile,
   focusConsolePanel,
+  focusImagesPanel,
+  focusAudioPanel,
   setPendingFileWrites,
   clearPendingFileWrites,
 }: ChatPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const isNearBottomRef = useRef(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const modeMenuRef = useRef<HTMLDivElement>(null);
   const modeMenuPopupRef = useRef<HTMLDivElement>(null);
@@ -606,6 +644,10 @@ export function ChatPanel({
   const planningTodosRef = useRef(planningTodos);
   useEffect(() => { projectFilesRef.current = projectFiles; }, [projectFiles]);
   useEffect(() => { planningTodosRef.current = planningTodos; }, [planningTodos]);
+  const audioPollInFlightRef = useRef(false);
+  const audioPollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hydratedMessageIdsRef = useRef<Set<string>>(new Set());
+  const initialChatMessagesRef = useRef(chatMessages);
   const [input, setInput] = useState("");
   const [selectedEngine, setSelectedEngine] = useState<GameEngine>(currentEngine);
   const [composerMode, setComposerMode] = useState<ComposerMode>("agent");
@@ -618,18 +660,39 @@ export function ChatPanel({
   const canPortal = typeof document !== "undefined";
 
   const mentionItems = useMemo(
-    () => [
-      { id: "console", display: "console" },
-      ...Array.from(
-        new Set(
-          projectFiles
-            .map((file) => file.path)
-            .concat(pendingFileWrites.map((entry) => entry.path))
-            .filter((path): path is string => isStableProjectPath(path))
-        )
-      ).map((path) => ({ id: path, display: path })),
-    ],
-    [pendingFileWrites, projectFiles]
+    () => {
+      const imageSlugCounts = new Map<string, number>();
+      const imageMentions = generatedImages.map((image, index) => {
+        const base = toMentionSlug(image.prompt) || `asset-${index + 1}`;
+        const seen = imageSlugCounts.get(base) ?? 0;
+        imageSlugCounts.set(base, seen + 1);
+        const slug = seen === 0 ? base : `${base}-${seen + 1}`;
+        return {
+          id: `image:${slug}`,
+          display: `image:${slug}`,
+          meta: image.prompt || "image",
+        };
+      });
+
+      return [
+        { id: "console", display: "console", meta: "runtime" },
+        ...Array.from(
+          new Set(
+            projectFiles
+              .map((file) => file.path)
+              .concat(pendingFileWrites.map((entry) => entry.path))
+              .filter((path): path is string => isStableProjectPath(path))
+          )
+        ).map((path) => ({ id: `code:${path}`, display: `code:${path}`, meta: "file" })),
+        ...imageMentions,
+        ...audioTracks.map((track, index) => ({
+          id: `audio:${toMentionSlug(track.name) || `track-${index + 1}`}`,
+          display: `audio:${toMentionSlug(track.name) || `track-${index + 1}`}`,
+          meta: track.name || "audio",
+        })),
+      ];
+    },
+    [audioTracks, generatedImages, pendingFileWrites, projectFiles]
   );
 
   const handleMentionChipClick = useCallback(
@@ -640,10 +703,18 @@ export function ChatPanel({
         focusConsolePanel();
         return;
       }
+      if (mention.kind === "images") {
+        focusImagesPanel();
+        return;
+      }
+      if (mention.kind === "audio") {
+        focusAudioPanel();
+        return;
+      }
       if (!projectFiles.some((file) => file.path === mention.value)) return;
       focusCodeFile(mention.value);
     },
-    [focusCodeFile, focusConsolePanel, projectFiles]
+    [focusAudioPanel, focusCodeFile, focusConsolePanel, focusImagesPanel, projectFiles]
   );
 
   const renderMessageTextWithMentions = useCallback((text: string) => {
@@ -654,7 +725,10 @@ export function ChatPanel({
       }
       const mention = normalizeMentionToken(segment);
       const isClickable = mention
-        ? mention.kind === "console" || projectFiles.some((file) => file.path === mention.value)
+        ? mention.kind === "console" ||
+          mention.kind === "images" ||
+          mention.kind === "audio" ||
+          projectFiles.some((file) => file.path === mention.value)
         : false;
       if (!isClickable) return <span key={`txt-${index}`}>{segment}</span>;
       return (
@@ -666,6 +740,10 @@ export function ChatPanel({
           title={
             mention?.kind === "console"
               ? "Open Console panel"
+              : mention?.kind === "images"
+                ? "Open Images panel"
+                : mention?.kind === "audio"
+                  ? "Open Audio panel"
               : `Open ${mention?.value ?? ""} in Code panel`
           }
         >
@@ -691,6 +769,137 @@ export function ChatPanel({
       });
     });
   }, [addAudioTrack]);
+
+  const audioTrackById = useMemo(
+    () => new Map(audioTracks.map((track) => [track.id, track])),
+    [audioTracks]
+  );
+
+  const pendingAudioIdsKey = useMemo(
+    () =>
+      audioTracks
+        .filter((track) => track.status === "pending")
+        .map((track) => track.id)
+        .sort()
+        .join("|"),
+    [audioTracks]
+  );
+
+  useEffect(() => {
+    if (!pendingAudioIdsKey) {
+      if (audioPollTimerRef.current) {
+        clearTimeout(audioPollTimerRef.current);
+        audioPollTimerRef.current = null;
+      }
+      return;
+    }
+
+    let cancelled = false;
+    const maxRounds = 30;
+    let round = 0;
+
+    const pollRound = async () => {
+      if (cancelled || audioPollInFlightRef.current) return;
+
+      const currentPending = Array.from(audioTrackById.values()).filter(
+        (track) => track.status === "pending"
+      );
+      if (currentPending.length === 0) return;
+
+      round += 1;
+      audioPollInFlightRef.current = true;
+      try {
+        const results = await Promise.all(
+          currentPending.map(async (track) => {
+            const res = await fetch(`/api/sounds/${encodeURIComponent(track.id)}`);
+            if (!res.ok) {
+              return {
+                id: track.id,
+                status: "error" as const,
+                error: `Audio status request failed (${res.status})`,
+              };
+            }
+            const payload = (await res.json()) as {
+              status?: "pending" | "ready" | "error";
+              dataUrl?: string | null;
+              duration?: number | null;
+              error?: string | null;
+              name?: string;
+              kind?: "music" | "sfx";
+            };
+            return {
+              id: track.id,
+              status: payload.status ?? "pending",
+              dataUrl: typeof payload.dataUrl === "string" ? payload.dataUrl : null,
+              duration: typeof payload.duration === "number" ? payload.duration : null,
+              error: typeof payload.error === "string" ? payload.error : null,
+              name: typeof payload.name === "string" ? payload.name : track.name,
+              kind: payload.kind === "music" ? "music" : "sfx",
+            };
+          })
+        );
+
+        for (const result of results) {
+          if (result.status === "pending") continue;
+          const existing = audioTrackById.get(result.id);
+          const nextStatus = result.status;
+          const nextDataUrl = result.dataUrl ?? existing?.dataUrl ?? null;
+          const nextError = result.error ?? null;
+          const nextDuration = result.duration ?? existing?.duration ?? null;
+          if (
+            existing &&
+            existing.status === nextStatus &&
+            existing.dataUrl === nextDataUrl &&
+            (existing.error ?? null) === nextError &&
+            existing.duration === nextDuration
+          ) {
+            continue;
+          }
+          addAudioTrack({
+            id: result.id,
+            name: result.name ?? existing?.name ?? result.id,
+            type: result.kind ?? existing?.type ?? "sfx",
+            description: existing?.description ?? "",
+            dataUrl: nextDataUrl,
+            status: nextStatus,
+            error: nextError,
+            duration: nextDuration,
+            createdAt: existing?.createdAt ?? Date.now(),
+          });
+        }
+
+        const hasPending = results.some((result) => result.status === "pending");
+        if (!cancelled && hasPending && round < maxRounds) {
+          audioPollTimerRef.current = setTimeout(() => {
+            void pollRound();
+          }, 3000);
+        } else if (!cancelled && hasPending && round >= maxRounds) {
+          for (const track of currentPending) {
+            if (track.status !== "pending") continue;
+            addAudioTrack({
+              ...track,
+              status: "error",
+              error: "Audio generation timed out",
+            });
+          }
+        }
+      } finally {
+        audioPollInFlightRef.current = false;
+      }
+    };
+
+    if (!audioPollTimerRef.current) {
+      void pollRound();
+    }
+
+    return () => {
+      cancelled = true;
+      if (audioPollTimerRef.current) {
+        clearTimeout(audioPollTimerRef.current);
+        audioPollTimerRef.current = null;
+      }
+    };
+  }, [addAudioTrack, audioTrackById, pendingAudioIdsKey]);
 
   useEffect(() => {
     setSelectedEngine(currentEngine);
@@ -774,13 +983,32 @@ export function ChatPanel({
   }, []);
 
   const { messages, sendMessage, stop, status, error } = useChat({
+    id: chatSessionId,
+    messages: chatMessages as UIMessage[],
+    experimental_throttle: 50,
     transport,
     onError,
     onFinish,
   });
 
   useEffect(() => {
+    initialChatMessagesRef.current = chatMessages;
+  }, [chatMessages]);
+
+  useEffect(() => {
+    hydratedMessageIdsRef.current = new Set(
+      initialChatMessagesRef.current.map((message) => message.id)
+    );
+    processedToolPayloadRef.current = new Map();
+  }, [chatSessionId]);
+
+  useEffect(() => {
+    setChatMessages(messages as PersistedChatMessage[]);
+  }, [messages, setChatMessages]);
+
+  useEffect(() => {
     for (const message of messages) {
+      if (hydratedMessageIdsRef.current.has(message.id)) continue;
       if (message.role !== "assistant") continue;
       for (const part of message.parts) {
         const partType = (part as { type: string }).type;
@@ -888,7 +1116,6 @@ export function ChatPanel({
               createIfMissing?: boolean;
             };
           };
-          if (toolPart.state !== "output-available") continue;
           if (toolPart.state === "input-streaming" || toolPart.state === "input-available") {
             if (isStableProjectPath(toolPart.input?.targetFile)) {
               setPendingFileWrites(
@@ -898,7 +1125,9 @@ export function ChatPanel({
                 }]
               );
             }
+            continue;
           }
+          if (toolPart.state !== "output-available") continue;
           if (!isStableProjectPath(toolPart.input?.targetFile) || typeof toolPart.input.newString !== "string") continue;
 
           const signature = JSON.stringify(toolPart.input);
@@ -1001,7 +1230,7 @@ export function ChatPanel({
             state: string;
             input?: { name?: string; prompt?: string; duration?: number };
           };
-          if (toolPart.state !== "output-available") continue;
+          if (toolPart.state !== "output-available" && toolPart.state !== "output-error") continue;
           const name = toolPart.input?.name;
           if (!name) continue;
           const type = partType === "tool-generate_music" ? "music" as const : "sfx" as const;
@@ -1043,7 +1272,19 @@ export function ChatPanel({
   ]);
 
   useEffect(() => {
-    if (scrollRef.current) {
+    const el = scrollRef.current;
+    if (!el) return;
+    const handleScroll = () => {
+      const threshold = 80;
+      isNearBottomRef.current =
+        el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
+    };
+    el.addEventListener("scroll", handleScroll, { passive: true });
+    return () => el.removeEventListener("scroll", handleScroll);
+  }, []);
+
+  useEffect(() => {
+    if (isNearBottomRef.current && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages, status]);
@@ -1077,15 +1318,22 @@ export function ChatPanel({
       .filter((token) => token.toLowerCase().startsWith("file:"))
       .map((token) => token.slice(5))
       .filter((token) => token.length > 0);
+    const explicitCodeMentions = mentions
+      .filter((token) => token.toLowerCase().startsWith("code:"))
+      .map((token) => token.slice(5))
+      .filter((token) => token.length > 0);
     const implicitFileMentions = mentions.filter(
-      (token) => !token.toLowerCase().startsWith("file:") && token.toLowerCase() !== "console"
+      (token) =>
+        !token.toLowerCase().startsWith("file:") &&
+        !token.toLowerCase().startsWith("code:") &&
+        token.toLowerCase() !== "console"
     );
     const mentionedFiles = Array.from(
       new Set(
         [
           ...(autoDebugConsole ? ["console"] : []),
           ...mentions.filter((token) => token.toLowerCase() === "console"),
-          ...[...explicitFileMentions, ...implicitFileMentions].filter((token) =>
+          ...[...explicitFileMentions, ...explicitCodeMentions, ...implicitFileMentions].filter((token) =>
             projectFiles.some((file) => file.path === token)
           ),
         ]
@@ -1110,6 +1358,15 @@ export function ChatPanel({
         currentProjectFiles: projectFiles,
         planningTodos,
         mentionedFiles,
+        audioTracks: audioTracks.map((track) => ({
+          id: track.id,
+          name: track.name,
+          type: track.type,
+          description: track.description,
+          status: track.status,
+          duration: track.duration,
+          error: track.error ?? null,
+        })),
         consoleLogs: consoleContext,
         generatedImages,
         composerMode,
@@ -1299,15 +1556,29 @@ export function ChatPanel({
                           </div>
                         )}
                         {toolParts.map((part, i) => (
-                          <ToolCallCard
-                            key={i}
-                            part={part as {
+                          (() => {
+                            const typedPart = part as {
                               type: string;
                               state?: string;
                               input?: Record<string, unknown>;
                               output?: Record<string, unknown>;
-                            }}
-                          />
+                            };
+                            const rawToolName = typedPart.type.replace("tool-", "");
+                            const isAudioTool = rawToolName === "generate_sound_effect" || rawToolName === "generate_music";
+                            const audioName =
+                              isAudioTool && typeof typedPart.input?.name === "string"
+                                ? typedPart.input.name
+                                : null;
+                            const audioKind: "sfx" | "music" = rawToolName === "generate_music" ? "music" : "sfx";
+                            const audioId = audioName ? getGeneratedAudioId(audioKind, audioName) : null;
+                            return (
+                              <ToolCallCard
+                                key={i}
+                                part={typedPart}
+                                audioTrack={audioId ? audioTrackById.get(audioId) : undefined}
+                              />
+                            );
+                          })()
                         ))}
                       </div>
                     </div>
@@ -1586,12 +1857,14 @@ export function ChatPanel({
                 className="composer-mention"
                 renderSuggestion={(entry, _search, highlightedDisplay) => (
                   <span className="composer-mentions-row">
-                    <span className="composer-mentions-row-icon">{entry.id === "console" ? ">" : "#"}</span>
+                    <span className="composer-mentions-row-icon">
+                      {entry.id === "console" ? ">" : String(entry.id).startsWith("image:") ? "I" : String(entry.id).startsWith("audio:") ? "A" : "#"}
+                    </span>
                     <span className="composer-mentions-row-label">
                       @{highlightedDisplay}
                     </span>
                     <span className="composer-mentions-row-meta">
-                      {entry.id === "console" ? "runtime" : "file"}
+                      {typeof (entry as { meta?: unknown }).meta === "string" ? (entry as { meta: string }).meta : "resource"}
                     </span>
                   </span>
                 )}
@@ -1626,14 +1899,8 @@ export function ChatPanel({
 
         <div className="flex items-center justify-between px-1 pt-1">
           <span className="text-[9px] text-[var(--color-text-muted)]">
-            Enter to send, Shift+Enter newline, @file / @console mention
+            Enter to send, Shift+Enter newline, @code:path / @console / @image:name / @audio:name
           </span>
-          {currentCode && (
-            <span className="text-[9px] text-[var(--color-success)] flex items-center gap-1">
-              <span className="w-1.5 h-1.5 bg-[var(--color-success)] rounded-full inline-block" />
-              Game loaded
-            </span>
-          )}
         </div>
       </div>
     </div>

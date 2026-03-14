@@ -590,6 +590,17 @@ body {
     }
 }
 
+@keyframes toastSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
 @keyframes messageFade {
     0% {
         opacity: 0;
@@ -606,5 +617,17 @@ body {
     100% {
         opacity: 0;
         transform: translateY(-4px);
+    }
+}
+
+@keyframes wavePulse {
+    0%,
+    100% {
+        transform: scaleY(0.72);
+        opacity: 0.22;
+    }
+    50% {
+        transform: scaleY(1);
+        opacity: 0.5;
     }
 }

@@ -15,7 +15,7 @@ export async function POST(req: Request) {
       return Response.json({ error: "imageId and prompt are required" }, { status: 400 });
     }
 
-    const stored = getImage(imageId);
+    const stored = await getImage(imageId);
     if (!stored) {
       return Response.json({ error: "Image not found or expired" }, { status: 404 });
     }
@@ -55,7 +55,7 @@ export async function POST(req: Request) {
     for (const part of parts) {
       if (part.inlineData) {
         const { mimeType, data: b64 } = part.inlineData;
-        const newId = storeImage(mimeType, b64);
+        const newId = await storeImage(mimeType, b64);
         const origin = new URL(req.url).origin;
         const url = `${origin}/api/images/${newId}`;
         console.log("[GEMINI] Edited image stored, id:", newId);

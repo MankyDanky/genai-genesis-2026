@@ -17,6 +17,10 @@ import { InspectorPanel } from "@/components/panels/inspector-panel";
 import { ImagesPanelWrapper } from "@/components/panels/images-panel-wrapper";
 import { AudioPanelWrapper } from "@/components/panels/audio-panel-wrapper";
 import { Toolbar } from "@/components/toolbar";
+import { ShareModal } from "@/components/share-modal";
+import { OpenProjectModal } from "@/components/open-project-modal";
+import { ConfirmModal } from "@/components/confirm-modal";
+import { useToast } from "@/components/toast";
 
 import "dockview/dist/styles/dockview.css";
 
@@ -73,14 +77,6 @@ function buildDefaultLayout(api: DockviewApi) {
   });
 
   api.addPanel({
-    id: "audio",
-    component: "audio",
-    title: "Audio",
-    inactive: true,
-    position: { referencePanel: "inspector", direction: "within" },
-  });
-
-  api.addPanel({
     id: "code",
     component: "code",
     title: "Code",
@@ -103,6 +99,14 @@ function buildDefaultLayout(api: DockviewApi) {
     initialHeight: h * 0.35,
   });
 
+  api.addPanel({
+    id: "audio",
+    component: "audio",
+    title: "Audio",
+    inactive: true,
+    position: { referencePanel: "images", direction: "within" },
+  });
+
   const apiAny = api as unknown as {
     getPanel?: (id: string) => { api?: { setActive?: () => void } } | undefined;
     panels?: Array<{ id?: string; api?: { setActive?: () => void } }>;
@@ -116,10 +120,27 @@ function buildDefaultLayout(api: DockviewApi) {
 export function DockLayout() {
   const apiRef = useRef<DockviewApi | null>(null);
   const lastFocusRequestIdRef = useRef<number>(0);
-  const { currentEngine, panelFocusRequest } = useGameForge();
+  const {
+    currentEngine,
+    currentCode,
+    panelFocusRequest,
+    projectId,
+    currentRevisionNumber,
+    lastPublishedPlayPath,
+    projectBusyAction,
+    saveProjectRevision,
+    publishProject,
+    loadProject,
+    resetWorkspace,
+    clearProjectFeedback,
+  } = useGameForge();
+  const { showToast } = useToast();
   const [openPanels, setOpenPanels] = useState<Set<string>>(
     () => new Set(ALL_PANELS.map((p) => p.id))
   );
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [showOpenModal, setShowOpenModal] = useState(false);
+  const [showConfirmReset, setShowConfirmReset] = useState(false);
 
   const syncOpenPanels = useCallback((api: DockviewApi) => {
     setOpenPanels(new Set(api.panels.map((p) => p.id)));
@@ -209,11 +230,80 @@ export function DockLayout() {
     panelApi.api?.setActive?.();
   }, [panelFocusRequest]);
 
+  // Load project from ?project= URL param (e.g. after forking)
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const projectParam = url.searchParams.get("project");
+    if (!projectParam) return;
+
+    // Clean URL immediately
+    window.history.replaceState({}, "", "/");
+
+    void loadProject(projectParam)
+      .then(() => showToast("Project loaded", "success"))
+      .catch((err) => {
+        showToast(err instanceof Error ? err.message : "Failed to load project", "error");
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const panelInfos = ALL_PANELS.map((p) => ({
     id: p.id,
     title: p.title,
     isOpen: openPanels.has(p.id),
   }));
+
+  const handleSaveProject = useCallback(() => {
+    void saveProjectRevision()
+      .then((result) => {
+        showToast(
+          `Saved ${result.projectId.slice(0, 8)}... as revision ${result.revisionNumber}`,
+          "success"
+        );
+      })
+      .catch((err) => {
+        showToast(err instanceof Error ? err.message : "Save failed", "error");
+      });
+  }, [saveProjectRevision, showToast]);
+
+  const handlePublishProject = useCallback(() => {
+    void publishProject()
+      .then(() => {
+        showToast("Published successfully", "success");
+        setShowShareModal(true);
+      })
+      .catch((err) => {
+        showToast(err instanceof Error ? err.message : "Publish failed", "error");
+      });
+  }, [publishProject, showToast]);
+
+  const handleOpenProject = useCallback(() => {
+    setShowOpenModal(true);
+  }, []);
+
+  const handleLoadProject = useCallback(
+    async (id: string) => {
+      await loadProject(id);
+      showToast("Project loaded", "success");
+    },
+    [loadProject, showToast]
+  );
+
+  const handleResetProject = useCallback(() => {
+    if (!projectId && !currentCode) {
+      clearProjectFeedback();
+      resetWorkspace();
+      return;
+    }
+    setShowConfirmReset(true);
+  }, [projectId, currentCode, clearProjectFeedback, resetWorkspace]);
+
+  const handleConfirmReset = useCallback(() => {
+    setShowConfirmReset(false);
+    clearProjectFeedback();
+    resetWorkspace();
+    showToast("Workspace reset", "success");
+  }, [clearProjectFeedback, resetWorkspace, showToast]);
 
   return (
     <div className="h-screen w-screen flex flex-col">
@@ -221,7 +311,17 @@ export function DockLayout() {
         panels={panelInfos}
         onTogglePanel={handleTogglePanel}
         onResetLayout={handleResetLayout}
+        onSaveProject={handleSaveProject}
+        onPublishProject={handlePublishProject}
+        onOpenProject={handleOpenProject}
+        onResetProject={handleResetProject}
+        onShareClick={() => setShowShareModal(true)}
+        onPlayPathClick={() => setShowShareModal(true)}
         engineLabel={getEngineLabel(currentEngine)}
+        projectId={projectId}
+        revisionNumber={currentRevisionNumber}
+        busyAction={projectBusyAction}
+        playPath={lastPublishedPlayPath}
       />
       <div className="flex-1 min-h-0">
         <DockviewReact
@@ -231,6 +331,28 @@ export function DockLayout() {
           className="h-full w-full"
         />
       </div>
+      {showShareModal && lastPublishedPlayPath ? (
+        <ShareModal
+          url={`${typeof window !== "undefined" ? window.location.origin : ""}${lastPublishedPlayPath}`}
+          onClose={() => setShowShareModal(false)}
+        />
+      ) : null}
+      {showOpenModal ? (
+        <OpenProjectModal
+          onLoad={handleLoadProject}
+          onClose={() => setShowOpenModal(false)}
+        />
+      ) : null}
+      {showConfirmReset ? (
+        <ConfirmModal
+          title="New Project"
+          message="You have unsaved work. Starting a new project will discard all current changes."
+          confirmLabel="Discard & Reset"
+          variant="danger"
+          onConfirm={handleConfirmReset}
+          onCancel={() => setShowConfirmReset(false)}
+        />
+      ) : null}
     </div>
   );
 }

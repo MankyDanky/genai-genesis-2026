@@ -14,6 +14,56 @@ function formatDuration(duration: number | null) {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
+function hashString(value: string): number {
+  let hash = 0;
+  for (let i = 0; i < value.length; i += 1) {
+    hash = (hash << 5) - hash + value.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
+function buildWaveHeights(seed: string, count = 64): number[] {
+  const base = hashString(seed) || 1;
+  const values: number[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const n = Math.abs(Math.sin((base + i * 37) * 0.017));
+    values.push(10 + Math.round(n * 74));
+  }
+  return values;
+}
+
+function WaveformBackground({ seed, isPlaying }: { seed: string; isPlaying: boolean }) {
+  const bars = useMemo(() => buildWaveHeights(seed), [seed]);
+
+  return (
+    <div className="pointer-events-none absolute inset-0 overflow-hidden">
+      <div className="absolute inset-0 bg-[linear-gradient(180deg,transparent,rgba(0,0,0,0.18))]" />
+      <div
+        className="absolute inset-x-0 top-1/2 -translate-y-1/2 px-2 opacity-45"
+        style={{
+          display: "grid",
+          gridTemplateColumns: `repeat(${bars.length}, minmax(0, 1fr))`,
+          gap: "2px",
+          alignItems: "center",
+          height: "72%",
+        }}
+      >
+        {bars.map((h, i) => (
+          <span key={`${seed}-${i}`} className="relative block h-full">
+            <span
+              className={`absolute left-0 right-0 top-1/2 -translate-y-1/2 rounded-[1px] bg-[var(--color-accent)] opacity-30 ${isPlaying ? "animate-[wavePulse_1.1s_ease-in-out_infinite]" : ""}`}
+              style={{
+                height: `${h}%`,
+              }}
+            />
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function AudioRow({
   track,
   isActive,
@@ -28,7 +78,8 @@ function AudioRow({
   const canPlay = track.status === "ready" && !!track.dataUrl;
 
   return (
-    <div className="group border-b border-[var(--color-border)] px-3 py-3 last:border-b-0">
+    <div className="group relative border-b border-[var(--color-border)] px-3 py-3 last:border-b-0 overflow-hidden">
+      <WaveformBackground seed={track.id} isPlaying={isActive && isPlaying} />
       <div className="flex items-start gap-3">
         <button
           type="button"
@@ -53,7 +104,7 @@ function AudioRow({
           )}
         </button>
 
-        <div className="min-w-0 flex-1 space-y-1">
+        <div className="relative min-w-0 flex-1 space-y-1">
           <div className="flex items-center gap-2">
             <p className="truncate text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--color-text-secondary)]">
               {track.name}
