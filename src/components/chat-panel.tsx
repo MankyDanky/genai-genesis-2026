@@ -963,12 +963,17 @@ export function ChatPanel({
     const listEl = planListRef.current;
     if (!listEl) return;
     const rect = listEl.getBoundingClientRect();
-    const threshold = 28;
-    const speed = 14;
-    if (clientY - rect.top < threshold) {
-      listEl.scrollTop -= speed;
-    } else if (rect.bottom - clientY < threshold) {
-      listEl.scrollTop += speed;
+    const threshold = 24;
+    const maxSpeed = 6;
+    const distanceToTop = clientY - rect.top;
+    const distanceToBottom = rect.bottom - clientY;
+
+    if (distanceToTop < threshold) {
+      const intensity = Math.max(0, (threshold - distanceToTop) / threshold);
+      listEl.scrollTop -= Math.max(1, Math.round(maxSpeed * intensity));
+    } else if (distanceToBottom < threshold) {
+      const intensity = Math.max(0, (threshold - distanceToBottom) / threshold);
+      listEl.scrollTop += Math.max(1, Math.round(maxSpeed * intensity));
     }
   };
 
