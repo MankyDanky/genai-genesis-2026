@@ -72,12 +72,17 @@ export function compileProjectToHtml(files: ProjectFile[]): string | null {
     return `<style data-path=\"${linked.path}\">\n${linked.content}\n</style>`;
   });
 
-  html = html.replace(/<script[^>]*src=["']([^"']+)["'][^>]*><\/script>/gi, (full, src) => {
+  html = html.replace(
+    /<script([^>]*)\ssrc=["']([^"']+)["']([^>]*)><\/script>/gi,
+    (full, beforeAttrs, src, afterAttrs) => {
     if (!isLocalRef(src)) return full;
     const script = resolveFileRef(src, map);
     if (!script || script.kind !== "script") return full;
-    return `<script data-path=\"${script.path}\">\n${script.content}\n</script>`;
-  });
+      const combinedAttrs = `${beforeAttrs ?? ""} ${afterAttrs ?? ""}`.trim();
+      const attrs = combinedAttrs.length > 0 ? ` ${combinedAttrs}` : "";
+      return `<script${attrs} data-path=\"${script.path}\">\n${script.content}\n</script>`;
+    }
+  );
 
   return html;
 }

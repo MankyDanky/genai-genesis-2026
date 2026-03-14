@@ -19,8 +19,9 @@ function sanitizeRoomType(roomType: string): string {
 export function buildPartyKitScaffold(inputRoomType = "game"): MultiplayerScaffold {
   const roomType = sanitizeRoomType(inputRoomType);
 
-  const clientFile = `// PartyKit multiplayer client (browser-safe)
-export function createPartySession({
+  const clientFile = `// PartyKit multiplayer client (browser-safe, non-module)
+(function () {
+function createPartySession({
   host = (window.__PARTYKIT_HOST__ || "localhost:1999"),
   protocol = (window.__PARTYKIT_PROTOCOL__ || (location.protocol === "https:" ? "wss" : "ws")),
   roomType = "${roomType}",
@@ -92,6 +93,9 @@ export function createPartySession({
     },
   };
 }
+
+window.GameForgePartySession = { createPartySession };
+})();
 `;
 
   const roomFile = `// PartyKit room server for room type: "${roomType}"
@@ -188,7 +192,7 @@ export default class GameRoom {
     quickStart: [
       "Set NEXT_PUBLIC_PARTYKIT_HOST (for local dev use localhost:1999).",
       "Run PartyKit room server with: pnpm dlx partykit dev",
-      "In your game code, import src/net/party-session.js and call createPartySession({ roomId, onState, onPlayers }).",
+      "In index.html, include <script src=\"src/net/party-session.js\"></script>, then call window.GameForgePartySession.createPartySession({ roomId, onState, onPlayers }).",
     ],
   };
 }

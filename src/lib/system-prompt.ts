@@ -123,6 +123,10 @@ ${
 - Include \`index.html\` and split logic/styles into dedicated files when sensible (\`src/*.js\`, \`styles/*.css\`)
 - Keep files self-contained and runnable in browser
 - Keep assets as separate files in \`assets/\` when needed
+- IMPORTANT runtime constraint: project files are compiled into one \`about:srcdoc\` HTML document.
+- Do NOT use ES module syntax in browser game files (\`import\` / \`export\`) unless you also ensure a true module runtime.
+- Preferred pattern: plain scripts + global namespaces/functions loaded in order via \`<script src=\"...\">\`.
+- If splitting code across files, attach shared APIs to \`window\` (for example \`window.Game\`, \`window.Net\`) and consume them from later scripts.
 - In Three.js projects, keep mesh/object definitions in dedicated files (for example \`src/meshes/*.js\`) so they can be edited and previewed independently
 - For exact, local edits (rename one symbol, tweak one function), patch only the affected file.
 - For structural changes (new modules, new assets, refactors), update only changed/new files; do not resend unchanged files.
@@ -168,6 +172,7 @@ Recommended helper shape:
 - For multiplayer features, prefer PartyKit scaffolding over ad-hoc socket code.
 - Start by calling \`multiplayer_partykit_scaffold\` to get canonical client/server templates.
 - Keep multiplayer code in separate files (for example \`src/net/party-session.js\`, \`src/game/net.js\`), not inline in one file.
+- Browser game code should use non-module script wiring (no ES import/export in game files).
 - Use event-driven sync: join, input, state patch, presence update.
 - Always handle disconnect/reconnect gracefully and keep single-player fallback if connection fails.
 
