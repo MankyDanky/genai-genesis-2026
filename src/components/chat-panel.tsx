@@ -3,10 +3,13 @@
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { useState, useEffect, useRef, useMemo, useCallback, type FormEvent, type KeyboardEvent } from "react";
+import type { GameEngine } from "@/lib/game-engine";
 
 interface ChatPanelProps {
   currentCode: string | null;
-  onCodeUpdate: (code: string) => void;
+  currentEngine: GameEngine;
+  onCodeUpdate: (code: string, engine?: GameEngine) => void;
+  onEngineUpdate: (engine: GameEngine) => void;
 }
 
 const EXAMPLE_PROMPTS = [
@@ -16,10 +19,25 @@ const EXAMPLE_PROMPTS = [
   "Breakout",
 ];
 
-export function ChatPanel({ currentCode, onCodeUpdate }: ChatPanelProps) {
+const ENGINE_OPTIONS: Array<{ id: GameEngine; label: string }> = [
+  { id: "canvas2d", label: "HTML5 Canvas" },
+  { id: "threejs", label: "Three.js" },
+];
+
+export function ChatPanel({
+  currentCode,
+  currentEngine,
+  onCodeUpdate,
+  onEngineUpdate,
+}: ChatPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [input, setInput] = useState("");
+  const [selectedEngine, setSelectedEngine] = useState<GameEngine>(currentEngine);
+
+  useEffect(() => {
+    setSelectedEngine(currentEngine);
+  }, [currentEngine]);
 
   const transport = useMemo(
     () => new DefaultChatTransport({ api: "/api/chat" }),
@@ -54,13 +72,13 @@ export function ChatPanel({ currentCode, onCodeUpdate }: ChatPanelProps) {
           if (toolPart.state === "output-available") {
             if (toolPart.input?.code && toolPart.input.code !== currentCode) {
               console.log("[Chat] Updating sandbox code, length:", toolPart.input.code.length);
-              onCodeUpdate(toolPart.input.code);
+              onCodeUpdate(toolPart.input.code, selectedEngine);
             }
           }
         }
       }
     }
-  }, [messages, currentCode, onCodeUpdate]);
+  }, [messages, currentCode, onCodeUpdate, selectedEngine]);
 
   // Log status changes
   useEffect(() => {
@@ -80,12 +98,17 @@ export function ChatPanel({ currentCode, onCodeUpdate }: ChatPanelProps) {
 
   const isLoading = status === "streaming" || status === "submitted";
 
+  const handleEngineChange = (engine: GameEngine) => {
+    setSelectedEngine(engine);
+    onEngineUpdate(engine);
+  };
+
   const doSubmit = () => {
     const text = input.trim();
     if (!text || isLoading) return;
-    console.log("[Chat] Submitting:", text);
+    console.log("[Chat] Submitting:", text, "| engine:", selectedEngine);
     setInput("");
-    sendMessage({ text }, { body: { currentCode } })
+    sendMessage({ text }, { body: { currentCode, gameEngine: selectedEngine } })
       .then(() => console.log("[Chat] sendMessage resolved"))
       .catch((err) => console.error("[Chat] sendMessage rejected:", err));
   };
@@ -111,6 +134,29 @@ export function ChatPanel({ currentCode, onCodeUpdate }: ChatPanelProps) {
             Describe Game
           </p>
         </div>
+
+        <div className="space-y-1.5">
+          <p className="text-[10px] text-[var(--color-text-muted)] uppercase tracking-[0.12em] font-semibold">
+            Engine
+          </p>
+          <div className="flex gap-1.5">
+            {ENGINE_OPTIONS.map((engine) => (
+              <button
+                key={engine.id}
+                type="button"
+                onClick={() => handleEngineChange(engine.id)}
+                className={`gf-btn-chip text-[10px] px-2.5 py-1 uppercase tracking-wider font-semibold border ${
+                  selectedEngine === engine.id
+                    ? "border-[var(--color-accent)] text-[var(--color-accent)] bg-[var(--color-accent-glow)]"
+                    : "border-[var(--color-border)] text-[var(--color-text-muted)]"
+                }`}
+              >
+                {engine.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <form onSubmit={handleSubmit}>
           <textarea
             ref={textareaRef}

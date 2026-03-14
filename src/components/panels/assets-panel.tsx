@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useGameForge } from "@/lib/game-forge-context";
 
-const ASSET_TYPES = ["sprite", "background", "ui"] as const;
+const ASSET_TYPES = ["sprite", "background", "ui", "mesh"] as const;
 
 export function AssetsPanel() {
   const { assets, removeAsset } = useGameForge();
@@ -82,6 +82,13 @@ export function AssetsPanel() {
                   {asset.dataUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={asset.dataUrl} alt={asset.name} className="w-full h-full object-contain" />
+                  ) : asset.type === "mesh" ? (
+                    <div className="text-center px-2">
+                      <p className="text-[10px] text-[var(--color-accent)] uppercase font-semibold">3D Mesh</p>
+                      {asset.format ? (
+                        <p className="text-[9px] text-[var(--color-text-muted)] uppercase">{asset.format}</p>
+                      ) : null}
+                    </div>
                   ) : (
                     <span className="text-[10px] text-[var(--color-text-muted)] uppercase">Pending</span>
                   )}
@@ -100,6 +107,16 @@ export function AssetsPanel() {
                   <p className="text-[9px] text-[var(--color-text-muted)] uppercase">
                     {asset.type}
                   </p>
+                  {asset.sourceUrl ? (
+                    <a
+                      href={asset.sourceUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[9px] text-[var(--color-accent)] uppercase tracking-wider"
+                    >
+                      Open
+                    </a>
+                  ) : null}
                 </div>
               </div>
             ))}

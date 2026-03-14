@@ -2,17 +2,26 @@ import { anthropic } from "@ai-sdk/anthropic";
 import { streamText, tool, stepCountIs, convertToModelMessages } from "ai";
 import { z } from "zod";
 import { getSystemPrompt } from "@/lib/system-prompt";
+import type { GameEngine } from "@/lib/game-engine";
 
 export const maxDuration = 60;
 
+function isGameEngine(value: unknown): value is GameEngine {
+  return value === "canvas2d" || value === "threejs";
+}
+
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
-    const { messages, currentCode } = body;
+    const body: unknown = await req.json();
+    const parsed = body as { messages?: unknown; currentCode?: unknown; gameEngine?: unknown };
+    const messages = parsed.messages;
+    const currentCode = typeof parsed.currentCode === "string" ? parsed.currentCode : null;
+    const gameEngine: GameEngine = isGameEngine(parsed.gameEngine) ? parsed.gameEngine : "canvas2d";
 
     console.log("[API] Received request:", {
-      messageCount: messages?.length ?? 0,
+      messageCount: Array.isArray(messages) ? messages.length : 0,
       hasCurrentCode: !!currentCode,
+      gameEngine,
     });
 
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
@@ -28,7 +37,7 @@ export async function POST(req: Request) {
 
     const result = streamText({
       model: anthropic("claude-sonnet-4-6"),
-      system: getSystemPrompt(currentCode),
+      system: getSystemPrompt({ currentCode, gameEngine }),
       messages: modelMessages,
       tools: {
         update_sandbox: tool({
