@@ -28,6 +28,7 @@ interface FallbackPublishedGame {
   multiplayer: boolean;
   multiplayerProvider: "partykit" | null;
   multiplayerRoomType: string | null;
+  runtimeEnv: Record<string, string>;
   createdAt: Date;
 }
 
@@ -223,6 +224,7 @@ async function hydrateRevision(revision: ProjectRevisionDocument) {
     planningTodos: revision.planningTodos,
     generatedImages: revision.generatedImages,
     audioTracks: revision.audioTracks,
+    runtimeEnv: revision.runtimeEnv ?? {},
     currentCode: compiledHtml,
     chatMessages: (JSON.parse(rawChatMessages || "[]") as PersistedChatMessage[]),
     createdAt: revision.createdAt,
@@ -297,6 +299,7 @@ export async function createRevisionFromSnapshot(
     planningTodos: snapshot.planningTodos,
     generatedImages: snapshot.generatedImages,
     audioTracks: snapshot.audioTracks,
+    runtimeEnv: snapshot.runtimeEnv,
     compiledHtml,
     chatTranscript: chatMessages,
     createdAt: now,
@@ -422,6 +425,7 @@ export async function publishProjectRevision(
     multiplayer: multiplayerMeta.multiplayer,
     multiplayerProvider: multiplayerMeta.multiplayerProvider,
     multiplayerRoomType: multiplayerMeta.multiplayerRoomType,
+    runtimeEnv: revision.runtimeEnv ?? {},
     compiledHtml: publishedCompiledHtml,
     createdAt: new Date(),
   };
@@ -463,6 +467,7 @@ export async function getPublishedGame(gameId: string | ObjectId) {
         multiplayer: doc.multiplayer ?? false,
         multiplayerProvider: doc.multiplayerProvider ?? null,
         multiplayerRoomType: doc.multiplayerRoomType ?? null,
+        runtimeEnv: doc.runtimeEnv ?? {},
         createdAt: doc.createdAt,
       };
     }
@@ -483,6 +488,7 @@ export async function getPublishedGame(gameId: string | ObjectId) {
     multiplayer: fallback.multiplayer,
     multiplayerProvider: fallback.multiplayerProvider,
     multiplayerRoomType: fallback.multiplayerRoomType,
+    runtimeEnv: fallback.runtimeEnv ?? {},
     createdAt: fallback.createdAt,
   };
 }
@@ -516,6 +522,7 @@ export async function forkPublishedGame(gameId: string | ObjectId) {
         planningTodos: [],
         generatedImages: revision.generatedImages,
         audioTracks: revision.audioTracks,
+        runtimeEnv: revision.runtimeEnv ?? {},
         chatMessages: [],
       };
 
@@ -535,6 +542,7 @@ export async function forkPublishedGame(gameId: string | ObjectId) {
     planningTodos: [],
     generatedImages: [],
     audioTracks: [],
+    runtimeEnv: {},
     chatMessages: [],
   };
 
@@ -574,6 +582,7 @@ export async function createStandalonePublishedGame(snapshot: {
       multiplayer: multiplayerMeta.multiplayer,
       multiplayerProvider: multiplayerMeta.multiplayerProvider,
       multiplayerRoomType: multiplayerMeta.multiplayerRoomType,
+      runtimeEnv: {},
       compiledHtml,
       createdAt: new Date(),
     };
@@ -594,6 +603,7 @@ export async function createStandalonePublishedGame(snapshot: {
       multiplayer: multiplayerMeta.multiplayer,
       multiplayerProvider: multiplayerMeta.multiplayerProvider,
       multiplayerRoomType: multiplayerMeta.multiplayerRoomType,
+      runtimeEnv: {},
       createdAt: new Date(),
     });
     return { id, title };
@@ -621,6 +631,7 @@ export async function listPublishedGames(limit = 60) {
       multiplayer: doc.multiplayer ?? false,
       multiplayerProvider: doc.multiplayerProvider ?? null,
       multiplayerRoomType: doc.multiplayerRoomType ?? null,
+      runtimeEnv: doc.runtimeEnv ?? {},
       createdAt: doc.createdAt,
     }));
   } catch (error) {
@@ -638,6 +649,7 @@ export async function listPublishedGames(limit = 60) {
         multiplayer: game.multiplayer,
         multiplayerProvider: game.multiplayerProvider,
         multiplayerRoomType: game.multiplayerRoomType,
+        runtimeEnv: game.runtimeEnv ?? {},
         createdAt: game.createdAt,
       }));
   }

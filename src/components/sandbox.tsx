@@ -2,10 +2,12 @@
 
 import { useState, useCallback, useRef, useMemo, useEffect } from "react";
 import type { AudioTrack } from "@/lib/game-forge-context";
+import type { RuntimeEnvMap } from "@/lib/runtime-env";
 
 interface SandboxProps {
   code: string | null;
   audioTracks?: AudioTrack[];
+  runtimeEnv?: RuntimeEnvMap;
   onConsoleMessage?: (event: {
     level: "log" | "info" | "warn" | "error";
     args: string[];
@@ -16,10 +18,12 @@ interface SandboxProps {
 
 function ShareBar({
   code,
+  openHtml,
   containerRef,
   onReload,
 }: {
   code: string;
+  openHtml: string;
   containerRef: React.RefObject<HTMLDivElement | null>;
   onReload?: () => void;
 }) {
@@ -50,10 +54,10 @@ function ShareBar({
   }, [code, showToast]);
 
   const handleOpen = useCallback(() => {
-    const blob = new Blob([code], { type: "text/html" });
+    const blob = new Blob([openHtml], { type: "text/html" });
     const url = URL.createObjectURL(blob);
     window.open(url, "_blank");
-  }, [code]);
+  }, [openHtml]);
 
   const handleReload = useCallback(() => {
     onReload?.();
@@ -208,15 +212,64 @@ window.__GAMEFORGE_MUSIC__ = ${JSON.stringify(musicMap)};
   return `${combined}${html}`;
 }
 
-export function Sandbox({ code, audioTracks = [], onConsoleMessage, onReload }: SandboxProps) {
+function injectMultiplayerRuntime(html: string, runtimeEnv: RuntimeEnvMap): string {
+  const resolvedHost = runtimeEnv.__PARTYKIT_HOST__ ?? process.env.NEXT_PUBLIC_PARTYKIT_HOST ?? "localhost:1999";
+  const resolvedProtocol = runtimeEnv.__PARTYKIT_PROTOCOL__ ?? process.env.NEXT_PUBLIC_PARTYKIT_PROTOCOL ?? "";
+  const script = `<script>
+window.__GAMEFORGE_ENV__ = Object.assign({}, window.__GAMEFORGE_ENV__ || {}, ${JSON.stringify(runtimeEnv)});
+Object.keys(window.__GAMEFORGE_ENV__).forEach(function (k) {
+  if (typeof window[k] === "undefined") window[k] = window.__GAMEFORGE_ENV__[k];
+});
+window.__PARTYKIT_HOST__ = window.__PARTYKIT_HOST__ || ${JSON.stringify(resolvedHost)};
+window.__PARTYKIT_PROTOCOL__ = window.__PARTYKIT_PROTOCOL__ || ${JSON.stringify(resolvedProtocol)};
+(function () {
+  if (!window.WebSocket || window.__GAMEFORGE_WS_PATCHED__) return;
+  window.__GAMEFORGE_WS_PATCHED__ = true;
+  const NativeWebSocket = window.WebSocket;
+  const host = window.__PARTYKIT_HOST__;
+  const defaultRoomType = "game";
+  function rewriteUrl(url) {
+    try {
+      const u = new URL(url);
+      if (!host || u.host !== host) return url;
+      const parts = u.pathname.split("/").filter(Boolean);
+      if (parts.length >= 3 && parts[0] === "parties" && parts[1] !== defaultRoomType) {
+        parts[1] = defaultRoomType;
+        u.pathname = "/" + parts.join("/");
+        return u.toString();
+      }
+      return url;
+    } catch {
+      return url;
+    }
+  }
+  function PatchedWebSocket(url, protocols) {
+    const rewritten = typeof url === "string" ? rewriteUrl(url) : url;
+    return protocols === undefined
+      ? new NativeWebSocket(rewritten)
+      : new NativeWebSocket(rewritten, protocols);
+  }
+  PatchedWebSocket.prototype = NativeWebSocket.prototype;
+  Object.setPrototypeOf(PatchedWebSocket, NativeWebSocket);
+  window.WebSocket = PatchedWebSocket;
+})();
+</script>`;
+  if (/<head[^>]*>/i.test(html)) {
+    return html.replace(/<head([^>]*)>/i, `<head$1>${script}`);
+  }
+  return `${script}${html}`;
+}
+
+export function Sandbox({ code, audioTracks = [], runtimeEnv = {}, onConsoleMessage, onReload }: SandboxProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const srcDoc = useMemo(() => {
     if (!code) return null;
     const withConsole = buildInstrumentedSrcDoc(code);
-    return injectSoundBridge(withConsole, audioTracks);
-  }, [audioTracks, code]);
+    const withAudio = injectSoundBridge(withConsole, audioTracks);
+    return injectMultiplayerRuntime(withAudio, runtimeEnv);
+  }, [audioTracks, code, runtimeEnv]);
 
   const handleReload = useCallback(() => {
     setReloadKey((prev) => prev + 1);
@@ -288,7 +341,7 @@ export function Sandbox({ code, audioTracks = [], onConsoleMessage, onReload }: 
 
   return (
     <div ref={containerRef} className="relative h-full w-full bg-black">
-      <ShareBar code={code} containerRef={containerRef} onReload={handleReload} />
+      <ShareBar code={code} openHtml={srcDoc} containerRef={containerRef} onReload={handleReload} />
       <iframe
         ref={iframeRef}
         key={`${code}:${reloadKey}`}

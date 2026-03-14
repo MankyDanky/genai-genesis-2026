@@ -23,7 +23,7 @@ export function buildPartyKitScaffold(inputRoomType = "game"): MultiplayerScaffo
 (function () {
 function createPartySession({
   host = (window.__PARTYKIT_HOST__ || "localhost:1999"),
-  protocol = (window.__PARTYKIT_PROTOCOL__ || (location.protocol === "https:" ? "wss" : "ws")),
+  protocol = (window.__PARTYKIT_PROTOCOL__ || ""),
   roomType = "${roomType}",
   roomId,
   playerId = crypto.randomUUID(),
@@ -38,10 +38,15 @@ function createPartySession({
       : "";
   const resolvedRoomId = roomId || fallbackRoomId;
   if (!resolvedRoomId) throw new Error("roomId is required");
+  const isLocalHost = /^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(host);
+  const resolvedProtocol =
+    protocol ||
+    (location.protocol === "https:" || !isLocalHost ? "wss" : "ws");
 
   const wsCandidates = [
-    \`\${protocol}://\${host}/parties/\${roomType}/\${encodeURIComponent(resolvedRoomId)}\`,
-    \`\${protocol}://\${host}/party/\${encodeURIComponent(resolvedRoomId)}\`,
+    \`\${resolvedProtocol}://\${host}/parties/\${roomType}/\${encodeURIComponent(resolvedRoomId)}\`,
+    \`\${resolvedProtocol}://\${host}/parties/game/\${encodeURIComponent(resolvedRoomId)}\`,
+    \`\${resolvedProtocol}://\${host}/party/\${encodeURIComponent(resolvedRoomId)}\`,
   ];
   let socket = null;
   let connected = false;

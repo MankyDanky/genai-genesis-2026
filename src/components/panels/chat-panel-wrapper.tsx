@@ -13,6 +13,7 @@ export function ChatPanelWrapper() {
     consoleLogs,
     generatedImages,
     audioTracks,
+    runtimeEnv,
     onCodeUpdate,
     onProjectFilesUpdate,
     patchProjectFiles,
@@ -33,6 +34,7 @@ export function ChatPanelWrapper() {
     focusAudioPanel,
     setPendingFileWrites,
     clearPendingFileWrites,
+    updateRuntimeEnv,
   } = useGameForge();
   return (
     <ChatPanel
@@ -44,6 +46,7 @@ export function ChatPanelWrapper() {
       consoleLogs={consoleLogs}
       generatedImages={generatedImages}
       audioTracks={audioTracks}
+      runtimeEnv={runtimeEnv}
       onCodeUpdate={onCodeUpdate}
       onProjectFilesUpdate={onProjectFilesUpdate}
       patchProjectFiles={patchProjectFiles}
@@ -64,6 +67,7 @@ export function ChatPanelWrapper() {
       focusAudioPanel={focusAudioPanel}
       setPendingFileWrites={setPendingFileWrites}
       clearPendingFileWrites={clearPendingFileWrites}
+      updateRuntimeEnv={updateRuntimeEnv}
     />
   );
 }

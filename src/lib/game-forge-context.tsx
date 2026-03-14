@@ -5,6 +5,7 @@ import type { GameEngine } from "@/lib/game-engine";
 import type { ProjectFile, ProjectFileKind } from "@/lib/project-files";
 import { compileProjectToHtml, normalizeProjectFiles } from "@/lib/project-files";
 import type { PersistedChatMessage } from "@/lib/db/schema";
+import { getDefaultRuntimeEnv, normalizeRuntimeEnv, type RuntimeEnvMap } from "@/lib/runtime-env";
 
 export interface PlanningTodo {
   id: string;
@@ -91,6 +92,7 @@ interface GameForgeContextValue {
   projectStatusMessage: string | null;
   projectError: string | null;
   projectBusyAction: "save" | "load" | "publish" | null;
+  runtimeEnv: RuntimeEnvMap;
   chatMessages: PersistedChatMessage[];
   chatSessionId: string;
   onCodeUpdate: (code: string, engine?: GameEngine) => void;
@@ -134,6 +136,9 @@ interface GameForgeContextValue {
     entries: Array<{ path: string; status: "streaming" | "finalizing"; content?: string }>
   ) => void;
   clearPendingFileWrites: (paths?: string[]) => void;
+  updateRuntimeEnv: (set: RuntimeEnvMap, unset?: string[]) => void;
+  setRuntimeEnvVar: (key: string, value: string) => void;
+  removeRuntimeEnvVar: (key: string) => void;
   setChatMessages: (messages: PersistedChatMessage[]) => void;
   saveProjectRevision: () => Promise<{
     projectId: string;
@@ -293,6 +298,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
   const [projectStatusMessage, setProjectStatusMessage] = useState<string | null>(null);
   const [projectError, setProjectError] = useState<string | null>(null);
   const [projectBusyAction, setProjectBusyAction] = useState<"save" | "load" | "publish" | null>(null);
+  const [runtimeEnv, setRuntimeEnv] = useState<RuntimeEnvMap>(() => getDefaultRuntimeEnv());
   const [chatMessages, setChatMessagesState] = useState<PersistedChatMessage[]>([]);
   const [chatSessionId, setChatSessionId] = useState<string>(() => createChatSessionId());
 
@@ -586,6 +592,37 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     setPendingFileWritesState((prev) => prev.filter((entry) => !remove.has(entry.path)));
   }, []);
 
+  const updateRuntimeEnv = useCallback((set: RuntimeEnvMap, unset: string[] = []) => {
+    const normalizedSet = normalizeRuntimeEnv(set);
+    const normalizedUnset = unset
+      .map((key) => key.trim())
+      .filter((key) => key.length > 0);
+    if (Object.keys(normalizedSet).length === 0 && normalizedUnset.length === 0) return;
+
+    setRuntimeEnv((prev) => {
+      const next = { ...prev, ...normalizedSet };
+      for (const key of normalizedUnset) delete next[key];
+      return next;
+    });
+  }, []);
+
+  const setRuntimeEnvVar = useCallback((key: string, value: string) => {
+    const normalizedKey = key.trim();
+    if (!normalizedKey) return;
+    setRuntimeEnv((prev) => ({ ...prev, [normalizedKey]: value }));
+  }, []);
+
+  const removeRuntimeEnvVar = useCallback((key: string) => {
+    const normalizedKey = key.trim();
+    if (!normalizedKey) return;
+    setRuntimeEnv((prev) => {
+      if (!(normalizedKey in prev)) return prev;
+      const next = { ...prev };
+      delete next[normalizedKey];
+      return next;
+    });
+  }, []);
+
   const setChatMessages = useCallback((messages: PersistedChatMessage[]) => {
     const normalized = normalizeChatMessages(messages);
     setChatMessagesState((prev) => (areChatMessagesEqual(prev, normalized) ? prev : normalized));
@@ -612,6 +649,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     setProjectStatusMessage(null);
     setProjectError(null);
     setProjectBusyAction(null);
+    setRuntimeEnv(getDefaultRuntimeEnv());
     setChatMessagesState([]);
     setChatSessionId(createChatSessionId());
   }, []);
@@ -631,6 +669,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     planningTodos: PlanningTodo[];
     generatedImages: GeneratedImage[];
     audioTracks: AudioTrack[];
+    runtimeEnv?: RuntimeEnvMap;
     currentCode: string;
     chatMessages: PersistedChatMessage[];
   }) => {
@@ -644,6 +683,10 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     setAssets([]);
     setAudioTracks(snapshot.audioTracks);
     setGeneratedImages(snapshot.generatedImages);
+    setRuntimeEnv({
+      ...getDefaultRuntimeEnv(),
+      ...normalizeRuntimeEnv(snapshot.runtimeEnv),
+    });
     setControlsState(snapshot.controls.length > 0 ? snapshot.controls : DEFAULT_CONTROLS);
     setFocusedCodePath(null);
     setActiveCodePath(normalizedFiles[0]?.path ?? null);
@@ -665,9 +708,11 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     planningTodos,
     generatedImages,
     audioTracks,
+    runtimeEnv,
     chatMessages,
   }), [
     audioTracks,
+    runtimeEnv,
     chatMessages,
     controls,
     currentCode,
@@ -786,6 +831,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
         planningTodos: PlanningTodo[];
         generatedImages: GeneratedImage[];
         audioTracks: AudioTrack[];
+        runtimeEnv?: RuntimeEnvMap;
         currentCode: string;
         chatMessages: PersistedChatMessage[];
       }>(
@@ -832,6 +878,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       projectStatusMessage,
       projectError,
       projectBusyAction,
+      runtimeEnv,
       chatMessages,
       chatSessionId,
       onCodeUpdate,
@@ -860,6 +907,9 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       focusAudioPanel,
       setPendingFileWrites,
       clearPendingFileWrites,
+      updateRuntimeEnv,
+      setRuntimeEnvVar,
+      removeRuntimeEnvVar,
       setChatMessages,
       saveProjectRevision,
       publishProject,
@@ -886,6 +936,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       projectStatusMessage,
       projectError,
       projectBusyAction,
+      runtimeEnv,
       chatMessages,
       chatSessionId,
       onCodeUpdate,
@@ -914,6 +965,9 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       focusAudioPanel,
       setPendingFileWrites,
       clearPendingFileWrites,
+      updateRuntimeEnv,
+      setRuntimeEnvVar,
+      removeRuntimeEnvVar,
       setChatMessages,
       saveProjectRevision,
       publishProject,

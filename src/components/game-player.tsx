@@ -3,6 +3,7 @@
 import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import type { RuntimeEnvMap } from "@/lib/runtime-env";
 
 interface GamePlayerProps {
   code: string;
@@ -11,6 +12,7 @@ interface GamePlayerProps {
   multiplayer: boolean;
   multiplayerProvider: "partykit" | null;
   multiplayerRoomType: string | null;
+  runtimeEnv: RuntimeEnvMap;
   roomId: string | null;
 }
 
@@ -19,17 +21,62 @@ function injectRuntimeMultiplayerConfig(
   multiplayer: boolean,
   multiplayerProvider: "partykit" | null,
   multiplayerRoomType: string | null,
+  runtimeEnv: RuntimeEnvMap,
   roomId: string | null,
 ) {
   if (!multiplayer || multiplayerProvider !== "partykit" || !roomId) return html;
 
   const roomType = multiplayerRoomType || "game";
+  const resolvedHost =
+    runtimeEnv.__PARTYKIT_HOST__ ?? process.env.NEXT_PUBLIC_PARTYKIT_HOST ?? "localhost:1999";
+  const resolvedProtocol =
+    runtimeEnv.__PARTYKIT_PROTOCOL__ ?? process.env.NEXT_PUBLIC_PARTYKIT_PROTOCOL ?? "";
   const script = `<script>
+window.__GAMEFORGE_ENV__ = Object.assign({}, window.__GAMEFORGE_ENV__ || {}, ${JSON.stringify(runtimeEnv)});
+Object.keys(window.__GAMEFORGE_ENV__).forEach(function (k) {
+  if (typeof window[k] === "undefined") window[k] = window.__GAMEFORGE_ENV__[k];
+});
 window.__GAMEFORGE_MULTIPLAYER__ = { enabled: true, provider: "partykit", roomType: ${JSON.stringify(roomType)}, roomId: ${JSON.stringify(roomId)} };
 window.__PARTYKIT_ROOM_ID__ = ${JSON.stringify(roomId)};
 window.__GAMEFORGE_PARTYKIT_ROOM_TYPE__ = ${JSON.stringify(roomType)};
-window.__PARTYKIT_HOST__ = window.__PARTYKIT_HOST__ || ${JSON.stringify(process.env.NEXT_PUBLIC_PARTYKIT_HOST || "localhost:1999")};
-window.__PARTYKIT_PROTOCOL__ = window.__PARTYKIT_PROTOCOL__ || ${JSON.stringify(process.env.NEXT_PUBLIC_PARTYKIT_PROTOCOL || "ws")};
+window.__PARTYKIT_HOST__ = window.__PARTYKIT_HOST__ || ${JSON.stringify(resolvedHost)};
+window.__PARTYKIT_PROTOCOL__ = window.__PARTYKIT_PROTOCOL__ || ${JSON.stringify(resolvedProtocol)};
+// Compatibility shim: older generated games may use custom PartyKit roomType paths
+// that are not mapped in partykit.json. Rewrite to /parties/game/:roomId when needed.
+(function () {
+  if (!window.WebSocket || window.__GAMEFORGE_WS_PATCHED__) return;
+  window.__GAMEFORGE_WS_PATCHED__ = true;
+  const NativeWebSocket = window.WebSocket;
+  const host = window.__PARTYKIT_HOST__;
+  const defaultRoomType = "game";
+
+  function rewriteUrl(url) {
+    try {
+      const u = new URL(url);
+      if (!host || u.host !== host) return url;
+      const parts = u.pathname.split("/").filter(Boolean);
+      if (parts.length >= 3 && parts[0] === "parties" && parts[1] !== defaultRoomType) {
+        parts[1] = defaultRoomType;
+        u.pathname = "/" + parts.join("/");
+        return u.toString();
+      }
+      return url;
+    } catch {
+      return url;
+    }
+  }
+
+  function PatchedWebSocket(url, protocols) {
+    const rewritten = typeof url === "string" ? rewriteUrl(url) : url;
+    return protocols === undefined
+      ? new NativeWebSocket(rewritten)
+      : new NativeWebSocket(rewritten, protocols);
+  }
+
+  PatchedWebSocket.prototype = NativeWebSocket.prototype;
+  Object.setPrototypeOf(PatchedWebSocket, NativeWebSocket);
+  window.WebSocket = PatchedWebSocket;
+})();
 </script>`;
 
   if (/<head[^>]*>/i.test(html)) {
@@ -45,6 +92,7 @@ export function GamePlayer({
   multiplayer,
   multiplayerProvider,
   multiplayerRoomType,
+  runtimeEnv,
   roomId,
 }: GamePlayerProps) {
   const router = useRouter();
@@ -57,6 +105,7 @@ export function GamePlayer({
     multiplayer,
     multiplayerProvider,
     multiplayerRoomType,
+    runtimeEnv,
     roomId,
   );
 

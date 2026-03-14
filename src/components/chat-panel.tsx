@@ -12,6 +12,7 @@ import type { ProjectFile } from "@/lib/project-files";
 import type { PlanningTodo, ConsoleLogEntry, GeneratedImage, PendingFileWrite, GameControl, AudioTrack } from "@/lib/game-forge-context";
 import { getGeneratedAudioId } from "@/lib/generated-audio";
 import type { PersistedChatMessage } from "@/lib/db/schema";
+import type { RuntimeEnvMap } from "@/lib/runtime-env";
 
 interface ChatPanelProps {
   currentCode: string | null;
@@ -22,6 +23,7 @@ interface ChatPanelProps {
   consoleLogs: ConsoleLogEntry[];
   generatedImages: GeneratedImage[];
   audioTracks: AudioTrack[];
+  runtimeEnv: RuntimeEnvMap;
   onCodeUpdate: (code: string, engine?: GameEngine) => void;
   onProjectFilesUpdate: (files: ProjectFile[], engine?: GameEngine, deletePaths?: string[]) => void;
   patchProjectFiles: (files: ProjectFile[], engine?: GameEngine) => void;
@@ -53,6 +55,7 @@ interface ChatPanelProps {
     entries: Array<{ path: string; status: "streaming" | "finalizing"; content?: string }>
   ) => void;
   clearPendingFileWrites: (paths?: string[]) => void;
+  updateRuntimeEnv: (set: RuntimeEnvMap, unset?: string[]) => void;
 }
 
 type ComposerMode = "agent" | "plan" | "debug" | "ask";
@@ -102,6 +105,24 @@ function isStableProjectPath(path: unknown): path is string {
 
 function hasMeaningfulContent(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
+}
+
+const IMMUTABLE_PROJECT_PATHS = new Set<string>([
+  "src/net/party-session.js",
+]);
+
+function normalizeProjectPath(path: string) {
+  return path.trim().replace(/^\.\//, "").replace(/\\/g, "/").replace(/^\/+/, "");
+}
+
+function isImmutableProjectPath(path: string) {
+  return IMMUTABLE_PROJECT_PATHS.has(normalizeProjectPath(path));
+}
+
+function isReservedSdkPath(path: string) {
+  const normalized = normalizeProjectPath(path).toLowerCase();
+  if (normalized === "src/net/party-session.js") return false;
+  return /(^|\/)party-session[^/]*\.js$/.test(normalized);
 }
 
 type GenerationPhase = "connecting" | "thinking" | "coding" | "executing" | "done";
@@ -198,6 +219,14 @@ function useRotatingMessage(phase: GenerationPhase, isActive: boolean) {
   if (phase === "done" || phase === "thinking") return "";
   const msgs = PHASE_MESSAGES[phase];
   return msgs[count % msgs.length];
+}
+
+function estimateTokensFromJson(value: unknown): number {
+  try {
+    return Math.max(0, Math.ceil(JSON.stringify(value).length / 4));
+  } catch {
+    return 0;
+  }
 }
 
 function useComposerAutoHeight(
@@ -474,6 +503,15 @@ function ToolCallCard({ part, audioTrack }: {
       return `${controls} control${controls === 1 ? "" : "s"} updated`;
     }
 
+    if (rawToolName === "update_runtime_env") {
+      const setCount =
+        input.set && typeof input.set === "object"
+          ? Object.keys(input.set as Record<string, unknown>).length
+          : 0;
+      const unsetCount = Array.isArray(input.unset) ? input.unset.length : 0;
+      return `Env updated (+${setCount} / -${unsetCount})`;
+    }
+
     return null;
   };
 
@@ -615,6 +653,7 @@ export function ChatPanel({
   consoleLogs,
   generatedImages,
   audioTracks,
+  runtimeEnv,
   onCodeUpdate,
   onProjectFilesUpdate,
   patchProjectFiles,
@@ -635,6 +674,7 @@ export function ChatPanel({
   focusAudioPanel,
   setPendingFileWrites,
   clearPendingFileWrites,
+  updateRuntimeEnv,
 }: ChatPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef(true);
@@ -695,6 +735,35 @@ export function ChatPanel({
     },
     [audioTracks, generatedImages, pendingFileWrites, projectFiles]
   );
+
+  const estimatedTokens = useMemo(() => {
+    const transcriptTokens = estimateTokensFromJson(chatMessages);
+    const contextTokens = estimateTokensFromJson({
+      currentProjectFiles: projectFiles,
+      currentCode,
+      planningTodos,
+      generatedImages,
+      audioTracks: audioTracks.map((track) => ({
+        id: track.id,
+        name: track.name,
+        type: track.type,
+        status: track.status,
+        duration: track.duration,
+      })),
+      runtimeEnv,
+      composerMode,
+    });
+    return transcriptTokens + contextTokens;
+  }, [
+    audioTracks,
+    composerMode,
+    currentCode,
+    generatedImages,
+    chatMessages,
+    planningTodos,
+    projectFiles,
+    runtimeEnv,
+  ]);
 
   const handleMentionChipClick = useCallback(
     (label: string) => {
@@ -1019,10 +1088,19 @@ export function ChatPanel({
           const existingPaths = new Set(projectFiles.map((file) => file.path));
           const files = rawFiles.filter((file) => {
             if (!isStableProjectPath(file?.path)) return false;
+            if (isReservedSdkPath(file.path)) return false;
+            if (isImmutableProjectPath(file.path)) {
+              // Immutable files may be created once, then become read-only.
+              return !existingPaths.has(file.path) && hasMeaningfulContent(file?.content);
+            }
             if (existingPaths.has(file.path)) return true;
             return hasMeaningfulContent(file?.content);
           });
-          const deletePaths = Array.isArray(toolPart.input?.deletePaths) ? toolPart.input.deletePaths : [];
+          const deletePaths = Array.isArray(toolPart.input?.deletePaths)
+            ? toolPart.input.deletePaths.filter((path): path is string =>
+                typeof path === "string" && !isImmutableProjectPath(path) && !isReservedSdkPath(path)
+              )
+            : [];
           const filePaths = files.map((file) => file.path);
           const pendingEntries = files.map((file) => ({
             path: file.path,
@@ -1066,6 +1144,8 @@ export function ChatPanel({
             };
           };
           if (!toolPart.input?.path || !Array.isArray(toolPart.input.edits) || toolPart.input.edits.length === 0) continue;
+          if (isReservedSdkPath(toolPart.input.path)) continue;
+          if (isImmutableProjectPath(toolPart.input.path)) continue;
           if (toolPart.state === "input-streaming" || toolPart.state === "input-available") {
             if (isStableProjectPath(toolPart.input.path)) {
               setPendingFileWrites([
@@ -1102,6 +1182,8 @@ export function ChatPanel({
           };
           if (toolPart.state === "input-streaming" || toolPart.state === "input-available") {
             if (isStableProjectPath(toolPart.input?.targetFile)) {
+              if (isReservedSdkPath(toolPart.input.targetFile)) continue;
+              if (isImmutableProjectPath(toolPart.input.targetFile)) continue;
               setPendingFileWrites(
                 [{
                   path: toolPart.input.targetFile,
@@ -1113,6 +1195,8 @@ export function ChatPanel({
           }
           if (toolPart.state !== "output-available") continue;
           if (!isStableProjectPath(toolPart.input?.targetFile) || typeof toolPart.input.newString !== "string") continue;
+          if (isReservedSdkPath(toolPart.input.targetFile)) continue;
+          if (isImmutableProjectPath(toolPart.input.targetFile)) continue;
 
           const signature = JSON.stringify(toolPart.input);
           const key = `${message.id}:${partType}:${toolPart.input.targetFile}`;
@@ -1133,10 +1217,68 @@ export function ChatPanel({
           const toolPart = part as { state: string; input?: { targetFile?: string } };
           if (toolPart.state !== "output-available") continue;
           if (!toolPart.input?.targetFile) continue;
+          if (isReservedSdkPath(toolPart.input.targetFile)) continue;
+          if (isImmutableProjectPath(toolPart.input.targetFile)) continue;
           const key = `${message.id}:${partType}:${toolPart.input.targetFile}`;
           if (processedToolPayloadRef.current.get(key) === "1") continue;
           processedToolPayloadRef.current.set(key, "1");
           deleteProjectFile(toolPart.input.targetFile);
+        }
+
+        if (partType === "tool-update_runtime_env") {
+          const toolPart = part as {
+            state: string;
+            input?: { set?: Record<string, string>; unset?: string[] };
+          };
+          if (toolPart.state !== "output-available") continue;
+          const setVars =
+            toolPart.input?.set && typeof toolPart.input.set === "object" ? toolPart.input.set : {};
+          const unsetVars = Array.isArray(toolPart.input?.unset) ? toolPart.input.unset : [];
+          const signature = JSON.stringify({ set: setVars, unset: unsetVars });
+          const key = `${message.id}:${partType}`;
+          if (processedToolPayloadRef.current.get(key) === signature) continue;
+          processedToolPayloadRef.current.set(key, signature);
+          updateRuntimeEnv(setVars, unsetVars);
+        }
+
+        if (partType === "tool-multiplayer_partykit_scaffold") {
+          const toolPart = part as {
+            state: string;
+            output?: {
+              files?: Array<{ path?: string; kind?: string; content?: string }>;
+            };
+          };
+          if (toolPart.state !== "output-available") continue;
+          const filesRaw = Array.isArray(toolPart.output?.files) ? toolPart.output.files : [];
+          const existingPaths = new Set(projectFiles.map((file) => file.path));
+          const files: ProjectFile[] = filesRaw
+            .filter((file): file is { path: string; kind?: string; content?: string } =>
+              typeof file?.path === "string" && typeof file?.content === "string"
+            )
+            .filter((file) => isStableProjectPath(file.path))
+            .filter((file) => !isReservedSdkPath(file.path))
+            .filter((file) => !(isImmutableProjectPath(file.path) && existingPaths.has(file.path)))
+            .filter((file) => !existingPaths.has(file.path))
+            .map((file) => ({
+              path: file.path,
+              content: file.content,
+              kind:
+                file.kind === "script"
+                  ? "script"
+                  : file.kind === "config"
+                    ? "config"
+                    : file.path.endsWith(".html")
+                      ? "html"
+                      : file.path.endsWith(".css")
+                        ? "style"
+                        : "other",
+            }));
+          if (files.length === 0) continue;
+          const signature = JSON.stringify(files.map((file) => ({ path: file.path, content: file.content })));
+          const key = `${message.id}:${partType}`;
+          if (processedToolPayloadRef.current.get(key) === signature) continue;
+          processedToolPayloadRef.current.set(key, signature);
+          patchProjectFiles(files, selectedEngine);
         }
 
         if (partType === "tool-todo_write") {
@@ -1253,6 +1395,7 @@ export function ChatPanel({
     setControls,
     setPendingFileWrites,
     clearPendingFileWrites,
+    updateRuntimeEnv,
     selectedEngine,
     projectFiles,
   ]);
@@ -1355,6 +1498,7 @@ export function ChatPanel({
         })),
         consoleLogs: consoleContext,
         generatedImages,
+        runtimeEnv,
         composerMode,
         planningMode,
         gameEngine: effectiveEngine,
@@ -1825,6 +1969,9 @@ export function ChatPanel({
                 : composerMode === "ask"
                   ? "Q&A mode"
                   : "Full edit mode"}
+          </span>
+          <span className="ml-auto text-[9px] text-[var(--color-text-muted)]">
+            ~{estimatedTokens.toLocaleString()} tokens
           </span>
         </div>
 

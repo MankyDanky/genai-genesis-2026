@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useGameForge } from "@/lib/game-forge-context";
 import { getEngineLabel } from "@/lib/game-engine";
 
@@ -32,38 +33,25 @@ function InfoRow({ label, value, accent }: { label: string; value: string; accen
 }
 
 export function InspectorPanel() {
-  const { currentCode, currentEngine, projectFiles, assets, controls } = useGameForge();
-
-  if (!currentCode) {
-    return (
-      <div className="flex h-full flex-col bg-[var(--color-bg)]">
-        <div className="flex-1 flex flex-col items-center justify-center gap-4">
-          <div className="w-12 h-12 border border-dashed border-[var(--color-border-light)] flex items-center justify-center">
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="var(--color-text-muted)" strokeWidth="1.2" opacity="0.6">
-              <circle cx="10" cy="10" r="8" />
-              <line x1="10" y1="6" x2="10" y2="10" />
-              <line x1="10" y1="10" x2="13" y2="12" />
-            </svg>
-          </div>
-          <div className="text-center space-y-1">
-            <p className="text-[11px] text-[var(--color-text-muted)] uppercase tracking-[0.12em] font-semibold">
-              No Selection
-            </p>
-            <p className="text-[10px] text-[var(--color-text-muted)] opacity-60">
-              Generate a game to inspect
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const {
+    currentCode,
+    currentEngine,
+    projectFiles,
+    assets,
+    controls,
+    runtimeEnv,
+    setRuntimeEnvVar,
+    removeRuntimeEnvVar,
+  } = useGameForge();
+  const [newKey, setNewKey] = useState("");
+  const [newValue, setNewValue] = useState("");
 
   return (
     <div className="flex h-full flex-col bg-[var(--color-bg)]">
       <div className="flex-1 overflow-y-auto">
         <Section title="Game">
-          <InfoRow label="Status" value="Running" accent />
-          <InfoRow label="Size" value={`${currentCode.length} chars`} />
+          <InfoRow label="Status" value={currentCode ? "Running" : "Idle"} accent={!!currentCode} />
+          <InfoRow label="Size" value={currentCode ? `${currentCode.length} chars` : "0 chars"} />
           <InfoRow label="Type" value={getEngineLabel(currentEngine)} />
         </Section>
 
@@ -83,6 +71,66 @@ export function InspectorPanel() {
           ) : (
             <InfoRow label="Controls" value="Not provided" />
           )}
+        </Section>
+
+        <Section title="Environment">
+          <div className="space-y-2">
+            {Object.entries(runtimeEnv).length === 0 ? (
+              <InfoRow label="Runtime" value="No variables" />
+            ) : (
+              Object.entries(runtimeEnv).map(([key, value]) => (
+                <div key={key} className="border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
+                  <div className="mb-1 text-[10px] text-[var(--color-text-muted)] uppercase tracking-[0.1em]">
+                    {key}
+                  </div>
+                  <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5">
+                    <input
+                      value={value}
+                      onChange={(event) => setRuntimeEnvVar(key, event.target.value)}
+                      className="h-7 min-w-0 w-full bg-[var(--color-bg)] border border-[var(--color-border)] px-2 text-[11px] text-[var(--color-text-secondary)]"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeRuntimeEnvVar(key)}
+                      className="h-7 px-2 border border-[var(--color-border)] text-[10px] uppercase tracking-[0.08em] text-[var(--color-text-muted)] hover:text-[var(--color-danger)]"
+                    >
+                      Del
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+            <div className="border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
+              <div className="mb-1 text-[10px] text-[var(--color-text-muted)] uppercase tracking-[0.1em]">Add Variable</div>
+              <div className="grid grid-cols-1 gap-1.5">
+                <input
+                  placeholder="__ENV_KEY__"
+                  value={newKey}
+                  onChange={(event) => setNewKey(event.target.value)}
+                  className="h-7 min-w-0 bg-[var(--color-bg)] border border-[var(--color-border)] px-2 text-[11px] text-[var(--color-text-secondary)]"
+                />
+                <input
+                  placeholder="value"
+                  value={newValue}
+                  onChange={(event) => setNewValue(event.target.value)}
+                  className="h-7 min-w-0 bg-[var(--color-bg)] border border-[var(--color-border)] px-2 text-[11px] text-[var(--color-text-secondary)]"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const key = newKey.trim();
+                    if (!key) return;
+                    setRuntimeEnvVar(key, newValue);
+                    setNewKey("");
+                    setNewValue("");
+                  }}
+                  className="h-7 px-2 border border-[var(--color-border-light)] text-[10px] uppercase tracking-[0.08em] text-[var(--color-accent)]"
+                >
+                  Add
+                </button>
+              </div>
+            </div>
+          </div>
         </Section>
       </div>
     </div>

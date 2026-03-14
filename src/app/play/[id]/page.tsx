@@ -48,6 +48,7 @@ export default async function PlayPage({ params, searchParams }: PageProps) {
       multiplayer={game.multiplayer}
       multiplayerProvider={game.multiplayerProvider}
       multiplayerRoomType={game.multiplayerRoomType}
+      runtimeEnv={game.runtimeEnv ?? {}}
       roomId={roomId}
     />
   );

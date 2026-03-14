@@ -1,6 +1,7 @@
 import type { GameEngine } from "@/lib/game-engine";
 import type { ProjectFile } from "@/lib/project-files";
 import { projectFilesToPrompt } from "@/lib/project-files";
+import type { RuntimeEnvMap } from "@/lib/runtime-env";
 
 interface ConsoleLogPayload {
     level: "log" | "info" | "warn" | "error";
@@ -31,6 +32,7 @@ interface PromptOptions {
     consoleLogs?: ConsoleLogPayload[];
     generatedImages?: GeneratedImagePayload[];
     currentAudioTracks?: AudioTrackPayload[];
+    runtimeEnv?: RuntimeEnvMap;
     composerMode?: "agent" | "plan" | "debug" | "ask";
     planningMode?: boolean;
     gameEngine?: GameEngine;
@@ -43,6 +45,7 @@ export function getSystemPrompt({
     consoleLogs = [],
     generatedImages = [],
     currentAudioTracks = [],
+    runtimeEnv = {},
     composerMode = "agent",
     planningMode = false,
     gameEngine = "canvas2d",
@@ -69,6 +72,7 @@ Use the exact tool names below:
 - \`generate_image\`: generate image asset URL for use in code
 - \`generate_sound_effect\`: schedule sound-effect generation from text
 - \`generate_music\`: schedule background music generation from text
+- \`update_runtime_env\`: set/unset runtime environment variables for iframe execution
 - \`todo_read\`: read current planning tasks/todos
 - \`list_audio_assets\`: list generated audio assets (name/type/description/status)
 - \`list_image_assets\`: list generated image assets (url/description)
@@ -89,6 +93,7 @@ Rules:
 - Use \`list_audio_assets\` and \`list_image_assets\` when you need to inspect available assets before editing.
 - Use \`todo_write\` when planning mode is enabled or task is multi-step.
 - When multiplayer is requested, call \`multiplayer_partykit_scaffold\` first, then apply only needed files.
+- Use \`update_runtime_env\` when runtime vars need to be changed (for example PartyKit host/protocol overrides).
 - Prefer multi-file flow (\`update_project_files\` / \`patch_project_file\` / \`edit_file\`) when project files exist.
 - Use \`update_sandbox\` only as fallback when operating in single-file mode.
 
@@ -97,6 +102,11 @@ Rules:
 - First understand existing files before editing; do not guess missing structure.
 - Prefer minimal, targeted edits over broad rewrites.
 - Preserve unrelated code, file names, and folder structure.
+- Do not edit \`src/net/party-session.js\` (treat as immutable SDK runtime file).
+- Multiplayer SDK file policy:
+  - Use ONLY \`src/net/party-session.js\` as the PartyKit client SDK path.
+  - Do NOT create alternate PartyKit SDK files (for example \`party-session-2.js\`, \`partyClient.js\`, etc).
+  - Read and use the existing SDK API surface; build gameplay code around it.
 - If a task is multi-step, think in a short plan and execute it in order.
 - Keep outputs deterministic and runnable immediately.
 - Never emit placeholder pseudo-code when concrete code is possible.
@@ -183,6 +193,9 @@ Recommended helper shape:
   - replicate shared objects (projectiles, pickups, hazards, timers, score/state machines)
   - apply remote updates every frame before rendering so each user sees the same world state
 - Always handle disconnect/reconnect gracefully and keep single-player fallback if connection fails.
+- Keep PartyKit runtime variables in sync with environment:
+  - \`__PARTYKIT_HOST__\`
+  - \`__PARTYKIT_PROTOCOL__\`
 
 ## Response Format
 
@@ -221,6 +234,11 @@ When you create or update a game:
             )
             .join("\n")}`
         : "";
+    const runtimeEnvSection = Object.keys(runtimeEnv).length > 0
+        ? `\n\n## Runtime Environment Variables\n\n${Object.entries(runtimeEnv)
+            .map(([key, value]) => `- ${key}=${value}`)
+            .join("\n")}`
+        : "";
     const consoleSection = includeConsole && consoleLogs.length > 0
         ? `\n\n## Runtime Console Logs (User Mentioned @console)\n\nUse these logs to debug before editing:\n\n${consoleLogs
             .map((entry) => `- [${new Date(entry.timestamp).toISOString()}] ${entry.level.toUpperCase()} ${entry.source}: ${entry.text}`)
@@ -243,7 +261,7 @@ When you create or update a game:
 
 The project currently has these files. Modify existing files when possible instead of replacing everything.
 
-${projectFilesToPrompt(currentProjectFiles)}${focusedSection}${consoleSection}${imagesSection}${audioSection}`;
+${projectFilesToPrompt(currentProjectFiles)}${focusedSection}${consoleSection}${imagesSection}${audioSection}${runtimeEnvSection}`;
     }
 
     if (currentCode) {
@@ -255,8 +273,8 @@ The sandbox currently contains the following code. When the user asks for modifi
 
 \`\`\`html
 ${currentCode}
-\`\`\`${consoleSection}${imagesSection}${audioSection}`;
+\`\`\`${consoleSection}${imagesSection}${audioSection}${runtimeEnvSection}`;
     }
 
-    return `${baseWithPlanning}${imagesSection}${audioSection}`;
+    return `${baseWithPlanning}${imagesSection}${audioSection}${runtimeEnvSection}`;
 }
