@@ -2,7 +2,7 @@
 
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
-import { useState, useEffect, useRef, useMemo, type FormEvent, type KeyboardEvent } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback, type FormEvent, type KeyboardEvent } from "react";
 import Markdown from "react-markdown";
 
 interface ChatPanelProps {
@@ -293,8 +293,18 @@ export function ChatPanel({ currentCode, onCodeUpdate }: ChatPanelProps) {
     []
   );
 
+  const onFinish = useCallback(() => {
+    console.log("[Chat] onFinish called - stream complete");
+  }, []);
+
+  const onError = useCallback((error: Error) => {
+    console.error("[Chat] useChat error:", error);
+  }, []);
+
   const { messages, sendMessage, status, error } = useChat({
     transport,
+    onError,
+    onFinish,
   });
 
   // Extract code from tool invocations
@@ -303,10 +313,14 @@ export function ChatPanel({ currentCode, onCodeUpdate }: ChatPanelProps) {
       if (message.role !== "assistant") continue;
       for (const part of message.parts) {
         const partType = (part as { type: string }).type;
+        if (partType.startsWith("tool-") || partType === "dynamic-tool") {
+          console.log("[Chat] Found tool part:", partType, "state:", (part as { state?: string }).state);
+        }
         if (partType === "tool-update_sandbox") {
           const toolPart = part as { state: string; input?: { code?: string } };
           if (toolPart.state === "output-available") {
             if (toolPart.input?.code && toolPart.input.code !== currentCode) {
+              console.log("[Chat] Updating sandbox code, length:", toolPart.input.code.length);
               onCodeUpdate(toolPart.input.code);
             }
           }
@@ -314,6 +328,15 @@ export function ChatPanel({ currentCode, onCodeUpdate }: ChatPanelProps) {
       }
     }
   }, [messages, currentCode, onCodeUpdate]);
+
+  // Log status changes
+  useEffect(() => {
+    console.log("[Chat] Status:", status, "| Messages:", messages.length, "| Error:", error?.message ?? "none");
+    if (messages.length > 0) {
+      const lastMsg = messages[messages.length - 1];
+      console.log("[Chat] Last message role:", lastMsg.role, "parts:", lastMsg.parts.map(p => (p as { type: string }).type));
+    }
+  }, [status, messages, error]);
 
   // Auto-scroll
   useEffect(() => {
@@ -340,8 +363,11 @@ export function ChatPanel({ currentCode, onCodeUpdate }: ChatPanelProps) {
   const doSubmit = () => {
     const text = input.trim();
     if (!text || isLoading) return;
+    console.log("[Chat] Submitting:", text);
     setInput("");
-    sendMessage({ text }, { body: { currentCode } });
+    sendMessage({ text }, { body: { currentCode } })
+      .then(() => console.log("[Chat] sendMessage resolved"))
+      .catch((err) => console.error("[Chat] sendMessage rejected:", err));
   };
 
   const handleSubmit = (e: FormEvent) => {

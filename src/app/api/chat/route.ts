@@ -10,7 +10,13 @@ export async function POST(req: Request) {
     const body = await req.json();
     const { messages, currentCode } = body;
 
+    console.log("[API] Received request:", {
+      messageCount: messages?.length ?? 0,
+      hasCurrentCode: !!currentCode,
+    });
+
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      console.error("[API] Invalid messages:", messages);
       return new Response(
         JSON.stringify({ error: "Messages array is required" }),
         { status: 400, headers: { "Content-Type": "application/json" } }
@@ -18,6 +24,7 @@ export async function POST(req: Request) {
     }
 
     const modelMessages = await convertToModelMessages(messages);
+    console.log("[API] Converted to model messages:", modelMessages.length);
 
     const result = streamText({
       model: anthropic("claude-sonnet-4-6"),
@@ -35,6 +42,7 @@ export async function POST(req: Request) {
               ),
           }),
           execute: async ({ code }) => {
+            console.log("[API] Tool update_sandbox executed, code length:", code.length);
             return { success: true, codeLength: code.length };
           },
         }),
@@ -50,6 +58,7 @@ export async function POST(req: Request) {
       },
     });
 
+    console.log("[API] Streaming response...");
     return result.toUIMessageStreamResponse({ sendReasoning: true });
   } catch (error) {
     console.error("[API] Unhandled error:", error);
