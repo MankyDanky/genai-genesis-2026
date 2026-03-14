@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { createStandalonePublishedGame } from "@/lib/db/projects";
+import { createStandalonePublishedGame, listPublishedGames } from "@/lib/db/projects";
 
 const SaveGameRequestSchema = z.object({
   code: z.string().min(1).max(2 * 1024 * 1024),
@@ -34,4 +34,11 @@ export async function POST(request: Request) {
       { status: 500 },
     );
   }
+}
+
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const limit = Number.parseInt(searchParams.get("limit") ?? "60", 10);
+  const games = await listPublishedGames(Number.isFinite(limit) ? limit : 60);
+  return NextResponse.json({ games });
 }

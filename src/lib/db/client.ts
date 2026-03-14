@@ -13,17 +13,30 @@ const options = {
 
 declare global {
   var _mongoClient: MongoClient | undefined;
+  var _mongoActiveUri: string | undefined;
   var _mongoSetupPromise: Promise<void> | undefined;
   var _mongoSetupError: Error | undefined;
   var _mongoSetupFailedAt: number | undefined;
   var _mongoOptionalWarnings: Set<string> | undefined;
 }
 
-function getUri(): string {
-  const uri = process.env.MONGODB_URI;
-  if (!uri) {
-    throw new Error("MONGODB_URI environment variable is not set");
+function getConfiguredUris(): string[] {
+  const directUri = process.env.MONGODB_URI_DIRECT?.trim();
+  const srvUri = process.env.MONGODB_URI?.trim();
+  const uris = [directUri, srvUri].filter(
+    (value): value is string => typeof value === "string" && value.length > 0
+  );
+  if (uris.length === 0) {
+    throw new Error("Set MONGODB_URI or MONGODB_URI_DIRECT");
   }
+  return [...new Set(uris)];
+}
+
+function getPrimaryUri(): string {
+  if (globalThis._mongoActiveUri) return globalThis._mongoActiveUri;
+  const [uri] = getConfiguredUris();
+  if (!uri) throw new Error("Set MONGODB_URI or MONGODB_URI_DIRECT");
+  globalThis._mongoActiveUri = uri;
   return uri;
 }
 
@@ -35,19 +48,23 @@ function normalizeMongoError(error: unknown): Error {
   return new Error(String(error));
 }
 
-function getClient(): MongoClient {
+function getClient(uri: string): MongoClient {
   if (process.env.NODE_ENV === "development") {
-    if (!globalThis._mongoClient) {
-      globalThis._mongoClient = new MongoClient(getUri(), options);
+    if (!globalThis._mongoClient || globalThis._mongoActiveUri !== uri) {
+      if (globalThis._mongoClient && globalThis._mongoActiveUri !== uri) {
+        void globalThis._mongoClient.close().catch(() => {});
+      }
+      globalThis._mongoClient = new MongoClient(uri, options);
+      globalThis._mongoActiveUri = uri;
     }
     return globalThis._mongoClient;
   }
 
-  return new MongoClient(getUri(), options);
+  return new MongoClient(uri, options);
 }
 
 export function getDb() {
-  return getClient().db(DATABASE_NAME);
+  return getClient(getPrimaryUri()).db(DATABASE_NAME);
 }
 
 export function getArtifactBucket() {
@@ -93,28 +110,40 @@ export async function ensureDbSetup() {
 
   if (!globalThis._mongoSetupPromise) {
     globalThis._mongoSetupPromise = (async () => {
-      try {
-        const client = getClient();
-        const db = client.db(DATABASE_NAME);
-        await client.connect();
-        await Promise.all([
-          db.collection("projects").createIndex({ updatedAt: -1 }, { name: "updatedAt_desc" }),
-          db
-            .collection("project_revisions")
-            .createIndex({ projectId: 1, revisionNumber: 1 }, { unique: true }),
-          db.collection("published_games").createIndex({ projectId: 1, createdAt: -1 }),
-          db.collection("project_artifacts").createIndex({ projectId: 1, createdAt: -1 }),
-          db.collection("project_artifacts").createIndex({ revisionId: 1, kind: 1 }),
-          db.collection("generated_audio_jobs").createIndex({ createdAt: -1 }),
-        ]);
-        globalThis._mongoSetupError = undefined;
-        globalThis._mongoSetupFailedAt = undefined;
-        globalThis._mongoOptionalWarnings?.clear();
-      } catch (error) {
-        globalThis._mongoSetupError = normalizeMongoError(error);
-        globalThis._mongoSetupFailedAt = Date.now();
-        throw globalThis._mongoSetupError;
+      const uriErrors: string[] = [];
+      for (const uri of getConfiguredUris()) {
+        const client = getClient(uri);
+        try {
+          const db = client.db(DATABASE_NAME);
+          await client.connect();
+          await Promise.all([
+            db.collection("projects").createIndex({ updatedAt: -1 }, { name: "updatedAt_desc" }),
+            db
+              .collection("project_revisions")
+              .createIndex({ projectId: 1, revisionNumber: 1 }, { unique: true }),
+            db.collection("published_games").createIndex({ projectId: 1, createdAt: -1 }),
+            db.collection("project_artifacts").createIndex({ projectId: 1, createdAt: -1 }),
+            db.collection("project_artifacts").createIndex({ revisionId: 1, kind: 1 }),
+            db.collection("generated_audio_jobs").createIndex({ createdAt: -1 }),
+          ]);
+          globalThis._mongoActiveUri = uri;
+          globalThis._mongoSetupError = undefined;
+          globalThis._mongoSetupFailedAt = undefined;
+          globalThis._mongoOptionalWarnings?.clear();
+          return;
+        } catch (error) {
+          uriErrors.push(`${uri.replace(/\/\/.*@/, "//***@")}: ${normalizeMongoError(error).message}`);
+          if (process.env.NODE_ENV !== "development") {
+            await client.close().catch(() => {});
+          }
+        }
       }
+
+      globalThis._mongoSetupError = new Error(
+        `Mongo setup failed for all configured URIs. ${uriErrors.join(" | ")}`
+      );
+      globalThis._mongoSetupFailedAt = Date.now();
+      throw globalThis._mongoSetupError;
     })();
   }
 

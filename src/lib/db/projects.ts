@@ -1,5 +1,6 @@
+import { randomUUID } from "crypto";
 import { ObjectId } from "mongodb";
-import { ensureDbSetup, getDb } from "@/lib/db/client";
+import { ensureDbSetup, getDb, logOptionalDbFailure } from "@/lib/db/client";
 import {
   createTextArtifactRef,
   INLINE_JSON_BYTES_LIMIT,
@@ -18,6 +19,29 @@ import {
 } from "@/lib/db/schema";
 import { compileProjectToHtml } from "@/lib/project-files";
 import type { AudioTrack } from "@/lib/game-forge-context";
+
+interface FallbackPublishedGame {
+  id: string;
+  title: string;
+  engine: "canvas2d" | "threejs";
+  code: string;
+  createdAt: Date;
+}
+
+declare global {
+  var __fallbackPublishedGames: Map<string, FallbackPublishedGame> | undefined;
+}
+
+function getFallbackPublishedGamesStore() {
+  if (!globalThis.__fallbackPublishedGames) {
+    globalThis.__fallbackPublishedGames = new Map<string, FallbackPublishedGame>();
+  }
+  return globalThis.__fallbackPublishedGames;
+}
+
+function fallbackGameId(gameId: string | ObjectId) {
+  return typeof gameId === "string" ? gameId : gameId.toHexString();
+}
 
 function deriveTitle(snapshot: SaveProjectSnapshotRequest) {
   const fromRequest = snapshot.title?.trim();
@@ -383,21 +407,38 @@ export async function publishProjectRevision(
 }
 
 export async function getPublishedGame(gameId: string | ObjectId) {
-  await ensureDbSetup();
-  const doc = await getDb()
-    .collection<PublishedGameDocument>("published_games")
-    .findOne({ _id: toObjectId(gameId) });
-  if (!doc) return null;
+  try {
+    await ensureDbSetup();
+    const doc = await getDb()
+      .collection<PublishedGameDocument>("published_games")
+      .findOne({ _id: toObjectId(gameId) });
+    if (doc) {
+      return {
+        id: doc._id.toHexString(),
+        projectId: doc.projectId?.toHexString() ?? null,
+        revisionId: doc.revisionId?.toHexString() ?? null,
+        revisionNumber: doc.revisionNumber,
+        title: doc.title,
+        engine: doc.engine,
+        code: await resolveTextArtifact(doc.compiledHtml),
+        createdAt: doc.createdAt,
+      };
+    }
+  } catch (error) {
+    logOptionalDbFailure("Published games", error);
+  }
 
+  const fallback = getFallbackPublishedGamesStore().get(fallbackGameId(gameId));
+  if (!fallback) return null;
   return {
-    id: doc._id.toHexString(),
-    projectId: doc.projectId?.toHexString() ?? null,
-    revisionId: doc.revisionId?.toHexString() ?? null,
-    revisionNumber: doc.revisionNumber,
-    title: doc.title,
-    engine: doc.engine,
-    code: await resolveTextArtifact(doc.compiledHtml),
-    createdAt: doc.createdAt,
+    id: fallback.id,
+    projectId: null,
+    revisionId: null,
+    revisionNumber: null,
+    title: fallback.title,
+    engine: fallback.engine,
+    code: fallback.code,
+    createdAt: fallback.createdAt,
   };
 }
 
@@ -460,36 +501,86 @@ export async function createStandalonePublishedGame(snapshot: {
   engine?: "canvas2d" | "threejs";
   code: string;
 }) {
-  await ensureDbSetup();
-  const db = getDb();
-
-  const compiledHtml = await createTextArtifactRef({
-    kind: "compiled-html",
-    text: snapshot.code,
-    contentType: "text/html;charset=utf-8",
-    inlineLimitBytes: INLINE_TEXT_BYTES_LIMIT,
-  });
-
   const title =
     snapshot.title?.trim() ||
     snapshot.code.match(/<title>(.*?)<\/title>/i)?.[1]?.trim() ||
     "Untitled Game";
-  const publishedGameId = new ObjectId();
-  const doc: PublishedGameDocument = {
-    _id: publishedGameId,
-    schemaVersion: PROJECT_SCHEMA_VERSION,
-    projectId: null,
-    revisionId: null,
-    revisionNumber: null,
-    title,
-    engine: snapshot.engine ?? "canvas2d",
-    compiledHtml,
-    createdAt: new Date(),
-  };
+  try {
+    await ensureDbSetup();
+    const db = getDb();
 
-  await db.collection<PublishedGameDocument>("published_games").insertOne(doc);
-  return {
-    id: publishedGameId.toHexString(),
-    title,
-  };
+    const compiledHtml = await createTextArtifactRef({
+      kind: "compiled-html",
+      text: snapshot.code,
+      contentType: "text/html;charset=utf-8",
+      inlineLimitBytes: INLINE_TEXT_BYTES_LIMIT,
+    });
+
+    const publishedGameId = new ObjectId();
+    const doc: PublishedGameDocument = {
+      _id: publishedGameId,
+      schemaVersion: PROJECT_SCHEMA_VERSION,
+      projectId: null,
+      revisionId: null,
+      revisionNumber: null,
+      title,
+      engine: snapshot.engine ?? "canvas2d",
+      compiledHtml,
+      createdAt: new Date(),
+    };
+
+    await db.collection<PublishedGameDocument>("published_games").insertOne(doc);
+    return {
+      id: publishedGameId.toHexString(),
+      title,
+    };
+  } catch (error) {
+    logOptionalDbFailure("Standalone publish", error);
+    const id = `local-${randomUUID()}`;
+    getFallbackPublishedGamesStore().set(id, {
+      id,
+      title,
+      engine: snapshot.engine ?? "canvas2d",
+      code: snapshot.code,
+      createdAt: new Date(),
+    });
+    return { id, title };
+  }
+}
+
+export async function listPublishedGames(limit = 60) {
+  const cappedLimit = Math.max(1, Math.min(200, Math.floor(limit)));
+  try {
+    await ensureDbSetup();
+    const docs = await getDb()
+      .collection<PublishedGameDocument>("published_games")
+      .find({})
+      .sort({ createdAt: -1 })
+      .limit(cappedLimit)
+      .toArray();
+
+    return docs.map((doc) => ({
+      id: doc._id.toHexString(),
+      projectId: doc.projectId?.toHexString() ?? null,
+      revisionId: doc.revisionId?.toHexString() ?? null,
+      revisionNumber: doc.revisionNumber,
+      title: doc.title,
+      engine: doc.engine,
+      createdAt: doc.createdAt,
+    }));
+  } catch (error) {
+    logOptionalDbFailure("Published games listing", error);
+    return Array.from(getFallbackPublishedGamesStore().values())
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice(0, cappedLimit)
+      .map((game) => ({
+        id: game.id,
+        projectId: null,
+        revisionId: null,
+        revisionNumber: null,
+        title: game.title,
+        engine: game.engine,
+        createdAt: game.createdAt,
+      }));
+  }
 }

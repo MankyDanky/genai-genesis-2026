@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useRef, useEffect, useCallback } from "react";
 
 interface PanelInfo {
@@ -310,6 +311,12 @@ export function Toolbar({
       </div>
 
       <div className="px-3 flex items-center gap-2">
+        <Link
+          href="/explore"
+          className="h-6 px-2.5 border border-[var(--color-border-light)] text-[10px] uppercase tracking-[0.1em] font-semibold text-[var(--color-text-secondary)] hover:text-[var(--color-text)] hover:border-[var(--color-accent)] flex items-center"
+        >
+          Explore
+        </Link>
         <ActionButton label="Save" onClick={onSaveProject} disabled={isBusy} />
         <ActionButton label="Publish" onClick={onPublishProject} disabled={isBusy} />
         {playPath && onShareClick ? (

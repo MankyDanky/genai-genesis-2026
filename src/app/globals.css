@@ -342,6 +342,9 @@ body {
 .composer-mentions__suggestions {
     margin-top: 6px;
     z-index: 60 !important;
+    min-width: min(460px, calc(100vw - 16px));
+    width: max-content;
+    max-width: calc(100vw - 16px);
 }
 
 .composer-mentions-panel {
@@ -396,9 +399,6 @@ body {
 }
 
 .composer-mentions-row-label {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
     white-space: nowrap;
 }
 

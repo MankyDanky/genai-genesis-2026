@@ -1392,6 +1392,46 @@ export function ChatPanel({
     highlighter.scrollLeft = left;
   }, []);
 
+  const clampMentionsPopup = useCallback(() => {
+    if (typeof window === "undefined") return;
+    const popup = document.querySelector<HTMLElement>(".composer-mentions__suggestions");
+    if (!popup) return;
+    const isVisible = popup.offsetParent !== null;
+    if (!isVisible) return;
+    const pad = 8;
+    popup.style.transform = "";
+    popup.style.maxWidth = `calc(100vw - ${pad * 2}px)`;
+
+    const offsetParent = popup.offsetParent as HTMLElement | null;
+    const parentRect = offsetParent?.getBoundingClientRect() ?? { left: 0 };
+    const rect = popup.getBoundingClientRect();
+    const currentLeft = Number.isFinite(Number.parseFloat(popup.style.left))
+      ? Number.parseFloat(popup.style.left)
+      : rect.left - parentRect.left;
+    const clampedViewportLeft = Math.min(
+      Math.max(0, rect.left),
+      Math.max(0, window.innerWidth - rect.width)
+    );
+    const nextLeft = currentLeft + (clampedViewportLeft - rect.left);
+    if (!Number.isFinite(nextLeft)) return;
+    popup.style.left = `${Math.max(0, Math.round(nextLeft))}px`;
+  }, []);
+
+  useEffect(() => {
+    const onReflow = () => {
+      requestAnimationFrame(() => clampMentionsPopup());
+    };
+    window.addEventListener("resize", onReflow);
+    window.addEventListener("scroll", onReflow, true);
+    const observer = new MutationObserver(onReflow);
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => {
+      window.removeEventListener("resize", onReflow);
+      window.removeEventListener("scroll", onReflow, true);
+      observer.disconnect();
+    };
+  }, [clampMentionsPopup]);
+
   const handleExampleClick = (prompt: string) => {
     setInput(prompt.toLowerCase());
     textareaRef.current?.focus();
@@ -1792,8 +1832,15 @@ export function ChatPanel({
           <div className="gf-input relative flex-1 min-w-0 border border-[var(--color-border-light)] bg-[var(--color-surface)]">
             <MentionsInput
               value={input}
-              onChange={(_, newValue) => setInput(newValue)}
+              onChange={(_, newValue) => {
+                setInput(newValue);
+                requestAnimationFrame(() => clampMentionsPopup());
+              }}
               onKeyDown={handleKeyDown}
+              onKeyUp={(e) => {
+                if (e.key === "Shift" || e.key === "Control" || e.key === "Alt" || e.key === "Meta") return;
+                requestAnimationFrame(() => clampMentionsPopup());
+              }}
               onScroll={handleComposerScroll}
               onMouseUp={() => {
                 const inputEl = textareaRef.current;

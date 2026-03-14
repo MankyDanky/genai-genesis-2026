@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { ObjectId } from "mongodb";
 import { getPublishedGame } from "@/lib/db/projects";
 
 export async function GET(
@@ -8,10 +7,6 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-
-    if (!ObjectId.isValid(id)) {
-      return NextResponse.json({ error: "Invalid game ID" }, { status: 400 });
-    }
 
     const game = await getPublishedGame(id);
 
