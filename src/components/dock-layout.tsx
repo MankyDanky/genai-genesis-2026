@@ -81,7 +81,7 @@ function buildDefaultLayout(api: DockviewApi) {
     id: "console",
     component: "console",
     title: "Console",
-    position: { referencePanel: "code", direction: "within" },
+    position: { referencePanel: "sandbox", direction: "within" },
   });
 
   api.addPanel({
@@ -91,6 +91,15 @@ function buildDefaultLayout(api: DockviewApi) {
     position: { referencePanel: "inspector", direction: "below" },
     initialHeight: h * 0.35,
   });
+
+  const apiAny = api as unknown as {
+    getPanel?: (id: string) => { api?: { setActive?: () => void } } | undefined;
+    panels?: Array<{ id?: string; api?: { setActive?: () => void } }>;
+  };
+  const sandboxPanel =
+    apiAny.getPanel?.("sandbox") ??
+    apiAny.panels?.find((panel) => panel.id === "sandbox");
+  sandboxPanel?.api?.setActive?.();
 }
 
 export function DockLayout() {

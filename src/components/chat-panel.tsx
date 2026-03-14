@@ -964,22 +964,22 @@ export function ChatPanel({
     const listEl = planListRef.current;
     if (!listEl) return;
     const now = Date.now();
-    if (now - lastPlanAutoScrollRef.current < 65) return;
+    if (now - lastPlanAutoScrollRef.current < 40) return;
     lastPlanAutoScrollRef.current = now;
     const rect = listEl.getBoundingClientRect();
-    const threshold = 20;
-    const maxSpeed = 2;
+    const threshold = 90;
+    const maxSpeed = 5;
     const distanceToTop = clientY - rect.top;
     const distanceToBottom = rect.bottom - clientY;
 
     if (distanceToTop < threshold) {
       const intensity = Math.max(0, (threshold - distanceToTop) / threshold);
-      const delta = Math.floor(maxSpeed * intensity);
-      if (delta > 0) listEl.scrollTop -= delta;
+      const delta = Math.max(1, Math.round(maxSpeed * intensity));
+      listEl.scrollTop -= delta;
     } else if (distanceToBottom < threshold) {
       const intensity = Math.max(0, (threshold - distanceToBottom) / threshold);
-      const delta = Math.floor(maxSpeed * intensity);
-      if (delta > 0) listEl.scrollTop += delta;
+      const delta = Math.max(1, Math.round(maxSpeed * intensity));
+      listEl.scrollTop += delta;
     }
   };
 
