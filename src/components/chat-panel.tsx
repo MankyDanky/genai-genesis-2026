@@ -6,6 +6,10 @@ import { useState, useEffect, useRef, useMemo, useCallback, type FormEvent, type
 import Markdown from "react-markdown";
 
 import type { AudioTrack } from "@/lib/game-forge-context";
+import {
+  getGeneratedAudioId,
+  type GeneratedAudioKind,
+} from "@/lib/generated-audio";
 
 interface ChatPanelProps {
   currentCode: string | null;
@@ -175,13 +179,33 @@ function StreamingIndicator({ phase, timer, message }: {
   );
 }
 
-// ── Sound player ──
+function getGeneratedAudioKind(partType: string): GeneratedAudioKind | null {
+  if (partType === "tool-generate_sound_effect") {
+    return "sfx";
+  }
 
-function SoundPlayer({
-  soundName,
+  if (partType === "tool-generate_music") {
+    return "music";
+  }
+
+  return null;
+}
+
+function getGeneratedAudioLabel(kind: GeneratedAudioKind): string {
+  return kind === "music" ? "music" : "sound effect";
+}
+
+// ── Audio player ──
+
+function GeneratedAudioPlayer({
+  audioId,
+  audioName,
+  audioKind,
   onStatusChange,
 }: {
-  soundName: string;
+  audioId: string;
+  audioName: string;
+  audioKind: GeneratedAudioKind;
   onStatusChange?: (data: {
     status: "ready" | "error";
     dataUrl?: string;
@@ -198,14 +222,14 @@ function SoundPlayer({
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const progressRef = useRef<HTMLDivElement>(null);
 
-  // Poll for audio data until ready — single source of truth for this sound
+  // Poll for audio data until ready — single source of truth for this generated audio.
   useEffect(() => {
     if (soundStatus !== "pending") return;
     let cancelled = false;
 
     const poll = () => {
       if (cancelled) return;
-      fetch(`/api/sounds/${encodeURIComponent(soundName)}`)
+      fetch(`/api/sounds/${encodeURIComponent(audioId)}`)
         .then((res) => res.json())
         .then((data: { status: string; dataUrl?: string | null; duration?: number; error?: string | null }) => {
           if (cancelled) return;
@@ -233,7 +257,7 @@ function SoundPlayer({
     };
     poll();
     return () => { cancelled = true; };
-  }, [soundName, soundStatus, onStatusChange]);
+  }, [audioId, soundStatus, onStatusChange]);
 
   // Create audio element when URL is available
   useEffect(() => {
@@ -305,7 +329,7 @@ function SoundPlayer({
           <circle cx="5" cy="5" r="4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeDasharray="18" strokeLinecap="round" />
         </svg>
         <span className="text-[10px] text-[var(--color-text-muted)]">
-          Generating &quot;{soundName}&quot;...
+          Generating {getGeneratedAudioLabel(audioKind)} &quot;{audioName}&quot;...
         </span>
       </div>
     );
@@ -375,9 +399,9 @@ function SoundPlayer({
 
 // ── Tool call card ──
 
-function ToolCallCard({ part, onSoundStatusChange }: {
+function ToolCallCard({ part, onAudioStatusChange }: {
   part: { type: string; state?: string; input?: Record<string, unknown> };
-  onSoundStatusChange?: (
+  onAudioStatusChange?: (
     name: string,
     data: {
       status: "ready" | "error";
@@ -389,32 +413,37 @@ function ToolCallCard({ part, onSoundStatusChange }: {
 }) {
   const toolName = part.type.replace("tool-", "").toUpperCase().replace(/_/g, "_");
   const state = part.state;
-  const isSoundTool = part.type === "tool-generate_sound_effect";
-  const codeLength = !isSoundTool ? (part.input?.code as string | undefined)?.length : undefined;
-  const soundName = isSoundTool ? (part.input?.name as string | undefined) : undefined;
+  const audioKind = getGeneratedAudioKind(part.type);
+  const isAudioTool = audioKind !== null;
+  const codeLength = !isAudioTool ? (part.input?.code as string | undefined)?.length : undefined;
+  const audioName = isAudioTool ? (part.input?.name as string | undefined) : undefined;
+  const audioLabel = audioKind ? getGeneratedAudioLabel(audioKind) : "audio";
+  const audioId = audioKind && audioName
+    ? getGeneratedAudioId(audioKind, audioName)
+    : undefined;
 
   let statusText: string;
   let statusColor: string;
 
   if (state === "input-streaming") {
-    statusText = isSoundTool ? "Requesting sound effect..." : "Generating game code...";
+    statusText = isAudioTool ? `Requesting ${audioLabel}...` : "Generating game code...";
     statusColor = "var(--color-accent)";
   } else if (state === "input-available") {
-    statusText = isSoundTool
-      ? `Queuing "${soundName ?? "sound"}"...`
+    statusText = isAudioTool
+      ? `Queuing "${audioName ?? audioLabel}"...`
       : codeLength
         ? `Code ready (${codeLength.toLocaleString()} chars)`
         : "Executing...";
     statusColor = "var(--color-accent)";
   } else if (state === "output-available") {
-    statusText = isSoundTool
-      ? `"${soundName ?? "sound"}" — generating in background`
+    statusText = isAudioTool
+      ? `"${audioName ?? audioLabel}" — generating in background`
       : codeLength
         ? `Code ready (${codeLength.toLocaleString()} chars)`
         : "Complete";
-    statusColor = isSoundTool ? "var(--color-accent)" : "var(--color-success)";
+    statusColor = isAudioTool ? "var(--color-accent)" : "var(--color-success)";
   } else {
-    statusText = isSoundTool ? "Requesting sound effect..." : "Preparing...";
+    statusText = isAudioTool ? `Requesting ${audioLabel}...` : "Preparing...";
     statusColor = "var(--color-accent)";
   }
 
@@ -423,19 +452,26 @@ function ToolCallCard({ part, onSoundStatusChange }: {
       className="mx-1 my-2 border border-[var(--color-border-light)] bg-[var(--color-surface)] overflow-hidden"
       style={{ animation: "fadeIn 0.2s ease-out" }}
     >
-      <div className="px-3 py-1.5 border-b border-[var(--color-border)] bg-[var(--color-surface-light)] flex items-center gap-2">
-        <span className="text-[9px] text-[var(--color-text-muted)] uppercase tracking-[0.15em] font-bold">
-          Tool
-        </span>
-        <span className="text-[10px] text-[var(--color-accent)] uppercase tracking-[0.1em] font-bold">
-          {toolName}
-        </span>
+      <div className="px-3 py-1.5 border-b border-[var(--color-border)] bg-[var(--color-surface-light)]">
+        <div className="flex items-center gap-2">
+          <span className="text-[9px] text-[var(--color-text-muted)] uppercase tracking-[0.15em] font-bold">
+            Tool
+          </span>
+          <span className="text-[10px] text-[var(--color-accent)] uppercase tracking-[0.1em] font-bold">
+            {toolName}
+          </span>
+        </div>
+        {isAudioTool && audioName && (
+          <div className="mt-1 text-[10px] text-[var(--color-text-secondary)] font-mono break-all">
+            {audioName}
+          </div>
+        )}
       </div>
-      {/* Status row — hidden for sound tools once output available (SoundPlayer takes over) */}
-      {!(isSoundTool && state === "output-available") && (
+      {/* Status row — hidden for generated audio once output is available (player takes over). */}
+      {!(isAudioTool && state === "output-available") && (
         <div className="px-3 py-2 flex items-center gap-2">
           <span style={{ color: statusColor }}>
-            {state === "input-streaming" || (isSoundTool && state === "input-available") || !state ? (
+            {state === "input-streaming" || (isAudioTool && state === "input-available") || !state ? (
               <svg width="10" height="10" viewBox="0 0 10 10" className="animate-spin">
                 <circle cx="5" cy="5" r="4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeDasharray="18" strokeLinecap="round" />
               </svg>
@@ -448,13 +484,14 @@ function ToolCallCard({ part, onSoundStatusChange }: {
           </span>
         </div>
       )}
-      {/* Audio player for sound effects — handles its own loading/ready/error states */}
-      {isSoundTool && state === "output-available" && soundName && (
-        <SoundPlayer
-          soundName={soundName}
+      {isAudioTool && state === "output-available" && audioName && audioId && audioKind && (
+        <GeneratedAudioPlayer
+          audioId={audioId}
+          audioName={audioName}
+          audioKind={audioKind}
           onStatusChange={
-            onSoundStatusChange
-              ? (data) => onSoundStatusChange(soundName, data)
+            onAudioStatusChange
+              ? (data) => onAudioStatusChange(audioName, data)
               : undefined
           }
         />
@@ -536,21 +573,22 @@ export function ChatPanel({ currentCode, onCodeUpdate, addAudioTrack }: ChatPane
     onFinish,
   });
 
-  const soundCreatedAtRef = useRef<Map<string, number>>(new Map());
+  const audioCreatedAtRef = useRef<Map<string, number>>(new Map());
 
-  const getSoundCreatedAt = useCallback((soundName: string) => {
-    const existing = soundCreatedAtRef.current.get(soundName);
+  const getAudioCreatedAt = useCallback((audioId: string) => {
+    const existing = audioCreatedAtRef.current.get(audioId);
     if (existing) {
       return existing;
     }
 
     const createdAt = Date.now();
-    soundCreatedAtRef.current.set(soundName, createdAt);
+    audioCreatedAtRef.current.set(audioId, createdAt);
     return createdAt;
   }, []);
 
-  const syncGeneratedSound = useCallback((
-    soundName: string,
+  const syncGeneratedAudio = useCallback((
+    kind: GeneratedAudioKind,
+    audioName: string,
     input: { prompt?: string; duration?: number } | undefined,
     update: {
       status: "pending" | "ready" | "error";
@@ -559,18 +597,20 @@ export function ChatPanel({ currentCode, onCodeUpdate, addAudioTrack }: ChatPane
       error?: string | null;
     }
   ) => {
+    const audioId = getGeneratedAudioId(kind, audioName);
+
     addAudioTrack({
-      id: soundName,
-      name: soundName,
-      type: "sfx",
+      id: audioId,
+      name: audioName,
+      type: kind,
       description: input?.prompt ?? "",
       dataUrl: update.dataUrl ?? null,
       status: update.status,
       error: update.error ?? null,
       duration: update.duration ?? input?.duration ?? null,
-      createdAt: getSoundCreatedAt(soundName),
+      createdAt: getAudioCreatedAt(audioId),
     });
-  }, [addAudioTrack, getSoundCreatedAt]);
+  }, [addAudioTrack, getAudioCreatedAt]);
 
   // Extract code from tool invocations
   useEffect(() => {
@@ -590,25 +630,31 @@ export function ChatPanel({ currentCode, onCodeUpdate, addAudioTrack }: ChatPane
             }
           }
         }
-        if (partType === "tool-generate_sound_effect") {
+        const audioKind = getGeneratedAudioKind(partType);
+        if (audioKind) {
           const toolPart = part as {
             state: string;
             input?: { name?: string; prompt?: string; duration?: number };
           };
+          const audioName = toolPart.input?.name;
+          const audioId = audioName
+            ? getGeneratedAudioId(audioKind, audioName)
+            : null;
 
           if (
             toolPart.state === "output-available" &&
-            toolPart.input?.name &&
-            !soundCreatedAtRef.current.has(toolPart.input.name)
+            audioName &&
+            audioId &&
+            !audioCreatedAtRef.current.has(audioId)
           ) {
-            syncGeneratedSound(toolPart.input.name, toolPart.input, {
+            syncGeneratedAudio(audioKind, audioName, toolPart.input, {
               status: "pending",
             });
           }
         }
       }
     }
-  }, [messages, currentCode, onCodeUpdate, syncGeneratedSound]);
+  }, [messages, currentCode, onCodeUpdate, syncGeneratedAudio]);
 
   // Log status changes
   useEffect(() => {
@@ -755,13 +801,19 @@ export function ChatPanel({ currentCode, onCodeUpdate, addAudioTrack }: ChatPane
                           <ToolCallCard
                             key={i}
                             part={part as { type: string; state?: string; input?: Record<string, unknown> }}
-                            onSoundStatusChange={(name, data) => {
+                            onAudioStatusChange={(name, data) => {
+                              const kind = getGeneratedAudioKind(
+                                (part as { type: string }).type,
+                              );
                               const input = (part as {
                                 input?: { prompt?: string; duration?: number };
                               }).input;
+                              if (!kind) {
+                                return;
+                              }
 
                               if (data.status === "ready" && data.dataUrl) {
-                                syncGeneratedSound(name, input, {
+                                syncGeneratedAudio(kind, name, input, {
                                   status: "ready",
                                   dataUrl: data.dataUrl,
                                   duration: data.duration ?? input?.duration ?? null,
@@ -771,7 +823,7 @@ export function ChatPanel({ currentCode, onCodeUpdate, addAudioTrack }: ChatPane
                               }
 
                               if (data.status === "error") {
-                                syncGeneratedSound(name, input, {
+                                syncGeneratedAudio(kind, name, input, {
                                   status: "error",
                                   error: data.error ?? "Generation failed",
                                 });

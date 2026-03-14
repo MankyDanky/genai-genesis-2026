@@ -49,14 +49,6 @@ function buildDefaultLayout(api: DockviewApi) {
   });
 
   api.addPanel({
-    id: "audio",
-    component: "audio",
-    title: "Audio",
-    inactive: true,
-    position: { referencePanel: "sandbox", direction: "within" },
-  });
-
-  api.addPanel({
     id: "composer",
     component: "composer",
     title: "Composer",
@@ -70,6 +62,14 @@ function buildDefaultLayout(api: DockviewApi) {
     title: "Inspector",
     position: { referencePanel: "sandbox", direction: "right" },
     initialWidth: w * 0.18,
+  });
+
+  api.addPanel({
+    id: "audio",
+    component: "audio",
+    title: "Audio",
+    inactive: true,
+    position: { referencePanel: "inspector", direction: "within" },
   });
 
   api.addPanel({

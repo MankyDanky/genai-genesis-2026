@@ -124,35 +124,48 @@ function ShareBar({ code, containerRef }: { code: string; containerRef: React.Re
   );
 }
 
-// Injected into every game's <head> — sets up __GAMEFORGE_SOUNDS__ and
-// listens for postMessage updates so sounds can arrive after the game loads.
+// Injected into every game's <head> — sets up async bridges for both
+// sound effects and music, then listens for postMessage updates.
 const SOUND_BRIDGE_SCRIPT = `<script>
 window.__GAMEFORGE_SOUNDS__ = window.__GAMEFORGE_SOUNDS__ || {};
+window.__GAMEFORGE_MUSIC__ = window.__GAMEFORGE_MUSIC__ || {};
 window.addEventListener('message', function(e) {
   if (e.data && e.data.type === 'gameforge-sounds-update') {
-    var sounds = e.data.sounds;
-    for (var name in sounds) {
-      window.__GAMEFORGE_SOUNDS__[name] = sounds[name];
+    var sounds = e.data.sounds || {};
+    var music = e.data.music || {};
+    for (var soundName in sounds) {
+      window.__GAMEFORGE_SOUNDS__[soundName] = sounds[soundName];
     }
-    // Re-create Audio objects if the game uses a sounds cache
+    for (var musicName in music) {
+      window.__GAMEFORGE_MUSIC__[musicName] = music[musicName];
+    }
     if (typeof window.__onSoundsUpdated === 'function') {
       window.__onSoundsUpdated();
+    }
+    if (typeof window.__onMusicUpdated === 'function') {
+      window.__onMusicUpdated();
     }
   }
 });
 </script>`;
 
 function injectSoundBridge(html: string, initialTracks: AudioTrack[]): string {
-  // Build initial sounds from whatever is already available
   const soundsWithData = initialTracks.filter((t) => t.dataUrl);
   const soundMap: Record<string, string> = {};
+  const musicMap: Record<string, string> = {};
   for (const track of soundsWithData) {
-    soundMap[track.id] = track.dataUrl!;
+    if (track.type === "music") {
+      musicMap[track.name] = track.dataUrl!;
+      continue;
+    }
+
+    soundMap[track.name] = track.dataUrl!;
   }
 
-  const initialScript = Object.keys(soundMap).length > 0
-    ? `<script>window.__GAMEFORGE_SOUNDS__ = ${JSON.stringify(soundMap)};</script>`
-    : "";
+  const initialScript = `<script>
+window.__GAMEFORGE_SOUNDS__ = ${JSON.stringify(soundMap)};
+window.__GAMEFORGE_MUSIC__ = ${JSON.stringify(musicMap)};
+</script>`;
 
   const combined = SOUND_BRIDGE_SCRIPT + initialScript;
 
@@ -185,11 +198,20 @@ export function Sandbox({ code, audioTracks = [] }: SandboxProps) {
     if (soundsWithData.length === 0) return;
 
     const sounds: Record<string, string> = {};
+    const music: Record<string, string> = {};
     for (const track of soundsWithData) {
-      sounds[track.id] = track.dataUrl!;
+      if (track.type === "music") {
+        music[track.name] = track.dataUrl!;
+        continue;
+      }
+
+      sounds[track.name] = track.dataUrl!;
     }
 
-    iframe.contentWindow.postMessage({ type: "gameforge-sounds-update", sounds }, "*");
+    iframe.contentWindow.postMessage(
+      { type: "gameforge-sounds-update", sounds, music },
+      "*",
+    );
   }, [audioTracks, code]);
 
   if (!injectedCode) {

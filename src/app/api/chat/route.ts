@@ -1,11 +1,37 @@
 import { anthropic } from "@ai-sdk/anthropic";
 import { streamText, tool, stepCountIs, convertToModelMessages } from "ai";
 import { z } from "zod";
+import { getGeneratedAudioId, type GeneratedAudioKind } from "@/lib/generated-audio";
 import { getSystemPrompt } from "@/lib/system-prompt";
-import { generateSoundEffect } from "@/lib/fal";
 import { soundStore } from "@/lib/sound-store";
 
 export const maxDuration = 120;
+
+function scheduleGeneratedAudio({
+  kind,
+  name,
+  prompt,
+  duration,
+}: {
+  kind: GeneratedAudioKind;
+  name: string;
+  prompt: string;
+  duration: number;
+}) {
+  const audioId = getGeneratedAudioId(kind, name);
+
+  soundStore.set(audioId, {
+    dataUrl: null,
+    name,
+    prompt,
+    kind,
+    duration,
+    status: "pending",
+    createdAt: Date.now(),
+  });
+
+  return audioId;
+}
 
 export async function POST(req: Request) {
   try {
@@ -70,50 +96,100 @@ export async function POST(req: Request) {
               .describe("Duration in seconds (0.5-10)"),
           }),
           execute: async ({ prompt, name, duration }) => {
-            console.log("[API] Queuing sound effect:", { prompt, name, duration });
-
-            // Store as pending immediately
-            soundStore.set(name, {
-              dataUrl: null,
+            console.log("[API] Scheduling sound effect generation:", {
+              prompt,
               name,
               duration,
-              status: "pending",
-              createdAt: Date.now(),
             });
 
-            // Fire and forget — generate in background
-            generateSoundEffect(prompt, duration)
-              .then(async (result) => {
-                console.log("[API] Sound generated, fetching audio from:", result.url);
-                const response = await fetch(result.url);
-                const arrayBuffer = await response.arrayBuffer();
-                const base64 = Buffer.from(arrayBuffer).toString("base64");
-                const contentType = response.headers.get("content-type") || "audio/wav";
-                const dataUrl = `data:${contentType};base64,${base64}`;
-
-                soundStore.set(name, {
-                  dataUrl,
-                  name,
-                  duration,
-                  status: "ready",
-                  createdAt: Date.now(),
-                });
-                console.log("[API] Sound ready:", name);
-              })
-              .catch((err) => {
-                console.error("[API] Sound generation failed:", name, err);
-                soundStore.set(name, {
-                  dataUrl: null,
-                  name,
-                  duration,
-                  status: "error",
-                  error: err instanceof Error ? err.message : "Generation failed",
-                  createdAt: Date.now(),
-                });
+            try {
+              scheduleGeneratedAudio({
+                kind: "sfx",
+                name,
+                prompt,
+                duration,
               });
 
-            // Return immediately — client will poll for completion
-            return { soundId: name, name, duration, status: "pending" };
+              console.log("[API] Sound effect scheduled:", { name });
+              return { soundId: name, name, duration, status: "pending" };
+            } catch (err) {
+              console.error("[API] Failed to schedule sound effect:", name, err);
+
+              soundStore.set(getGeneratedAudioId("sfx", name), {
+                dataUrl: null,
+                name,
+                prompt,
+                kind: "sfx",
+                duration,
+                status: "error",
+                error:
+                  err instanceof Error
+                    ? err.message
+                    : "Sound generation setup failed",
+                createdAt: Date.now(),
+              });
+
+              return { soundId: name, name, duration, status: "error" };
+            }
+          },
+        }),
+        generate_music: tool({
+          description:
+            "Generate instrumental background music that matches the current game's feel. Returns a musicId to reference in game code via window.__GAMEFORGE_MUSIC__[musicId].",
+          inputSchema: z.object({
+            prompt: z
+              .string()
+              .describe(
+                "Describe the music's mood, tempo, instrumentation, and energy so it fits the game's atmosphere and pacing."
+              ),
+            name: z
+              .string()
+              .describe(
+                "Short identifier for the music track, used as the key in game code (e.g., 'title_theme', 'battle_loop', 'ambient_bg')"
+              ),
+            duration: z
+              .number()
+              .min(10)
+              .max(120)
+              .default(30)
+              .describe("Duration in seconds (10-120)"),
+          }),
+          execute: async ({ prompt, name, duration }) => {
+            console.log("[API] Scheduling music generation:", {
+              prompt,
+              name,
+              duration,
+            });
+
+            try {
+              scheduleGeneratedAudio({
+                kind: "music",
+                name,
+                prompt,
+                duration,
+              });
+
+              console.log("[API] Music scheduled:", { name });
+              return { musicId: name, name, duration, status: "pending" };
+            } catch (err) {
+              console.error("[API] Failed to schedule music:", name, err);
+
+              soundStore.set(getGeneratedAudioId("music", name), {
+                dataUrl: null,
+                name,
+                prompt,
+                kind: "music",
+                duration,
+                status: "error",
+                error:
+                  err instanceof Error
+                    ? err.message
+                    : "Music generation setup failed",
+                createdAt: Date.now(),
+              });
+
+              return { musicId: name, name, duration, status: "error" };
+            }
           },
         }),
       },

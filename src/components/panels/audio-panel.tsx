@@ -195,7 +195,7 @@ export function AudioPanel() {
               No Audio Yet
             </p>
             <p className="text-[10px] text-[var(--color-text-muted)] opacity-60">
-              Generated sound effects will appear here
+              Generated sound effects and music will appear here
             </p>
           </div>
         </div>

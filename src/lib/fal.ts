@@ -24,23 +24,3 @@ export async function generateImage(
 
   return url;
 }
-
-export async function generateSoundEffect(
-  prompt: string,
-  duration: number = 2,
-): Promise<{ url: string }> {
-  const result = await fal.subscribe("beatoven/sound-effect-generation", {
-    input: {
-      prompt,
-      duration,
-      refinement: 60,
-    },
-  });
-
-  const audio = (result.data as { audio?: { url?: string } })?.audio;
-  if (!audio?.url) {
-    throw new Error("No audio returned from fal.ai");
-  }
-
-  return { url: audio.url };
-}
