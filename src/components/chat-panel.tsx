@@ -9,7 +9,7 @@ import remarkGfm from "remark-gfm";
 import { Mention, MentionsInput } from "react-mentions";
 import type { GameEngine } from "@/lib/game-engine";
 import type { ProjectFile } from "@/lib/project-files";
-import type { PlanningTodo, ConsoleLogEntry, GeneratedImage, PendingFileWrite, GameControl, AudioTrack } from "@/lib/game-forge-context";
+import type { PlanningTodo, ConsoleLogEntry, GeneratedImage, PendingFileWrite, GameControl, AudioTrack, ChatTab } from "@/lib/game-forge-context";
 import { getGeneratedAudioId } from "@/lib/generated-audio";
 import { audioPoller } from "@/lib/audio-poller";
 import type { PersistedChatMessage } from "@/lib/db/schema";
@@ -45,7 +45,13 @@ interface ChatPanelProps {
   setControls: (controls: GameControl[]) => void;
   chatMessages: PersistedChatMessage[];
   chatSessionId: string;
+  chatTabs: ChatTab[];
+  activeChatTabId: string;
   setChatMessages: (messages: PersistedChatMessage[]) => void;
+  createChatTab: () => string;
+  deleteChatTab: (id: string) => void;
+  switchChatTab: (id: string) => void;
+  renameChatTab: (id: string, name: string) => void;
   focusCodeFile: (path: string) => void;
   focusConsolePanel: () => void;
   focusImagesPanel: () => void;
@@ -623,7 +629,13 @@ export function ChatPanel({
   setControls,
   chatMessages,
   chatSessionId,
+  chatTabs,
+  activeChatTabId,
   setChatMessages,
+  createChatTab,
+  deleteChatTab,
+  switchChatTab,
+  renameChatTab,
   focusCodeFile,
   focusConsolePanel,
   focusImagesPanel,
@@ -1478,8 +1490,77 @@ export function ChatPanel({
   const isEmpty = messages.length === 0;
   const canSend = input.trim().length > 0 && !isLoading;
 
+  const [editingTabId, setEditingTabId] = useState<string | null>(null);
+  const [editingTabName, setEditingTabName] = useState("");
+
   return (
     <div className="flex h-full flex-col bg-[var(--color-bg)]">
+      <div className="shrink-0 flex items-center border-t border-b border-[var(--color-border)] bg-[var(--color-surface)] overflow-x-auto">
+        {chatTabs.map((tab) => (
+          <div
+            key={tab.id}
+            className={`group flex items-center gap-1 px-2.5 py-1.5 border-r border-[var(--color-border)] cursor-pointer min-w-0 ${
+              tab.id === activeChatTabId
+                ? "bg-[var(--color-bg)] text-[var(--color-text)]"
+                : "text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-light)]"
+            }`}
+            onClick={() => {
+              if (tab.id !== activeChatTabId) switchChatTab(tab.id);
+            }}
+            onDoubleClick={() => {
+              setEditingTabId(tab.id);
+              setEditingTabName(tab.name);
+            }}
+          >
+            {editingTabId === tab.id ? (
+              <input
+                autoFocus
+                value={editingTabName}
+                onChange={(e) => setEditingTabName(e.target.value)}
+                onBlur={() => {
+                  renameChatTab(tab.id, editingTabName);
+                  setEditingTabId(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    renameChatTab(tab.id, editingTabName);
+                    setEditingTabId(null);
+                  }
+                  if (e.key === "Escape") setEditingTabId(null);
+                }}
+                onClick={(e) => e.stopPropagation()}
+                className="bg-[var(--color-surface)] border border-[var(--color-accent)] text-[10px] text-[var(--color-text)] px-1 py-0 w-[70px] outline-none"
+              />
+            ) : (
+              <span className="text-[10px] uppercase tracking-[0.08em] font-semibold truncate max-w-[80px]">
+                {tab.name}
+              </span>
+            )}
+            {chatTabs.length > 1 && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  deleteChatTab(tab.id);
+                }}
+                className="opacity-0 group-hover:opacity-100 text-[9px] text-[var(--color-text-muted)] hover:text-[var(--color-danger)] ml-0.5 shrink-0"
+                aria-label={`Close ${tab.name}`}
+              >
+                ✕
+              </button>
+            )}
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={() => createChatTab()}
+          className="shrink-0 px-2 py-1.5 text-[11px] text-[var(--color-text-muted)] hover:text-[var(--color-accent)] hover:bg-[var(--color-surface-light)]"
+          aria-label="New chat"
+          title="New chat"
+        >
+          +
+        </button>
+      </div>
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
         {isEmpty ? (
           <div className="flex flex-col items-center justify-center h-full gap-4 px-2">
@@ -1540,7 +1621,7 @@ export function ChatPanel({
                   ) : (
                     <div className="flex items-start gap-2">
                       <div className="shrink-0 w-5 h-5 rounded-full bg-[var(--color-surface-elevated)] border border-[var(--color-border-light)] flex items-center justify-center mt-0.5">
-                        <span className="text-[9px] text-[var(--color-accent)] font-bold">G</span>
+                        <span className="text-[9px] text-[var(--color-accent)] font-bold">A</span>
                       </div>
                       <div className="min-w-0 flex-1 space-y-1">
                         {reasoningParts.map((part, i) => (

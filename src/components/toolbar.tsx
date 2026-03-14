@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
+import Image from "next/image";
 
 interface PanelInfo {
   id: string;
@@ -186,11 +187,9 @@ export function Toolbar({
       }}
     >
       <div className="px-4 flex items-center h-full border-r border-[var(--color-border)] gap-2">
-        <div className="w-4 h-4 border border-[var(--color-accent)] flex items-center justify-center">
-          <div className="w-1.5 h-1.5 bg-[var(--color-accent)]" />
-        </div>
+        <Image src="/axiom.png" alt="Axiom" width={20} height={20} className="object-contain" />
         <span className="text-[11px] text-[var(--color-accent)] font-bold tracking-[0.12em] uppercase">
-          Game Forge
+          AXIOM
         </span>
         {engineLabel ? (
           <span className="text-[9px] text-[var(--color-text-muted)] tracking-[0.08em] uppercase border border-[var(--color-border)] px-1.5 py-0.5">

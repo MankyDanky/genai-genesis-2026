@@ -14,17 +14,17 @@ export async function generateMetadata({
   const { id } = await params;
 
   if (!ObjectId.isValid(id)) {
-    return { title: "Game Not Found | GAME FORGE" };
+    return { title: "Game Not Found | AXIOM" };
   }
 
   const game = await getPublishedGame(id);
   if (!game) {
-    return { title: "Game Not Found | GAME FORGE" };
+    return { title: "Game Not Found | AXIOM" };
   }
 
   return {
-    title: `${game.title} | GAME FORGE`,
-    description: `Play ${game.title} — built with Game Forge`,
+    title: `${game.title} | AXIOM`,
+    description: `Play ${game.title} — built with AXIOM`,
   };
 }
 
