@@ -2,6 +2,8 @@
   "$schema": "https://www.partykit.io/schema.json",
   "name": "game-forge-room",
   "main": "partykit/room.js",
+  "parties": {
+    "game": "partykit/room.js"
+  },
   "compatibilityDate": "2026-03-14"
 }
-

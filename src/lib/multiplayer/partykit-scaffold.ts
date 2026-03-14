@@ -38,36 +38,70 @@ function createPartySession({
   const resolvedRoomId = roomId || fallbackRoomId;
   if (!resolvedRoomId) throw new Error("roomId is required");
 
-  const wsUrl = \`\${protocol}://\${host}/parties/\${roomType}/\${encodeURIComponent(resolvedRoomId)}\`;
-  const socket = new WebSocket(wsUrl);
+  const wsCandidates = [
+    \`\${protocol}://\${host}/parties/\${roomType}/\${encodeURIComponent(resolvedRoomId)}\`,
+    \`\${protocol}://\${host}/party/\${encodeURIComponent(resolvedRoomId)}\`,
+  ];
+  let socket = null;
   let connected = false;
+  let currentWsUrl = "";
+  let closedManually = false;
+  let candidateIndex = 0;
 
   const send = (type, payload = {}) => {
     const message = JSON.stringify({ type, playerId, payload, ts: Date.now() });
-    if (socket.readyState === WebSocket.OPEN) socket.send(message);
+    if (socket && socket.readyState === WebSocket.OPEN) socket.send(message);
   };
 
-  socket.addEventListener("open", () => {
-    connected = true;
-    send("join", { playerId });
-  });
-
-  socket.addEventListener("close", () => {
-    connected = false;
-  });
-
-  socket.addEventListener("message", (event) => {
-    let message;
-    try {
-      message = JSON.parse(event.data);
-    } catch {
+  const connectAt = (index) => {
+    if (index >= wsCandidates.length) {
+      if (typeof onEvent === "function") {
+        onEvent({ type: "connection_error", payload: { tried: wsCandidates } });
+      }
       return;
     }
 
-    if (message?.type === "state" && typeof onState === "function") onState(message.payload);
-    if (message?.type === "players" && typeof onPlayers === "function") onPlayers(message.payload);
-    if (typeof onEvent === "function") onEvent(message);
-  });
+    candidateIndex = index;
+    currentWsUrl = wsCandidates[index];
+    socket = new WebSocket(currentWsUrl);
+
+    socket.addEventListener("open", () => {
+      connected = true;
+      send("join", { playerId });
+      if (typeof onEvent === "function") {
+        onEvent({ type: "connected", payload: { wsUrl: currentWsUrl, candidateIndex } });
+      }
+    });
+
+    socket.addEventListener("close", () => {
+      const wasConnected = connected;
+      connected = false;
+      if (!closedManually && !wasConnected) {
+        connectAt(index + 1);
+      }
+    });
+
+    socket.addEventListener("error", () => {
+      if (typeof onEvent === "function") {
+        onEvent({ type: "socket_error", payload: { wsUrl: currentWsUrl, candidateIndex } });
+      }
+    });
+
+    socket.addEventListener("message", (event) => {
+      let message;
+      try {
+        message = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+
+      if (message?.type === "state" && typeof onState === "function") onState(message.payload);
+      if (message?.type === "players" && typeof onPlayers === "function") onPlayers(message.payload);
+      if (typeof onEvent === "function") onEvent(message);
+    });
+  };
+
+  connectAt(0);
 
   return {
     get playerId() {
@@ -79,6 +113,9 @@ function createPartySession({
     get connected() {
       return connected;
     },
+    get wsUrl() {
+      return currentWsUrl;
+    },
     sendInput(input) {
       send("input", input);
     },
@@ -89,7 +126,8 @@ function createPartySession({
       send("presence", presence);
     },
     close() {
-      socket.close();
+      closedManually = true;
+      if (socket) socket.close();
     },
   };
 }
@@ -177,6 +215,9 @@ export default class GameRoom {
   "$schema": "https://www.partykit.io/schema.json",
   "name": "game-forge-room",
   "main": "partykit/room.js",
+  "parties": {
+    "game": "partykit/room.js"
+  },
   "compatibilityDate": "2026-03-14"
 }
 `;
