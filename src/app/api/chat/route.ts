@@ -12,6 +12,45 @@ function isGameEngine(value: unknown): value is GameEngine {
   return value === "canvas2d" || value === "threejs";
 }
 
+function sanitizeMessagesForModel(messages: unknown[]): Array<{ role: "user" | "assistant"; parts: Array<{ type: "text"; text: string }> }> {
+  const sanitized: Array<{ role: "user" | "assistant"; parts: Array<{ type: "text"; text: string }> }> = [];
+
+  for (const rawMessage of messages) {
+    if (!rawMessage || typeof rawMessage !== "object") continue;
+    const message = rawMessage as {
+      role?: unknown;
+      content?: unknown;
+      parts?: unknown;
+    };
+
+    if (message.role !== "user" && message.role !== "assistant") continue;
+
+    const textParts: Array<{ type: "text"; text: string }> = [];
+
+    if (typeof message.content === "string" && message.content.trim().length > 0) {
+      textParts.push({ type: "text", text: message.content });
+    }
+
+    if (Array.isArray(message.parts)) {
+      for (const rawPart of message.parts) {
+        if (!rawPart || typeof rawPart !== "object") continue;
+        const part = rawPart as { type?: unknown; text?: unknown };
+        if (part.type === "text" && typeof part.text === "string" && part.text.trim().length > 0) {
+          textParts.push({ type: "text", text: part.text });
+        }
+      }
+    }
+
+    if (textParts.length === 0) continue;
+    sanitized.push({
+      role: message.role,
+      parts: textParts,
+    });
+  }
+
+  return sanitized;
+}
+
 export async function POST(req: Request) {
   try {
     const body: unknown = await req.json();
@@ -48,7 +87,8 @@ export async function POST(req: Request) {
       );
     }
 
-    const modelMessages = await convertToModelMessages(messages);
+    const sanitizedMessages = sanitizeMessagesForModel(messages);
+    const modelMessages = await convertToModelMessages(sanitizedMessages);
     console.log("[API] Converted to model messages:", modelMessages.length);
 
     const result = streamText({
