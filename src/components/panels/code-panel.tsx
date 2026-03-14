@@ -1,7 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Editor from "react-simple-code-editor";
+import Prism from "prismjs";
+import "prismjs/components/prism-markup";
+import "prismjs/components/prism-css";
+import "prismjs/components/prism-clike";
+import "prismjs/components/prism-javascript";
+import "prismjs/components/prism-jsx";
+import "prismjs/components/prism-typescript";
+import "prismjs/components/prism-tsx";
+import "prismjs/components/prism-json";
 import { useGameForge } from "@/lib/game-forge-context";
+import styles from "./code-panel.module.css";
 
 interface FileNode {
   kind: "file";
@@ -47,6 +58,24 @@ function basename(path: string): string {
 
 function normalizeUserPath(name: string): string {
   return name.trim().replace(/^\.\//, "").replace(/\\/g, "/").replace(/^\/+/, "");
+}
+
+function getPrismLanguage(path: string): keyof typeof Prism.languages {
+  const lower = path.toLowerCase();
+  if (lower.endsWith(".html") || lower.endsWith(".htm")) return "markup";
+  if (lower.endsWith(".css")) return "css";
+  if (lower.endsWith(".json")) return "json";
+  if (lower.endsWith(".tsx")) return "tsx";
+  if (lower.endsWith(".jsx")) return "jsx";
+  if (lower.endsWith(".ts")) return "typescript";
+  if (
+    lower.endsWith(".js") ||
+    lower.endsWith(".mjs") ||
+    lower.endsWith(".cjs")
+  ) {
+    return "javascript";
+  }
+  return "plain";
 }
 
 function insertFileNode(nodes: TreeNode[], parts: string[], fullPath: string, prefix = ""): TreeNode[] {
@@ -377,6 +406,11 @@ export function CodePanel() {
       : (codeFiles[0]?.path ?? null);
 
   const selectedFile = codeFiles.find((file) => file.path === effectiveSelectedFilePath) ?? null;
+  const highlightCode = useCallback((code: string) => {
+    const language = selectedFile ? getPrismLanguage(selectedFile.path) : "plain";
+    const grammar = Prism.languages[language] ?? Prism.languages.plain ?? Prism.languages.plaintext;
+    return Prism.highlight(code, grammar, language);
+  }, [selectedFile]);
 
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
 
@@ -651,11 +685,26 @@ export function CodePanel() {
             <div className="px-3 py-1.5 border-b border-[var(--color-border)] text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
               {selectedFile.path}
             </div>
-            <textarea
-              value={selectedFile.content}
-              onChange={(e) => updateProjectFile(selectedFile.path, e.target.value)}
-              className="flex-1 w-full bg-[var(--color-bg)] text-[11px] text-[var(--color-text-secondary)] p-3 font-[var(--font-mono)] outline-none resize-none"
-            />
+            <div className={`flex-1 min-h-0 overflow-auto ${styles.editorRoot}`}>
+              <Editor
+                value={selectedFile.content}
+                onValueChange={(value) => updateProjectFile(selectedFile.path, value)}
+                highlight={highlightCode}
+                textareaClassName={styles.editorTextarea}
+                className={styles.editor}
+                padding={12}
+                style={{
+                  minHeight: "100%",
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 11,
+                  lineHeight: "1.25rem",
+                  background: "var(--color-bg)",
+                  color: "var(--color-text-secondary)",
+                  outline: "none",
+                }}
+                spellCheck={false}
+              />
+            </div>
           </>
         ) : (
           <div className="flex-1 flex items-center justify-center text-[10px] text-[var(--color-text-muted)] uppercase">
