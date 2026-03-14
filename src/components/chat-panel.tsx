@@ -4,11 +4,14 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { useState, useEffect, useRef, useMemo, useCallback, type FormEvent, type KeyboardEvent } from "react";
 import type { GameEngine } from "@/lib/game-engine";
+import type { ProjectFile } from "@/lib/project-files";
 
 interface ChatPanelProps {
   currentCode: string | null;
   currentEngine: GameEngine;
+  projectFiles: ProjectFile[];
   onCodeUpdate: (code: string, engine?: GameEngine) => void;
+  onProjectFilesUpdate: (files: ProjectFile[], engine?: GameEngine) => void;
   onEngineUpdate: (engine: GameEngine) => void;
 }
 
@@ -59,7 +62,9 @@ function ToolStreamCard({
 export function ChatPanel({
   currentCode,
   currentEngine,
+  projectFiles,
   onCodeUpdate,
+  onProjectFilesUpdate,
   onEngineUpdate,
 }: ChatPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -105,9 +110,22 @@ export function ChatPanel({
             onCodeUpdate(toolPart.input.code, selectedEngine);
           }
         }
+        if (partType === "tool-update_project_files") {
+          const toolPart = part as {
+            state: string;
+            input?: {
+              files?: ProjectFile[];
+            };
+          };
+
+          if (toolPart.state === "output-available" && Array.isArray(toolPart.input?.files) && toolPart.input.files.length > 0) {
+            console.log("[Chat] Updating project files:", toolPart.input.files.length);
+            onProjectFilesUpdate(toolPart.input.files, selectedEngine);
+          }
+        }
       }
     }
-  }, [messages, currentCode, onCodeUpdate, selectedEngine]);
+  }, [messages, currentCode, onCodeUpdate, onProjectFilesUpdate, selectedEngine]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -126,7 +144,7 @@ export function ChatPanel({
     const text = input.trim();
     if (!text || isLoading) return;
     setInput("");
-    sendMessage({ text }, { body: { currentCode, gameEngine: selectedEngine } })
+    sendMessage({ text }, { body: { currentCode, currentProjectFiles: projectFiles, gameEngine: selectedEngine } })
       .catch((err) => console.error("[Chat] sendMessage rejected:", err));
   };
 

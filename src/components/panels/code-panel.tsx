@@ -1,42 +1,60 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { useGameForge } from "@/lib/game-forge-context";
+import { isCodeFile } from "@/lib/project-files";
 
 export function CodePanel() {
-  const { currentCode } = useGameForge();
+  const { projectFiles, updateProjectFile } = useGameForge();
+  const codeFiles = useMemo(() => projectFiles.filter(isCodeFile), [projectFiles]);
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+
+  const effectiveSelectedPath =
+    selectedPath && codeFiles.some((file) => file.path === selectedPath)
+      ? selectedPath
+      : (codeFiles[0]?.path ?? null);
+  const selectedFile = codeFiles.find((file) => file.path === effectiveSelectedPath) ?? null;
 
   return (
-    <div className="flex h-full flex-col bg-[var(--color-bg)]">
-      {currentCode ? (
-        <pre className="flex-1 overflow-auto px-4 py-3 text-[11px] text-[var(--color-text-secondary)] leading-[1.7] whitespace-pre font-[var(--font-mono)] selection:bg-[var(--color-accent-glow-strong)]">
-          {currentCode}
-        </pre>
-      ) : (
-        <div className="flex-1 flex flex-col items-center justify-center gap-4">
-          <div className="w-12 h-12 border border-dashed border-[var(--color-border-light)] flex items-center justify-center">
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="var(--color-text-muted)" strokeWidth="1.2" opacity="0.6">
-              <polyline points="6,4 2,10 6,16" />
-              <polyline points="14,4 18,10 14,16" />
-              <line x1="11" y1="3" x2="9" y2="17" />
-            </svg>
+    <div className="flex h-full bg-[var(--color-bg)]">
+      <div className="w-44 border-r border-[var(--color-border)] overflow-y-auto">
+        {codeFiles.length === 0 ? (
+          <p className="text-[10px] text-[var(--color-text-muted)] p-3 uppercase">No code files</p>
+        ) : (
+          codeFiles.map((file) => (
+            <button
+              key={file.path}
+                type="button"
+                onClick={() => setSelectedPath(file.path)}
+                className={`w-full text-left px-3 py-2 text-[10px] uppercase tracking-wider border-b border-[var(--color-border)] ${
+                file.path === effectiveSelectedPath
+                  ? "bg-[var(--color-accent-glow)] text-[var(--color-accent)]"
+                  : "text-[var(--color-text-muted)]"
+              }`}
+            >
+              {file.path}
+            </button>
+          ))
+        )}
+      </div>
+
+      <div className="flex-1 flex flex-col">
+        {selectedFile ? (
+          <>
+            <div className="px-3 py-1.5 border-b border-[var(--color-border)] text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
+              {selectedFile.path}
+            </div>
+            <textarea
+              value={selectedFile.content}
+              onChange={(e) => updateProjectFile(selectedFile.path, e.target.value)}
+              className="flex-1 w-full bg-[var(--color-bg)] text-[11px] text-[var(--color-text-secondary)] p-3 font-[var(--font-mono)] outline-none resize-none"
+            />
+          </>
+        ) : (
+          <div className="flex-1 flex items-center justify-center text-[10px] text-[var(--color-text-muted)] uppercase">
+            No code selected
           </div>
-          <div className="text-center space-y-1">
-            <p className="text-[11px] text-[var(--color-text-muted)] uppercase tracking-[0.12em] font-semibold">
-              No Code Yet
-            </p>
-            <p className="text-[10px] text-[var(--color-text-muted)] opacity-60">
-              Generated source will appear here
-            </p>
-          </div>
-        </div>
-      )}
-      <div className="border-t border-[var(--color-border)] px-3 py-1.5 flex items-center justify-between shrink-0">
-        <span className="text-[10px] text-[var(--color-text-muted)] uppercase tracking-wider font-semibold">
-          Source
-        </span>
-        <span className="text-[10px] text-[var(--color-text-muted)] tracking-wider">
-          {currentCode ? `${currentCode.length} chars` : "empty"}
-        </span>
+        )}
       </div>
     </div>
   );

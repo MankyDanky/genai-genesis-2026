@@ -32,7 +32,7 @@ function InfoRow({ label, value, accent }: { label: string; value: string; accen
 }
 
 export function InspectorPanel() {
-  const { currentCode, currentEngine, assets, audioTracks } = useGameForge();
+  const { currentCode, currentEngine, projectFiles, assets, audioTracks } = useGameForge();
 
   if (!currentCode) {
     return (
@@ -68,7 +68,11 @@ export function InspectorPanel() {
         </Section>
 
         <Section title="Assets">
-          <InfoRow label="Count" value={String(assets.length)} />
+          <InfoRow
+            label="Files"
+            value={String(projectFiles.filter((f) => f.path.startsWith("assets/") || f.kind === "asset").length)}
+          />
+          <InfoRow label="Generated" value={String(assets.length)} />
         </Section>
 
         <Section title="Audio">
