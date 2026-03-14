@@ -1,42 +1,203 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { useGameForge } from "@/lib/game-forge-context";
+import { isCodeFile } from "@/lib/project-files";
+
+interface FileNode {
+  kind: "file";
+  name: string;
+  path: string;
+}
+
+interface FolderNode {
+  kind: "folder";
+  name: string;
+  path: string;
+  children: TreeNode[];
+}
+
+type TreeNode = FileNode | FolderNode;
+
+function insertNode(nodes: TreeNode[], parts: string[], fullPath: string, prefix = ""): TreeNode[] {
+  if (parts.length === 0) return nodes;
+  const [head, ...tail] = parts;
+  const currentPath = prefix ? `${prefix}/${head}` : head;
+
+  if (tail.length === 0) {
+    return [...nodes, { kind: "file", name: head, path: fullPath }];
+  }
+
+  const existingIndex = nodes.findIndex((node) => node.kind === "folder" && node.name === head);
+  if (existingIndex >= 0) {
+    const folder = nodes[existingIndex] as FolderNode;
+    const updated: FolderNode = {
+      ...folder,
+      children: insertNode(folder.children, tail, fullPath, currentPath),
+    };
+    const copy = [...nodes];
+    copy[existingIndex] = updated;
+    return copy;
+  }
+
+  return [
+    ...nodes,
+    {
+      kind: "folder",
+      name: head,
+      path: currentPath,
+      children: insertNode([], tail, fullPath, currentPath),
+    },
+  ];
+}
+
+function buildTree(paths: string[]): TreeNode[] {
+  let tree: TreeNode[] = [];
+  for (const path of paths) {
+    tree = insertNode(tree, path.split("/"), path);
+  }
+
+  const sortNodes = (nodes: TreeNode[]): TreeNode[] => {
+    const next = nodes.map((node) => {
+      if (node.kind === "folder") {
+        return { ...node, children: sortNodes(node.children) };
+      }
+      return node;
+    });
+
+    next.sort((a, b) => {
+      if (a.kind !== b.kind) return a.kind === "folder" ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+    return next;
+  };
+
+  return sortNodes(tree);
+}
+
+function TreeView({
+  nodes,
+  depth,
+  selectedPath,
+  expanded,
+  onToggleFolder,
+  onSelectFile,
+}: {
+  nodes: TreeNode[];
+  depth: number;
+  selectedPath: string | null;
+  expanded: Set<string>;
+  onToggleFolder: (path: string) => void;
+  onSelectFile: (path: string) => void;
+}) {
+  return (
+    <>
+      {nodes.map((node) => {
+        const paddingLeft = 8 + depth * 12;
+        if (node.kind === "folder") {
+          const isOpen = expanded.has(node.path);
+          return (
+            <div key={node.path}>
+              <button
+                type="button"
+                onClick={() => onToggleFolder(node.path)}
+                className="w-full text-left py-1.5 text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] hover:bg-[var(--color-surface-light)]"
+                style={{ paddingLeft }}
+              >
+                <span className="inline-block w-3">{isOpen ? "▾" : "▸"}</span>
+                {node.name}
+              </button>
+              {isOpen ? (
+                <TreeView
+                  nodes={node.children}
+                  depth={depth + 1}
+                  selectedPath={selectedPath}
+                  expanded={expanded}
+                  onToggleFolder={onToggleFolder}
+                  onSelectFile={onSelectFile}
+                />
+              ) : null}
+            </div>
+          );
+        }
+
+        const isSelected = node.path === selectedPath;
+        return (
+          <button
+            key={node.path}
+            type="button"
+            onClick={() => onSelectFile(node.path)}
+            className={`w-full text-left py-1.5 text-[10px] tracking-wider hover:bg-[var(--color-surface-light)] ${
+              isSelected ? "text-[var(--color-accent)] bg-[var(--color-accent-glow)]" : "text-[var(--color-text-secondary)]"
+            }`}
+            style={{ paddingLeft }}
+          >
+            {node.name}
+          </button>
+        );
+      })}
+    </>
+  );
+}
 
 export function CodePanel() {
-  const { currentCode } = useGameForge();
+  const { projectFiles, updateProjectFile } = useGameForge();
+  const codeFiles = useMemo(() => projectFiles.filter(isCodeFile), [projectFiles]);
+  const tree = useMemo(() => buildTree(codeFiles.map((file) => file.path)), [codeFiles]);
+
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set(["src", "styles", "assets"]));
+
+  const effectiveSelectedPath =
+    selectedPath && codeFiles.some((file) => file.path === selectedPath)
+      ? selectedPath
+      : (codeFiles[0]?.path ?? null);
+
+  const selectedFile = codeFiles.find((file) => file.path === effectiveSelectedPath) ?? null;
+
+  const handleToggleFolder = (path: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  };
 
   return (
-    <div className="flex h-full flex-col bg-[var(--color-bg)]">
-      {currentCode ? (
-        <pre className="flex-1 overflow-auto px-4 py-3 text-[11px] text-[var(--color-text-secondary)] leading-[1.7] whitespace-pre font-[var(--font-mono)] selection:bg-[var(--color-accent-glow-strong)]">
-          {currentCode}
-        </pre>
-      ) : (
-        <div className="flex-1 flex flex-col items-center justify-center gap-4">
-          <div className="w-12 h-12 border border-dashed border-[var(--color-border-light)] flex items-center justify-center">
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="var(--color-text-muted)" strokeWidth="1.2" opacity="0.6">
-              <polyline points="6,4 2,10 6,16" />
-              <polyline points="14,4 18,10 14,16" />
-              <line x1="11" y1="3" x2="9" y2="17" />
-            </svg>
+    <div className="flex h-full bg-[var(--color-bg)]">
+      <div className="w-56 border-r border-[var(--color-border)] overflow-y-auto py-1">
+        {tree.length === 0 ? (
+          <p className="text-[10px] text-[var(--color-text-muted)] p-3 uppercase">No code files</p>
+        ) : (
+          <TreeView
+            nodes={tree}
+            depth={0}
+            selectedPath={effectiveSelectedPath}
+            expanded={expanded}
+            onToggleFolder={handleToggleFolder}
+            onSelectFile={setSelectedPath}
+          />
+        )}
+      </div>
+
+      <div className="flex-1 flex flex-col">
+        {selectedFile ? (
+          <>
+            <div className="px-3 py-1.5 border-b border-[var(--color-border)] text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
+              {selectedFile.path}
+            </div>
+            <textarea
+              value={selectedFile.content}
+              onChange={(e) => updateProjectFile(selectedFile.path, e.target.value)}
+              className="flex-1 w-full bg-[var(--color-bg)] text-[11px] text-[var(--color-text-secondary)] p-3 font-[var(--font-mono)] outline-none resize-none"
+            />
+          </>
+        ) : (
+          <div className="flex-1 flex items-center justify-center text-[10px] text-[var(--color-text-muted)] uppercase">
+            No code selected
           </div>
-          <div className="text-center space-y-1">
-            <p className="text-[11px] text-[var(--color-text-muted)] uppercase tracking-[0.12em] font-semibold">
-              No Code Yet
-            </p>
-            <p className="text-[10px] text-[var(--color-text-muted)] opacity-60">
-              Generated source will appear here
-            </p>
-          </div>
-        </div>
-      )}
-      <div className="border-t border-[var(--color-border)] px-3 py-1.5 flex items-center justify-between shrink-0">
-        <span className="text-[10px] text-[var(--color-text-muted)] uppercase tracking-wider font-semibold">
-          Source
-        </span>
-        <span className="text-[10px] text-[var(--color-text-muted)] tracking-wider">
-          {currentCode ? `${currentCode.length} chars` : "empty"}
-        </span>
+        )}
       </div>
     </div>
   );

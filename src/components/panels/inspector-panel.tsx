@@ -1,6 +1,7 @@
 "use client";
 
 import { useGameForge } from "@/lib/game-forge-context";
+import { getEngineLabel } from "@/lib/game-engine";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -31,7 +32,7 @@ function InfoRow({ label, value, accent }: { label: string; value: string; accen
 }
 
 export function InspectorPanel() {
-  const { currentCode } = useGameForge();
+  const { currentCode, currentEngine, projectFiles, assets, audioTracks } = useGameForge();
 
   if (!currentCode) {
     return (
@@ -63,7 +64,19 @@ export function InspectorPanel() {
         <Section title="Game">
           <InfoRow label="Status" value="Running" accent />
           <InfoRow label="Size" value={`${currentCode.length} chars`} />
-          <InfoRow label="Type" value="HTML5 Canvas" />
+          <InfoRow label="Type" value={getEngineLabel(currentEngine)} />
+        </Section>
+
+        <Section title="Assets">
+          <InfoRow
+            label="Files"
+            value={String(projectFiles.filter((f) => f.path.startsWith("assets/") || f.kind === "asset").length)}
+          />
+          <InfoRow label="Generated" value={String(assets.length)} />
+        </Section>
+
+        <Section title="Audio">
+          <InfoRow label="Tracks" value={String(audioTracks.length)} />
         </Section>
 
         <Section title="Controls">

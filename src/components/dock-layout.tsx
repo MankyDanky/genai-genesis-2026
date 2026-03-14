@@ -10,7 +10,9 @@ import { gameForgeTheme } from "@/lib/dock-theme";
 import { SandboxPanel } from "@/components/panels/sandbox-panel";
 import { ChatPanelWrapper } from "@/components/panels/chat-panel-wrapper";
 import { CodePanel } from "@/components/panels/code-panel";
+import { ConsolePanel } from "@/components/panels/console-panel";
 import { InspectorPanel } from "@/components/panels/inspector-panel";
+import { ImagesPanelWrapper } from "@/components/panels/images-panel-wrapper";
 import { Toolbar } from "@/components/toolbar";
 
 import "dockview/dist/styles/dockview.css";
@@ -19,7 +21,9 @@ const components = {
   sandbox: SandboxPanel,
   composer: ChatPanelWrapper,
   code: CodePanel,
+  console: ConsolePanel,
   inspector: InspectorPanel,
+  images: ImagesPanelWrapper,
 };
 
 interface PanelDef {
@@ -33,6 +37,8 @@ const ALL_PANELS: PanelDef[] = [
   { id: "composer", component: "composer", title: "Composer" },
   { id: "inspector", component: "inspector", title: "Inspector" },
   { id: "code", component: "code", title: "Code" },
+  { id: "console", component: "console", title: "Console" },
+  { id: "images", component: "images", title: "Images" },
 ];
 
 function buildDefaultLayout(api: DockviewApi) {
@@ -67,6 +73,21 @@ function buildDefaultLayout(api: DockviewApi) {
     title: "Code",
     position: { referencePanel: "sandbox", direction: "below" },
     initialHeight: h * 0.28,
+  });
+
+  api.addPanel({
+    id: "console",
+    component: "console",
+    title: "Console",
+    position: { referencePanel: "code", direction: "within" },
+  });
+
+  api.addPanel({
+    id: "images",
+    component: "images",
+    title: "Images",
+    position: { referencePanel: "inspector", direction: "below" },
+    initialHeight: h * 0.35,
   });
 }
 
