@@ -45,6 +45,17 @@ interface GameForgeContextValue {
 
 const GameForgeContext = createContext<GameForgeContextValue | null>(null);
 
+function areProjectFilesEqual(a: ProjectFile[], b: ProjectFile[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    const af = a[i];
+    const bf = b[i];
+    if (!bf) return false;
+    if (af.path !== bf.path || af.kind !== bf.kind || af.content !== bf.content) return false;
+  }
+  return true;
+}
+
 export function GameForgeProvider({ children }: { children: ReactNode }) {
   const [currentCode, setCurrentCode] = useState<string | null>(null);
   const [currentEngine, setCurrentEngine] = useState<GameEngine>("canvas2d");
@@ -60,8 +71,12 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
 
   const onProjectFilesUpdate = useCallback((files: ProjectFile[], engine?: GameEngine) => {
     const normalized = normalizeProjectFiles(files);
-    setProjectFiles(normalized);
-    setCurrentCode(compileProjectToHtml(normalized));
+    setProjectFiles((prev) => {
+      if (areProjectFilesEqual(prev, normalized)) return prev;
+      return normalized;
+    });
+    const compiled = compileProjectToHtml(normalized);
+    setCurrentCode((prev) => (prev === compiled ? prev : compiled));
     if (engine) setCurrentEngine(engine);
   }, []);
 
@@ -75,7 +90,9 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
         byPath.set(file.path, file);
       }
       const next = Array.from(byPath.values());
-      setCurrentCode(compileProjectToHtml(next));
+      if (areProjectFilesEqual(prev, next)) return prev;
+      const compiled = compileProjectToHtml(next);
+      setCurrentCode((current) => (current === compiled ? current : compiled));
       return next;
     });
     if (engine) setCurrentEngine(engine);

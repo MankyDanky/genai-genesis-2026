@@ -285,6 +285,7 @@ export function ChatPanel({
 }: ChatPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const processedToolPayloadRef = useRef<Map<string, string>>(new Map());
   const [input, setInput] = useState("");
   const [selectedEngine, setSelectedEngine] = useState<GameEngine>(currentEngine);
 
@@ -324,6 +325,9 @@ export function ChatPanel({
           const toolPart = part as { state: string; input?: { code?: string } };
           if (toolPart.state === "output-available") {
             if (toolPart.input?.code && toolPart.input.code !== currentCode) {
+              const key = `${message.id}:${partType}:${toolPart.state}`;
+              if (processedToolPayloadRef.current.get(key) === toolPart.input.code) continue;
+              processedToolPayloadRef.current.set(key, toolPart.input.code);
               console.log("[Chat] Updating sandbox code, length:", toolPart.input.code.length);
               onCodeUpdate(toolPart.input.code, selectedEngine);
             }
@@ -333,6 +337,16 @@ export function ChatPanel({
         if (partType === "tool-update_project_files") {
           const toolPart = part as { state: string; input?: { files?: ProjectFile[] } };
           if (Array.isArray(toolPart.input?.files) && toolPart.input.files.length > 0) {
+            const signature = JSON.stringify(
+              toolPart.input.files.map((f) => ({
+                path: f.path,
+                kind: f.kind,
+                content: f.content,
+              }))
+            );
+            const key = `${message.id}:${partType}:${toolPart.state}`;
+            if (processedToolPayloadRef.current.get(key) === signature) continue;
+            processedToolPayloadRef.current.set(key, signature);
             if (toolPart.state === "output-available") {
               onProjectFilesUpdate(toolPart.input.files, selectedEngine);
             } else if (toolPart.state === "input-streaming" || toolPart.state === "input-available") {
