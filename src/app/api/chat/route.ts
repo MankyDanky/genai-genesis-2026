@@ -2,8 +2,10 @@ import { anthropic } from "@ai-sdk/anthropic";
 import { streamText, tool, stepCountIs, convertToModelMessages } from "ai";
 import { z } from "zod";
 import { getSystemPrompt } from "@/lib/system-prompt";
+import { generateSoundEffect } from "@/lib/fal";
+import { soundStore } from "@/lib/sound-store";
 
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 export async function POST(req: Request) {
   try {
@@ -46,13 +48,81 @@ export async function POST(req: Request) {
             return { success: true, codeLength: code.length };
           },
         }),
+        generate_sound_effect: tool({
+          description:
+            "Generate an AI sound effect from a text description. Returns a soundId to reference in game code via window.__GAMEFORGE_SOUNDS__[soundId].",
+          inputSchema: z.object({
+            prompt: z
+              .string()
+              .describe(
+                "Description of the sound effect (e.g., '8-bit explosion with reverb', 'coin pickup chime')"
+              ),
+            name: z
+              .string()
+              .describe(
+                "Short identifier for the sound, used as the key in game code (e.g., 'explosion', 'laser', 'coin_pickup')"
+              ),
+            duration: z
+              .number()
+              .min(0.5)
+              .max(10)
+              .default(2)
+              .describe("Duration in seconds (0.5-10)"),
+          }),
+          execute: async ({ prompt, name, duration }) => {
+            console.log("[API] Queuing sound effect:", { prompt, name, duration });
+
+            // Store as pending immediately
+            soundStore.set(name, {
+              dataUrl: null,
+              name,
+              duration,
+              status: "pending",
+              createdAt: Date.now(),
+            });
+
+            // Fire and forget — generate in background
+            generateSoundEffect(prompt, duration)
+              .then(async (result) => {
+                console.log("[API] Sound generated, fetching audio from:", result.url);
+                const response = await fetch(result.url);
+                const arrayBuffer = await response.arrayBuffer();
+                const base64 = Buffer.from(arrayBuffer).toString("base64");
+                const contentType = response.headers.get("content-type") || "audio/wav";
+                const dataUrl = `data:${contentType};base64,${base64}`;
+
+                soundStore.set(name, {
+                  dataUrl,
+                  name,
+                  duration,
+                  status: "ready",
+                  createdAt: Date.now(),
+                });
+                console.log("[API] Sound ready:", name);
+              })
+              .catch((err) => {
+                console.error("[API] Sound generation failed:", name, err);
+                soundStore.set(name, {
+                  dataUrl: null,
+                  name,
+                  duration,
+                  status: "error",
+                  error: err instanceof Error ? err.message : "Generation failed",
+                  createdAt: Date.now(),
+                });
+              });
+
+            // Return immediately — client will poll for completion
+            return { soundId: name, name, duration, status: "pending" };
+          },
+        }),
       },
       providerOptions: {
         anthropic: {
           thinking: { type: "enabled", budgetTokens: 10000 },
         },
       },
-      stopWhen: stepCountIs(2),
+      stopWhen: stepCountIs(3),
       onError: ({ error }) => {
         console.error("[API] streamText error:", error);
       },

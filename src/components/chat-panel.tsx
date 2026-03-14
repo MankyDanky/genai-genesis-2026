@@ -5,9 +5,12 @@ import { DefaultChatTransport } from "ai";
 import { useState, useEffect, useRef, useMemo, useCallback, type FormEvent, type KeyboardEvent } from "react";
 import Markdown from "react-markdown";
 
+import type { AudioTrack } from "@/lib/game-forge-context";
+
 interface ChatPanelProps {
   currentCode: string | null;
   onCodeUpdate: (code: string) => void;
+  addAudioTrack: (track: AudioTrack) => void;
 }
 
 const EXAMPLE_PROMPTS = [
@@ -172,29 +175,247 @@ function StreamingIndicator({ phase, timer, message }: {
   );
 }
 
+// ── Sound player ──
+
+function SoundPlayer({
+  soundName,
+  onStatusChange,
+}: {
+  soundName: string;
+  onStatusChange?: (data: {
+    status: "ready" | "error";
+    dataUrl?: string;
+    duration?: number;
+    error?: string | null;
+  }) => void;
+}) {
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [soundStatus, setSoundStatus] = useState<"pending" | "ready" | "error">("pending");
+  const [soundError, setSoundError] = useState<string | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const progressRef = useRef<HTMLDivElement>(null);
+
+  // Poll for audio data until ready — single source of truth for this sound
+  useEffect(() => {
+    if (soundStatus !== "pending") return;
+    let cancelled = false;
+
+    const poll = () => {
+      if (cancelled) return;
+      fetch(`/api/sounds/${encodeURIComponent(soundName)}`)
+        .then((res) => res.json())
+        .then((data: { status: string; dataUrl?: string | null; duration?: number; error?: string | null }) => {
+          if (cancelled) return;
+          if (data.status === "ready" && data.dataUrl) {
+            setAudioUrl(data.dataUrl);
+            setSoundStatus("ready");
+            if (data.duration) setDuration(data.duration);
+            onStatusChange?.({
+              status: "ready",
+              dataUrl: data.dataUrl,
+              duration: data.duration ?? 0,
+            });
+          } else if (data.status === "error") {
+            setSoundStatus("error");
+            setSoundError(data.error ?? "Generation failed");
+            onStatusChange?.({
+              status: "error",
+              error: data.error ?? "Generation failed",
+            });
+          } else if (data.status === "pending") {
+            setTimeout(poll, 3000);
+          }
+        })
+        .catch(() => { if (!cancelled) setTimeout(poll, 3000); });
+    };
+    poll();
+    return () => { cancelled = true; };
+  }, [soundName, soundStatus, onStatusChange]);
+
+  // Create audio element when URL is available
+  useEffect(() => {
+    if (!audioUrl) return;
+    const audio = new Audio(audioUrl);
+    audioRef.current = audio;
+
+    const onLoaded = () => setDuration(audio.duration);
+    const onTimeUpdate = () => setCurrentTime(audio.currentTime);
+    const onEnded = () => { setIsPlaying(false); setCurrentTime(0); };
+
+    audio.addEventListener("loadedmetadata", onLoaded);
+    audio.addEventListener("timeupdate", onTimeUpdate);
+    audio.addEventListener("ended", onEnded);
+
+    return () => {
+      audio.removeEventListener("loadedmetadata", onLoaded);
+      audio.removeEventListener("timeupdate", onTimeUpdate);
+      audio.removeEventListener("ended", onEnded);
+      audio.pause();
+    };
+  }, [audioUrl]);
+
+  const togglePlay = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (isPlaying) {
+      audio.pause();
+      setIsPlaying(false);
+    } else {
+      audio.play().catch(() => {});
+      setIsPlaying(true);
+    }
+  }, [isPlaying]);
+
+  const handleSeek = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const audio = audioRef.current;
+    const bar = progressRef.current;
+    if (!audio || !bar || !duration) return;
+    const rect = bar.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    audio.currentTime = ratio * duration;
+    setCurrentTime(audio.currentTime);
+  }, [duration]);
+
+  const formatTime = (t: number) => {
+    const s = Math.floor(t % 60);
+    const m = Math.floor(t / 60);
+    return `${m}:${String(s).padStart(2, "0")}`;
+  };
+
+  if (soundStatus === "error") {
+    return (
+      <div className="px-3 py-2 flex items-center gap-2">
+        <svg width="10" height="10" viewBox="0 0 10 10" style={{ color: "var(--color-danger)" }}>
+          <circle cx="5" cy="5" r="4" fill="none" stroke="currentColor" strokeWidth="1.5" />
+          <line x1="3" y1="3" x2="7" y2="7" stroke="currentColor" strokeWidth="1.5" />
+          <line x1="7" y1="3" x2="3" y2="7" stroke="currentColor" strokeWidth="1.5" />
+        </svg>
+        <span className="text-[10px] text-[var(--color-danger)]">{soundError ?? "Failed"}</span>
+      </div>
+    );
+  }
+
+  if (soundStatus === "pending" || !audioUrl) {
+    return (
+      <div className="px-3 py-2 flex items-center gap-2">
+        <svg width="10" height="10" viewBox="0 0 10 10" className="animate-spin" style={{ color: "var(--color-accent)" }}>
+          <circle cx="5" cy="5" r="4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeDasharray="18" strokeLinecap="round" />
+        </svg>
+        <span className="text-[10px] text-[var(--color-text-muted)]">
+          Generating &quot;{soundName}&quot;...
+        </span>
+      </div>
+    );
+  }
+
+  const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
+
+  return (
+    <div className="px-3 py-2 space-y-2">
+      <div className="flex items-center gap-2.5">
+        {/* Play/Pause button */}
+        <button
+          type="button"
+          onClick={togglePlay}
+          className="shrink-0 w-6 h-6 flex items-center justify-center border border-[var(--color-border-light)] bg-[var(--color-surface-light)] text-[var(--color-accent)] hover:bg-[var(--color-accent-glow)] transition-colors"
+        >
+          {isPlaying ? (
+            <svg width="8" height="10" viewBox="0 0 8 10" fill="currentColor">
+              <rect x="0" y="0" width="3" height="10" />
+              <rect x="5" y="0" width="3" height="10" />
+            </svg>
+          ) : (
+            <svg width="8" height="10" viewBox="0 0 8 10" fill="currentColor">
+              <polygon points="0,0 8,5 0,10" />
+            </svg>
+          )}
+        </button>
+
+        {/* Progress bar */}
+        <div
+          ref={progressRef}
+          onClick={handleSeek}
+          className="flex-1 h-5 flex items-center cursor-pointer group"
+        >
+          <div className="w-full h-[3px] bg-[var(--color-border)] relative overflow-hidden">
+            <div
+              className="absolute inset-y-0 left-0 bg-[var(--color-accent)]"
+              style={{ width: `${progress}%` }}
+            />
+            {/* Waveform visualization overlay */}
+            <div className="absolute inset-0 flex items-end gap-px px-px opacity-60">
+              {Array.from({ length: 32 }, (_, i) => (
+                <div
+                  key={i}
+                  className="flex-1 rounded-t-sm"
+                  style={{
+                    height: `${30 + Math.sin(i * 0.8) * 40 + Math.sin(i * 1.6) * 25}%`,
+                    backgroundColor: (i / 32) * 100 < progress
+                      ? "var(--color-accent)"
+                      : "var(--color-text-muted)",
+                    opacity: (i / 32) * 100 < progress ? 0.8 : 0.3,
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Time display */}
+        <span className="shrink-0 text-[10px] text-[var(--color-text-muted)] font-mono tabular-nums w-[70px] text-right">
+          {formatTime(currentTime)} / {formatTime(duration)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 // ── Tool call card ──
 
-function ToolCallCard({ part }: {
-  part: { type: string; state?: string; input?: { code?: string } };
+function ToolCallCard({ part, onSoundStatusChange }: {
+  part: { type: string; state?: string; input?: Record<string, unknown> };
+  onSoundStatusChange?: (
+    name: string,
+    data: {
+      status: "ready" | "error";
+      dataUrl?: string;
+      duration?: number;
+      error?: string | null;
+    }
+  ) => void;
 }) {
   const toolName = part.type.replace("tool-", "").toUpperCase().replace(/_/g, "_");
   const state = part.state;
-  const codeLength = part.input?.code?.length;
+  const isSoundTool = part.type === "tool-generate_sound_effect";
+  const codeLength = !isSoundTool ? (part.input?.code as string | undefined)?.length : undefined;
+  const soundName = isSoundTool ? (part.input?.name as string | undefined) : undefined;
 
   let statusText: string;
   let statusColor: string;
 
   if (state === "input-streaming") {
-    statusText = "Generating game code...";
+    statusText = isSoundTool ? "Requesting sound effect..." : "Generating game code...";
     statusColor = "var(--color-accent)";
-  } else if (state === "input-available" || state === "output-available") {
-    statusText = codeLength
-      ? `Code ready (${codeLength.toLocaleString()} chars)`
-      : "Code ready";
-    statusColor = "var(--color-success)";
+  } else if (state === "input-available") {
+    statusText = isSoundTool
+      ? `Queuing "${soundName ?? "sound"}"...`
+      : codeLength
+        ? `Code ready (${codeLength.toLocaleString()} chars)`
+        : "Executing...";
+    statusColor = "var(--color-accent)";
+  } else if (state === "output-available") {
+    statusText = isSoundTool
+      ? `"${soundName ?? "sound"}" — generating in background`
+      : codeLength
+        ? `Code ready (${codeLength.toLocaleString()} chars)`
+        : "Complete";
+    statusColor = isSoundTool ? "var(--color-accent)" : "var(--color-success)";
   } else {
-    statusText = "Preparing...";
-    statusColor = "var(--color-text-muted)";
+    statusText = isSoundTool ? "Requesting sound effect..." : "Preparing...";
+    statusColor = "var(--color-accent)";
   }
 
   return (
@@ -210,20 +431,34 @@ function ToolCallCard({ part }: {
           {toolName}
         </span>
       </div>
-      <div className="px-3 py-2 flex items-center gap-2">
-        <span style={{ color: statusColor }}>
-          {state === "input-streaming" ? (
-            <svg width="10" height="10" viewBox="0 0 10 10" className="animate-spin">
-              <circle cx="5" cy="5" r="4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeDasharray="18" strokeLinecap="round" />
-            </svg>
-          ) : (
-            <span className="text-[10px]">&#9654;</span>
-          )}
-        </span>
-        <span className="text-[11px]" style={{ color: statusColor }}>
-          {statusText}
-        </span>
-      </div>
+      {/* Status row — hidden for sound tools once output available (SoundPlayer takes over) */}
+      {!(isSoundTool && state === "output-available") && (
+        <div className="px-3 py-2 flex items-center gap-2">
+          <span style={{ color: statusColor }}>
+            {state === "input-streaming" || (isSoundTool && state === "input-available") || !state ? (
+              <svg width="10" height="10" viewBox="0 0 10 10" className="animate-spin">
+                <circle cx="5" cy="5" r="4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeDasharray="18" strokeLinecap="round" />
+              </svg>
+            ) : (
+              <span className="text-[10px]">&#9654;</span>
+            )}
+          </span>
+          <span className="text-[11px]" style={{ color: statusColor }}>
+            {statusText}
+          </span>
+        </div>
+      )}
+      {/* Audio player for sound effects — handles its own loading/ready/error states */}
+      {isSoundTool && state === "output-available" && soundName && (
+        <SoundPlayer
+          soundName={soundName}
+          onStatusChange={
+            onSoundStatusChange
+              ? (data) => onSoundStatusChange(soundName, data)
+              : undefined
+          }
+        />
+      )}
     </div>
   );
 }
@@ -277,7 +512,7 @@ function useAutoResize(textareaRef: React.RefObject<HTMLTextAreaElement | null>,
 
 // ── Main component ──
 
-export function ChatPanel({ currentCode, onCodeUpdate }: ChatPanelProps) {
+export function ChatPanel({ currentCode, onCodeUpdate, addAudioTrack }: ChatPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [input, setInput] = useState("");
@@ -301,6 +536,42 @@ export function ChatPanel({ currentCode, onCodeUpdate }: ChatPanelProps) {
     onFinish,
   });
 
+  const soundCreatedAtRef = useRef<Map<string, number>>(new Map());
+
+  const getSoundCreatedAt = useCallback((soundName: string) => {
+    const existing = soundCreatedAtRef.current.get(soundName);
+    if (existing) {
+      return existing;
+    }
+
+    const createdAt = Date.now();
+    soundCreatedAtRef.current.set(soundName, createdAt);
+    return createdAt;
+  }, []);
+
+  const syncGeneratedSound = useCallback((
+    soundName: string,
+    input: { prompt?: string; duration?: number } | undefined,
+    update: {
+      status: "pending" | "ready" | "error";
+      dataUrl?: string | null;
+      duration?: number | null;
+      error?: string | null;
+    }
+  ) => {
+    addAudioTrack({
+      id: soundName,
+      name: soundName,
+      type: "sfx",
+      description: input?.prompt ?? "",
+      dataUrl: update.dataUrl ?? null,
+      status: update.status,
+      error: update.error ?? null,
+      duration: update.duration ?? input?.duration ?? null,
+      createdAt: getSoundCreatedAt(soundName),
+    });
+  }, [addAudioTrack, getSoundCreatedAt]);
+
   // Extract code from tool invocations
   useEffect(() => {
     for (const message of messages) {
@@ -319,9 +590,25 @@ export function ChatPanel({ currentCode, onCodeUpdate }: ChatPanelProps) {
             }
           }
         }
+        if (partType === "tool-generate_sound_effect") {
+          const toolPart = part as {
+            state: string;
+            input?: { name?: string; prompt?: string; duration?: number };
+          };
+
+          if (
+            toolPart.state === "output-available" &&
+            toolPart.input?.name &&
+            !soundCreatedAtRef.current.has(toolPart.input.name)
+          ) {
+            syncGeneratedSound(toolPart.input.name, toolPart.input, {
+              status: "pending",
+            });
+          }
+        }
       }
     }
-  }, [messages, currentCode, onCodeUpdate]);
+  }, [messages, currentCode, onCodeUpdate, syncGeneratedSound]);
 
   // Log status changes
   useEffect(() => {
@@ -467,7 +754,29 @@ export function ChatPanel({ currentCode, onCodeUpdate }: ChatPanelProps) {
                         {toolParts.map((part, i) => (
                           <ToolCallCard
                             key={i}
-                            part={part as { type: string; state?: string; input?: { code?: string } }}
+                            part={part as { type: string; state?: string; input?: Record<string, unknown> }}
+                            onSoundStatusChange={(name, data) => {
+                              const input = (part as {
+                                input?: { prompt?: string; duration?: number };
+                              }).input;
+
+                              if (data.status === "ready" && data.dataUrl) {
+                                syncGeneratedSound(name, input, {
+                                  status: "ready",
+                                  dataUrl: data.dataUrl,
+                                  duration: data.duration ?? input?.duration ?? null,
+                                  error: null,
+                                });
+                                return;
+                              }
+
+                              if (data.status === "error") {
+                                syncGeneratedSound(name, input, {
+                                  status: "error",
+                                  error: data.error ?? "Generation failed",
+                                });
+                              }
+                            }}
                           />
                         ))}
                       </div>

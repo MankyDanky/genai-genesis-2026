@@ -8,6 +8,7 @@ import {
 import { useCallback, useMemo, useRef, useState } from "react";
 import { gameForgeTheme } from "@/lib/dock-theme";
 import { SandboxPanel } from "@/components/panels/sandbox-panel";
+import { AudioPanel } from "@/components/panels/audio-panel";
 import { ChatPanelWrapper } from "@/components/panels/chat-panel-wrapper";
 import { CodePanel } from "@/components/panels/code-panel";
 import { InspectorPanel } from "@/components/panels/inspector-panel";
@@ -17,6 +18,7 @@ import "dockview/dist/styles/dockview.css";
 
 const components = {
   sandbox: SandboxPanel,
+  audio: AudioPanel,
   composer: ChatPanelWrapper,
   code: CodePanel,
   inspector: InspectorPanel,
@@ -30,6 +32,7 @@ interface PanelDef {
 
 const ALL_PANELS: PanelDef[] = [
   { id: "sandbox", component: "sandbox", title: "Game View" },
+  { id: "audio", component: "audio", title: "Audio" },
   { id: "composer", component: "composer", title: "Composer" },
   { id: "inspector", component: "inspector", title: "Inspector" },
   { id: "code", component: "code", title: "Code" },
@@ -43,6 +46,14 @@ function buildDefaultLayout(api: DockviewApi) {
     id: "sandbox",
     component: "sandbox",
     title: "Game View",
+  });
+
+  api.addPanel({
+    id: "audio",
+    component: "audio",
+    title: "Audio",
+    inactive: true,
+    position: { referencePanel: "sandbox", direction: "within" },
   });
 
   api.addPanel({

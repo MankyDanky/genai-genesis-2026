@@ -1,9 +1,11 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useMemo, useEffect } from "react";
+import type { AudioTrack } from "@/lib/game-forge-context";
 
 interface SandboxProps {
   code: string | null;
+  audioTracks?: AudioTrack[];
 }
 
 function ShareBar({ code, containerRef }: { code: string; containerRef: React.RefObject<HTMLDivElement | null> }) {
@@ -122,10 +124,75 @@ function ShareBar({ code, containerRef }: { code: string; containerRef: React.Re
   );
 }
 
-export function Sandbox({ code }: SandboxProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
+// Injected into every game's <head> — sets up __GAMEFORGE_SOUNDS__ and
+// listens for postMessage updates so sounds can arrive after the game loads.
+const SOUND_BRIDGE_SCRIPT = `<script>
+window.__GAMEFORGE_SOUNDS__ = window.__GAMEFORGE_SOUNDS__ || {};
+window.addEventListener('message', function(e) {
+  if (e.data && e.data.type === 'gameforge-sounds-update') {
+    var sounds = e.data.sounds;
+    for (var name in sounds) {
+      window.__GAMEFORGE_SOUNDS__[name] = sounds[name];
+    }
+    // Re-create Audio objects if the game uses a sounds cache
+    if (typeof window.__onSoundsUpdated === 'function') {
+      window.__onSoundsUpdated();
+    }
+  }
+});
+</script>`;
 
-  if (!code) {
+function injectSoundBridge(html: string, initialTracks: AudioTrack[]): string {
+  // Build initial sounds from whatever is already available
+  const soundsWithData = initialTracks.filter((t) => t.dataUrl);
+  const soundMap: Record<string, string> = {};
+  for (const track of soundsWithData) {
+    soundMap[track.id] = track.dataUrl!;
+  }
+
+  const initialScript = Object.keys(soundMap).length > 0
+    ? `<script>window.__GAMEFORGE_SOUNDS__ = ${JSON.stringify(soundMap)};</script>`
+    : "";
+
+  const combined = SOUND_BRIDGE_SCRIPT + initialScript;
+
+  const headIndex = html.indexOf("<head>");
+  if (headIndex !== -1) {
+    const insertAt = headIndex + "<head>".length;
+    return html.slice(0, insertAt) + combined + html.slice(insertAt);
+  }
+
+  return combined + html;
+}
+
+export function Sandbox({ code, audioTracks = [] }: SandboxProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  // Only recompute srcDoc when the game CODE changes, not when sounds arrive
+  const injectedCode = useMemo(() => {
+    if (!code) return null;
+    return injectSoundBridge(code, audioTracks);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally keyed on code only for initial render
+  }, [code]);
+
+  // Push sound updates to the running iframe via postMessage (no restart)
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe?.contentWindow || !code) return;
+
+    const soundsWithData = audioTracks.filter((t) => t.dataUrl);
+    if (soundsWithData.length === 0) return;
+
+    const sounds: Record<string, string> = {};
+    for (const track of soundsWithData) {
+      sounds[track.id] = track.dataUrl!;
+    }
+
+    iframe.contentWindow.postMessage({ type: "gameforge-sounds-update", sounds }, "*");
+  }, [audioTracks, code]);
+
+  if (!injectedCode) {
     return (
       <div className="relative flex h-full w-full items-center justify-center bg-[var(--color-bg)] overflow-hidden">
         <div className="relative text-center animate-[fadeIn_0.4s_ease-out] space-y-3">
@@ -148,10 +215,11 @@ export function Sandbox({ code }: SandboxProps) {
 
   return (
     <div ref={containerRef} className="relative h-full w-full bg-black">
-      <ShareBar code={code} containerRef={containerRef} />
+      <ShareBar code={injectedCode} containerRef={containerRef} />
       <iframe
+        ref={iframeRef}
         key={code}
-        srcDoc={code}
+        srcDoc={injectedCode}
         sandbox="allow-scripts"
         title="Game Preview"
         className="h-full w-full border-none"
