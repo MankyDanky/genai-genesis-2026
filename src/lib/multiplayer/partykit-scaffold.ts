@@ -30,9 +30,14 @@ export function createPartySession({
   onPlayers,
   onEvent,
 } = {}) {
-  if (!roomId) throw new Error("roomId is required");
+  const fallbackRoomId =
+    typeof window !== "undefined" && typeof window.__PARTYKIT_ROOM_ID__ === "string"
+      ? window.__PARTYKIT_ROOM_ID__
+      : "";
+  const resolvedRoomId = roomId || fallbackRoomId;
+  if (!resolvedRoomId) throw new Error("roomId is required");
 
-  const wsUrl = \`\${protocol}://\${host}/parties/\${roomType}/\${encodeURIComponent(roomId)}\`;
+  const wsUrl = \`\${protocol}://\${host}/parties/\${roomType}/\${encodeURIComponent(resolvedRoomId)}\`;
   const socket = new WebSocket(wsUrl);
   let connected = false;
 
@@ -66,6 +71,9 @@ export function createPartySession({
   return {
     get playerId() {
       return playerId;
+    },
+    get roomId() {
+      return resolvedRoomId;
     },
     get connected() {
       return connected;
@@ -184,4 +192,3 @@ export default class GameRoom {
     ],
   };
 }
-

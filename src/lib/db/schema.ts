@@ -90,6 +90,9 @@ export interface PublishedGameDocument {
   revisionNumber: number | null;
   title: string;
   engine: GameEngine;
+  multiplayer: boolean;
+  multiplayerProvider: "partykit" | null;
+  multiplayerRoomType: string | null;
   compiledHtml: ArtifactRef;
   createdAt: Date;
 }

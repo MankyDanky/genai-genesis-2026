@@ -8,6 +8,8 @@ export default async function ExplorePage() {
     id: game.id,
     title: game.title,
     engine: game.engine,
+    multiplayer: game.multiplayer ?? false,
+    multiplayerRoomType: game.multiplayerRoomType ?? null,
     createdAt: game.createdAt.toISOString(),
   }));
 

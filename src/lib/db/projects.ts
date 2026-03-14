@@ -25,6 +25,9 @@ interface FallbackPublishedGame {
   title: string;
   engine: "canvas2d" | "threejs";
   code: string;
+  multiplayer: boolean;
+  multiplayerProvider: "partykit" | null;
+  multiplayerRoomType: string | null;
   createdAt: Date;
 }
 
@@ -49,6 +52,38 @@ function deriveTitle(snapshot: SaveProjectSnapshotRequest) {
   const html = snapshot.currentCode ?? snapshot.projectFiles.find((file) => file.path === "index.html")?.content ?? "";
   const titleMatch = html.match(/<title>(.*?)<\/title>/i);
   return titleMatch?.[1]?.trim() || "Untitled Game";
+}
+
+function detectPublishedGameMultiplayer(html: string) {
+  const lower = html.toLowerCase();
+  const multiplayerHints = [
+    "createpartysession(",
+    "__partykit_host__",
+    "__partykit_room_id__",
+    "/parties/",
+    "partykit",
+  ];
+  const multiplayer = multiplayerHints.some((hint) => lower.includes(hint));
+
+  if (!multiplayer) {
+    return {
+      multiplayer: false,
+      multiplayerProvider: null as const,
+      multiplayerRoomType: null as string | null,
+    };
+  }
+
+  const roomTypeMatch =
+    html.match(/__GAMEFORGE_PARTYKIT_ROOM_TYPE__\s*=\s*["']([^"'\\\n]+)["']/i) ??
+    html.match(/roomType\s*=\s*["']([^"'\\\n]+)["']/i) ??
+    html.match(/\/parties\/([^/"'\\\n]+)\//i);
+  const roomType = roomTypeMatch?.[1]?.trim() || "game";
+
+  return {
+    multiplayer: true,
+    multiplayerProvider: "partykit" as const,
+    multiplayerRoomType: roomType,
+  };
 }
 
 function toObjectId(value: string | ObjectId) {
@@ -364,6 +399,7 @@ export async function publishProjectRevision(
   const baseHtml = await resolveTextArtifact(revision.compiledHtml);
   const htmlWithImages = await inlineImageUrls(baseHtml);
   const htmlWithAssets = await injectSoundsIntoHtml(htmlWithImages, revision.audioTracks ?? []);
+  const multiplayerMeta = detectPublishedGameMultiplayer(htmlWithAssets);
 
   const publishedCompiledHtml = await createTextArtifactRef({
     kind: "compiled-html",
@@ -383,6 +419,9 @@ export async function publishProjectRevision(
     revisionNumber: revision.revisionNumber,
     title: revision.title,
     engine: revision.engine,
+    multiplayer: multiplayerMeta.multiplayer,
+    multiplayerProvider: multiplayerMeta.multiplayerProvider,
+    multiplayerRoomType: multiplayerMeta.multiplayerRoomType,
     compiledHtml: publishedCompiledHtml,
     createdAt: new Date(),
   };
@@ -421,6 +460,9 @@ export async function getPublishedGame(gameId: string | ObjectId) {
         title: doc.title,
         engine: doc.engine,
         code: await resolveTextArtifact(doc.compiledHtml),
+        multiplayer: doc.multiplayer ?? false,
+        multiplayerProvider: doc.multiplayerProvider ?? null,
+        multiplayerRoomType: doc.multiplayerRoomType ?? null,
         createdAt: doc.createdAt,
       };
     }
@@ -438,6 +480,9 @@ export async function getPublishedGame(gameId: string | ObjectId) {
     title: fallback.title,
     engine: fallback.engine,
     code: fallback.code,
+    multiplayer: fallback.multiplayer,
+    multiplayerProvider: fallback.multiplayerProvider,
+    multiplayerRoomType: fallback.multiplayerRoomType,
     createdAt: fallback.createdAt,
   };
 }
@@ -505,6 +550,7 @@ export async function createStandalonePublishedGame(snapshot: {
     snapshot.title?.trim() ||
     snapshot.code.match(/<title>(.*?)<\/title>/i)?.[1]?.trim() ||
     "Untitled Game";
+  const multiplayerMeta = detectPublishedGameMultiplayer(snapshot.code);
   try {
     await ensureDbSetup();
     const db = getDb();
@@ -525,6 +571,9 @@ export async function createStandalonePublishedGame(snapshot: {
       revisionNumber: null,
       title,
       engine: snapshot.engine ?? "canvas2d",
+      multiplayer: multiplayerMeta.multiplayer,
+      multiplayerProvider: multiplayerMeta.multiplayerProvider,
+      multiplayerRoomType: multiplayerMeta.multiplayerRoomType,
       compiledHtml,
       createdAt: new Date(),
     };
@@ -542,6 +591,9 @@ export async function createStandalonePublishedGame(snapshot: {
       title,
       engine: snapshot.engine ?? "canvas2d",
       code: snapshot.code,
+      multiplayer: multiplayerMeta.multiplayer,
+      multiplayerProvider: multiplayerMeta.multiplayerProvider,
+      multiplayerRoomType: multiplayerMeta.multiplayerRoomType,
       createdAt: new Date(),
     });
     return { id, title };
@@ -566,6 +618,9 @@ export async function listPublishedGames(limit = 60) {
       revisionNumber: doc.revisionNumber,
       title: doc.title,
       engine: doc.engine,
+      multiplayer: doc.multiplayer ?? false,
+      multiplayerProvider: doc.multiplayerProvider ?? null,
+      multiplayerRoomType: doc.multiplayerRoomType ?? null,
       createdAt: doc.createdAt,
     }));
   } catch (error) {
@@ -580,6 +635,9 @@ export async function listPublishedGames(limit = 60) {
         revisionNumber: null,
         title: game.title,
         engine: game.engine,
+        multiplayer: game.multiplayer,
+        multiplayerProvider: game.multiplayerProvider,
+        multiplayerRoomType: game.multiplayerRoomType,
         createdAt: game.createdAt,
       }));
   }

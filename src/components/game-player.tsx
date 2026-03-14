@@ -8,13 +8,57 @@ interface GamePlayerProps {
   code: string;
   title: string;
   gameId: string;
+  multiplayer: boolean;
+  multiplayerProvider: "partykit" | null;
+  multiplayerRoomType: string | null;
+  roomId: string | null;
 }
 
-export function GamePlayer({ code, title, gameId }: GamePlayerProps) {
+function injectRuntimeMultiplayerConfig(
+  html: string,
+  multiplayer: boolean,
+  multiplayerProvider: "partykit" | null,
+  multiplayerRoomType: string | null,
+  roomId: string | null,
+) {
+  if (!multiplayer || multiplayerProvider !== "partykit" || !roomId) return html;
+
+  const roomType = multiplayerRoomType || "game";
+  const script = `<script>
+window.__GAMEFORGE_MULTIPLAYER__ = { enabled: true, provider: "partykit", roomType: ${JSON.stringify(roomType)}, roomId: ${JSON.stringify(roomId)} };
+window.__PARTYKIT_ROOM_ID__ = ${JSON.stringify(roomId)};
+window.__GAMEFORGE_PARTYKIT_ROOM_TYPE__ = ${JSON.stringify(roomType)};
+window.__PARTYKIT_HOST__ = window.__PARTYKIT_HOST__ || ${JSON.stringify(process.env.NEXT_PUBLIC_PARTYKIT_HOST || "localhost:1999")};
+window.__PARTYKIT_PROTOCOL__ = window.__PARTYKIT_PROTOCOL__ || ${JSON.stringify(process.env.NEXT_PUBLIC_PARTYKIT_PROTOCOL || "ws")};
+</script>`;
+
+  if (/<head[^>]*>/i.test(html)) {
+    return html.replace(/<head([^>]*)>/i, `<head$1>${script}`);
+  }
+  return `${script}${html}`;
+}
+
+export function GamePlayer({
+  code,
+  title,
+  gameId,
+  multiplayer,
+  multiplayerProvider,
+  multiplayerRoomType,
+  roomId,
+}: GamePlayerProps) {
   const router = useRouter();
   const [copied, setCopied] = useState(false);
   const [forking, setForking] = useState(false);
   const [forkError, setForkError] = useState<string | null>(null);
+
+  const runtimeCode = injectRuntimeMultiplayerConfig(
+    code,
+    multiplayer,
+    multiplayerProvider,
+    multiplayerRoomType,
+    roomId,
+  );
 
   const handleShare = useCallback(async () => {
     const url = window.location.href;
@@ -52,6 +96,11 @@ export function GamePlayer({ code, title, gameId }: GamePlayerProps) {
     }
   }, [gameId, router]);
 
+  const handleNewRoom = useCallback(() => {
+    const nextRoom = `${gameId}-${Math.random().toString(36).slice(2, 8)}`;
+    router.push(`/play/${gameId}?room=${encodeURIComponent(nextRoom)}`);
+  }, [gameId, router]);
+
   return (
     <div className="flex flex-col h-screen w-screen bg-[var(--color-bg)]">
       {/* Top bar */}
@@ -60,6 +109,20 @@ export function GamePlayer({ code, title, gameId }: GamePlayerProps) {
           {title}
         </span>
         <div className="flex items-center gap-3 shrink-0 ml-4">
+          {multiplayer ? (
+            <>
+              <span className="text-[10px] uppercase tracking-[0.1em] text-[var(--color-accent)]">
+                Room: {roomId || "none"}
+              </span>
+              <button
+                type="button"
+                onClick={handleNewRoom}
+                className="text-[10px] text-[var(--color-text-muted)] uppercase tracking-[0.1em] font-semibold hover:text-[var(--color-accent)]"
+              >
+                New Room
+              </button>
+            </>
+          ) : null}
           <button
             type="button"
             onClick={handleShare}
@@ -93,7 +156,7 @@ export function GamePlayer({ code, title, gameId }: GamePlayerProps) {
 
       {/* Game iframe */}
       <iframe
-        srcDoc={code}
+        srcDoc={runtimeCode}
         sandbox="allow-scripts"
         title={title}
         className="flex-1 w-full border-none"

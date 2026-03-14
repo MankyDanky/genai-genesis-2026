@@ -7,6 +7,8 @@ export interface ExploreGameItem {
   id: string;
   title: string;
   engine: "canvas2d" | "threejs";
+  multiplayer: boolean;
+  multiplayerRoomType: string | null;
   createdAt: string;
 }
 
@@ -202,6 +204,9 @@ function ExploreCard({ game }: { game: ExploreGameItem }) {
     );
   }, [code, game.title, isVisible]);
 
+  const joinRoomId = `game-${game.id}`;
+  const playHref = game.multiplayer ? `/play/${game.id}?room=${encodeURIComponent(joinRoomId)}` : `/play/${game.id}`;
+
   return (
     <article
       key={game.id}
@@ -231,16 +236,22 @@ function ExploreCard({ game }: { game: ExploreGameItem }) {
         </span>
       </div>
 
+      {game.multiplayer ? (
+        <p className="mb-2 text-[9px] uppercase tracking-[0.08em] text-[var(--color-accent)]">
+          Multiplayer • Room type {game.multiplayerRoomType || "game"}
+        </p>
+      ) : null}
+
       <p className="mb-3 text-[10px] text-[var(--color-text-muted)]">
         Published {formatDate(game.createdAt)}
       </p>
 
       <div className="flex items-center gap-2">
         <Link
-          href={`/play/${game.id}`}
+          href={playHref}
           className="gf-btn-chip border border-[var(--color-border-light)] bg-[var(--color-surface-light)] px-2.5 py-1 text-[10px] uppercase tracking-[0.1em] text-[var(--color-accent)]"
         >
-          Play
+          {game.multiplayer ? "Join" : "Play"}
         </Link>
         <span className="text-[9px] text-[var(--color-text-muted)]">ID: {game.id.slice(0, 8)}…</span>
       </div>
