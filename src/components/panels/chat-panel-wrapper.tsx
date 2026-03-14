@@ -8,6 +8,7 @@ export function ChatPanelWrapper() {
     currentCode,
     currentEngine,
     projectFiles,
+    pendingFileWrites,
     planningTodos,
     consoleLogs,
     generatedImages,
@@ -20,12 +21,15 @@ export function ChatPanelWrapper() {
     writePlanningTodos,
     onEngineUpdate,
     addImage,
+    setPendingFileWrites,
+    clearPendingFileWrites,
   } = useGameForge();
   return (
     <ChatPanel
       currentCode={currentCode}
       currentEngine={currentEngine}
       projectFiles={projectFiles}
+      pendingFileWrites={pendingFileWrites}
       planningTodos={planningTodos}
       consoleLogs={consoleLogs}
       generatedImages={generatedImages}
@@ -38,6 +42,8 @@ export function ChatPanelWrapper() {
       writePlanningTodos={writePlanningTodos}
       onEngineUpdate={onEngineUpdate}
       addImage={addImage}
+      setPendingFileWrites={setPendingFileWrites}
+      clearPendingFileWrites={clearPendingFileWrites}
     />
   );
 }

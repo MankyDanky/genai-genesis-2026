@@ -7,12 +7,13 @@ import { useState, useEffect, useRef, useMemo, useCallback, type FormEvent, type
 import Markdown from "react-markdown";
 import type { GameEngine } from "@/lib/game-engine";
 import type { ProjectFile } from "@/lib/project-files";
-import type { PlanningTodo, ConsoleLogEntry, GeneratedImage } from "@/lib/game-forge-context";
+import type { PlanningTodo, ConsoleLogEntry, GeneratedImage, PendingFileWrite } from "@/lib/game-forge-context";
 
 interface ChatPanelProps {
   currentCode: string | null;
   currentEngine: GameEngine;
   projectFiles: ProjectFile[];
+  pendingFileWrites: PendingFileWrite[];
   planningTodos: PlanningTodo[];
   consoleLogs: ConsoleLogEntry[];
   generatedImages: GeneratedImage[];
@@ -34,6 +35,8 @@ interface ChatPanelProps {
   writePlanningTodos: (merge: boolean, todos: PlanningTodo[]) => void;
   onEngineUpdate: (engine: GameEngine) => void;
   addImage: (image: GeneratedImage) => void;
+  setPendingFileWrites: (paths: string[], status: "streaming" | "finalizing") => void;
+  clearPendingFileWrites: (paths?: string[]) => void;
 }
 
 type ComposerMode = "agent" | "plan" | "debug" | "ask";
@@ -68,6 +71,15 @@ function inferEngineFromPrompt(prompt: string): GameEngine {
     "obj",
   ];
   return threeSignals.some((token) => text.includes(token)) ? "threejs" : "canvas2d";
+}
+
+function isStableProjectPath(path: unknown): path is string {
+  if (typeof path !== "string") return false;
+  const value = path.trim();
+  if (!value) return false;
+  if (value.startsWith("/") || value.startsWith("./") || value.includes("\\")) return false;
+  if (value.endsWith(".") || value.includes("//")) return false;
+  return true;
 }
 
 type GenerationPhase = "connecting" | "thinking" | "coding" | "executing" | "done";
@@ -370,6 +382,7 @@ export function ChatPanel({
   currentCode,
   currentEngine,
   projectFiles,
+  pendingFileWrites,
   planningTodos,
   consoleLogs,
   generatedImages,
@@ -382,6 +395,8 @@ export function ChatPanel({
   writePlanningTodos,
   onEngineUpdate,
   addImage,
+  setPendingFileWrites,
+  clearPendingFileWrites,
 }: ChatPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -410,6 +425,8 @@ export function ChatPanel({
 
     const fileSuggestions: MentionSuggestion[] = projectFiles
       .map((file) => file.path)
+      .concat(pendingFileWrites.map((entry) => entry.path))
+      .filter((value, index, all) => all.indexOf(value) === index)
       .filter((path) => path.toLowerCase().includes(fileQuery))
       .slice(0, 7)
       .map((path) => {
@@ -439,7 +456,7 @@ export function ChatPanel({
       : [];
 
     return [...consoleSuggestion, ...fileSuggestions].slice(0, 8);
-  }, [mentionQuery, mentionStart, projectFiles]);
+  }, [mentionQuery, mentionStart, pendingFileWrites, projectFiles]);
 
   useEffect(() => {
     setSelectedEngine(currentEngine);
@@ -561,8 +578,18 @@ export function ChatPanel({
 
         if (partType === "tool-update_project_files") {
           const toolPart = part as { state: string; input?: { files?: ProjectFile[]; deletePaths?: string[] } };
-          const files = Array.isArray(toolPart.input?.files) ? toolPart.input.files : [];
+          const rawFiles = Array.isArray(toolPart.input?.files) ? toolPart.input.files : [];
+          const files = rawFiles.filter((file) => isStableProjectPath(file?.path));
           const deletePaths = Array.isArray(toolPart.input?.deletePaths) ? toolPart.input.deletePaths : [];
+          const filePaths = files.map((file) => file.path);
+
+          if (filePaths.length > 0) {
+            const pendingState = toolPart.state === "input-streaming" ? "streaming" : "finalizing";
+            if (toolPart.state === "input-streaming" || toolPart.state === "input-available") {
+              setPendingFileWrites(filePaths, pendingState);
+            }
+          }
+
           if (files.length > 0 || deletePaths.length > 0) {
             const signature = JSON.stringify(
               {
@@ -579,8 +606,7 @@ export function ChatPanel({
             processedToolPayloadRef.current.set(key, signature);
             if (toolPart.state === "output-available") {
               onProjectFilesUpdate(files, selectedEngine, deletePaths);
-            } else if (toolPart.state === "input-available") {
-              if (files.length > 0) patchProjectFiles(files, selectedEngine);
+              clearPendingFileWrites(filePaths);
             }
           }
         }
@@ -594,6 +620,11 @@ export function ChatPanel({
             };
           };
           if (!toolPart.input?.path || !Array.isArray(toolPart.input.edits) || toolPart.input.edits.length === 0) continue;
+          if (toolPart.state === "input-streaming" || toolPart.state === "input-available") {
+            if (isStableProjectPath(toolPart.input.path)) {
+              setPendingFileWrites([toolPart.input.path], toolPart.state === "input-streaming" ? "streaming" : "finalizing");
+            }
+          }
           if (toolPart.state !== "output-available") continue;
 
           const signature = JSON.stringify({
@@ -604,6 +635,7 @@ export function ChatPanel({
           if (processedToolPayloadRef.current.get(key) === signature) continue;
           processedToolPayloadRef.current.set(key, signature);
           patchProjectFileContent(toolPart.input.path, toolPart.input.edits);
+          clearPendingFileWrites([toolPart.input.path]);
         }
 
         if (partType === "tool-edit_file") {
@@ -618,7 +650,15 @@ export function ChatPanel({
             };
           };
           if (toolPart.state !== "output-available") continue;
-          if (!toolPart.input?.targetFile || typeof toolPart.input.newString !== "string") continue;
+          if (toolPart.state === "input-streaming" || toolPart.state === "input-available") {
+            if (isStableProjectPath(toolPart.input?.targetFile)) {
+              setPendingFileWrites(
+                [toolPart.input.targetFile],
+                toolPart.state === "input-streaming" ? "streaming" : "finalizing"
+              );
+            }
+          }
+          if (!isStableProjectPath(toolPart.input?.targetFile) || typeof toolPart.input.newString !== "string") continue;
 
           const signature = JSON.stringify(toolPart.input);
           const key = `${message.id}:${partType}:${toolPart.input.targetFile}`;
@@ -632,6 +672,7 @@ export function ChatPanel({
             replaceAll: toolPart.input.replaceAll,
             createIfMissing: toolPart.input.createIfMissing,
           });
+          clearPendingFileWrites([toolPart.input.targetFile]);
         }
 
         if (partType === "tool-delete_file") {
@@ -689,6 +730,8 @@ export function ChatPanel({
     deleteProjectFile,
     writePlanningTodos,
     addImage,
+    setPendingFileWrites,
+    clearPendingFileWrites,
     selectedEngine,
   ]);
 
@@ -750,6 +793,7 @@ export function ChatPanel({
           timestamp: entry.timestamp,
         }))
       : [];
+    clearPendingFileWrites();
     setInput("");
     setMentionQuery("");
     setMentionStart(null);

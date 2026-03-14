@@ -234,6 +234,7 @@ function TreeView({
   onSelectFolder,
   onSelectFile,
   onContextMenu,
+  pendingByPath,
 }: {
   nodes: TreeNode[];
   depth: number;
@@ -252,6 +253,7 @@ function TreeView({
   onSelectFolder: (path: string) => void;
   onSelectFile: (path: string) => void;
   onContextMenu: (e: React.MouseEvent, target: ContextTarget) => void;
+  pendingByPath: Map<string, "streaming" | "finalizing">;
 }) {
   const rootCreate = depth === 0 && createState?.parent === "" ? createState : null;
 
@@ -336,6 +338,7 @@ function TreeView({
                     onSelectFolder={onSelectFolder}
                     onSelectFile={onSelectFile}
                     onContextMenu={onContextMenu}
+                    pendingByPath={pendingByPath}
                   />
                 </>
               ) : null}
@@ -370,7 +373,15 @@ function TreeView({
             }`}
             style={{ paddingLeft }}
           >
-            {node.name}
+            <span className="inline-flex items-center gap-1.5">
+              <span>{node.name}</span>
+              {pendingByPath.has(node.path) ? (
+                <span
+                  className="inline-block h-2 w-2 rounded-full bg-[var(--color-accent)] animate-pulse"
+                  title={pendingByPath.get(node.path) === "finalizing" ? "Finalizing write" : "Streaming write"}
+                />
+              ) : null}
+            </span>
           </button>
         );
       })}
@@ -379,8 +390,18 @@ function TreeView({
 }
 
 export function CodePanel() {
-  const { projectFiles, updateProjectFile, deleteProjectFile } = useGameForge();
+  const { projectFiles, pendingFileWrites, updateProjectFile, deleteProjectFile } = useGameForge();
   const codeFiles = useMemo(() => projectFiles.filter((file) => file.kind !== "asset"), [projectFiles]);
+  const pendingByPath = useMemo(
+    () => new Map(pendingFileWrites.map((entry) => [entry.path, entry.status])),
+    [pendingFileWrites]
+  );
+  const pendingPaths = useMemo(
+    () => pendingFileWrites
+      .map((entry) => entry.path)
+      .filter((path) => path && !codeFiles.some((file) => file.path === path)),
+    [codeFiles, pendingFileWrites]
+  );
 
   const explorerRef = useRef<HTMLDivElement>(null);
   const createInputRef = useRef<HTMLInputElement>(null);
@@ -401,8 +422,8 @@ export function CodePanel() {
   const canPortal = typeof document !== "undefined";
 
   const tree = useMemo(
-    () => buildTree(codeFiles.map((file) => file.path), virtualFolders),
-    [codeFiles, virtualFolders]
+    () => buildTree([...codeFiles.map((file) => file.path), ...pendingPaths], virtualFolders),
+    [codeFiles, pendingPaths, virtualFolders]
   );
 
   const effectiveSelectedFilePath =
@@ -706,6 +727,7 @@ export function CodePanel() {
               setSelectedFolderPath(null);
             }}
             onContextMenu={openContextMenu}
+            pendingByPath={pendingByPath}
           />
         )}
       </div>

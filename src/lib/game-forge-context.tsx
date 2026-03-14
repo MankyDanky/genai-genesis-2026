@@ -47,10 +47,16 @@ export interface GeneratedImage {
   prompt: string;
 }
 
+export interface PendingFileWrite {
+  path: string;
+  status: "streaming" | "finalizing";
+}
+
 interface GameForgeContextValue {
   currentCode: string | null;
   currentEngine: GameEngine;
   projectFiles: ProjectFile[];
+  pendingFileWrites: PendingFileWrite[];
   planningTodos: PlanningTodo[];
   consoleLogs: ConsoleLogEntry[];
   generatedImages: GeneratedImage[];
@@ -85,6 +91,8 @@ interface GameForgeContextValue {
   addAudioTrack: (track: AudioTrack) => void;
   removeAudioTrack: (id: string) => void;
   addImage: (image: GeneratedImage) => void;
+  setPendingFileWrites: (paths: string[], status: "streaming" | "finalizing") => void;
+  clearPendingFileWrites: (paths?: string[]) => void;
 }
 
 const GameForgeContext = createContext<GameForgeContextValue | null>(null);
@@ -135,6 +143,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
   const [currentCode, setCurrentCode] = useState<string | null>(null);
   const [currentEngine, setCurrentEngine] = useState<GameEngine>("canvas2d");
   const [projectFiles, setProjectFiles] = useState<ProjectFile[]>([]);
+  const [pendingFileWrites, setPendingFileWritesState] = useState<PendingFileWrite[]>([]);
   const [consoleLogs, setConsoleLogs] = useState<ConsoleLogEntry[]>([]);
   const [planningTodos, setPlanningTodos] = useState<PlanningTodo[]>(() => {
     if (typeof window === "undefined") return [];
@@ -384,11 +393,34 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const setPendingFileWrites = useCallback((paths: string[], status: "streaming" | "finalizing") => {
+    if (paths.length === 0) return;
+    const unique = Array.from(new Set(paths.filter(Boolean)));
+    if (unique.length === 0) return;
+    setPendingFileWritesState((prev) => {
+      const byPath = new Map(prev.map((entry) => [entry.path, entry]));
+      for (const path of unique) {
+        byPath.set(path, { path, status });
+      }
+      return Array.from(byPath.values());
+    });
+  }, []);
+
+  const clearPendingFileWrites = useCallback((paths?: string[]) => {
+    if (!paths || paths.length === 0) {
+      setPendingFileWritesState([]);
+      return;
+    }
+    const remove = new Set(paths);
+    setPendingFileWritesState((prev) => prev.filter((entry) => !remove.has(entry.path)));
+  }, []);
+
   const value = useMemo(
     () => ({
       currentCode,
       currentEngine,
       projectFiles,
+      pendingFileWrites,
       planningTodos,
       consoleLogs,
       generatedImages,
@@ -410,11 +442,14 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       addAudioTrack,
       removeAudioTrack,
       addImage,
+      setPendingFileWrites,
+      clearPendingFileWrites,
     }),
     [
       currentCode,
       currentEngine,
       projectFiles,
+      pendingFileWrites,
       planningTodos,
       consoleLogs,
       generatedImages,
@@ -436,6 +471,8 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       addAudioTrack,
       removeAudioTrack,
       addImage,
+      setPendingFileWrites,
+      clearPendingFileWrites,
     ]
   );
 
