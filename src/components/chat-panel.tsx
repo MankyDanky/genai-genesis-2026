@@ -9,7 +9,7 @@ import remarkGfm from "remark-gfm";
 import { Mention, MentionsInput } from "react-mentions";
 import type { GameEngine } from "@/lib/game-engine";
 import type { ProjectFile } from "@/lib/project-files";
-import type { PlanningTodo, ConsoleLogEntry, GeneratedImage, PendingFileWrite, GameControl, AudioTrack } from "@/lib/game-forge-context";
+import type { PlanningTodo, ConsoleLogEntry, GeneratedImage, GeneratedMesh, PendingFileWrite, GameControl, AudioTrack } from "@/lib/game-forge-context";
 import { getGeneratedAudioId } from "@/lib/generated-audio";
 import type { PersistedChatMessage } from "@/lib/db/schema";
 
@@ -41,6 +41,9 @@ interface ChatPanelProps {
   onEngineUpdate: (engine: GameEngine) => void;
   addImage: (image: GeneratedImage) => void;
   addAudioTrack: (track: AudioTrack) => void;
+  generatedMeshes: GeneratedMesh[];
+  addMesh: (mesh: GeneratedMesh) => void;
+  updateMesh: (mesh: GeneratedMesh) => void;
   setControls: (controls: GameControl[]) => void;
   chatMessages: PersistedChatMessage[];
   chatSessionId: string;
@@ -49,6 +52,7 @@ interface ChatPanelProps {
   focusConsolePanel: () => void;
   focusImagesPanel: () => void;
   focusAudioPanel: () => void;
+  focusMeshesPanel: () => void;
   setPendingFileWrites: (
     entries: Array<{ path: string; status: "streaming" | "finalizing"; content?: string }>
   ) => void;
@@ -250,6 +254,9 @@ function normalizeMentionToken(raw: string) {
   }
   if (token.toLowerCase().startsWith("audio:")) {
     return { kind: "audio" as const, value: token };
+  }
+  if (token.toLowerCase().startsWith("mesh:")) {
+    return { kind: "meshes" as const, value: token };
   }
   if (token.toLowerCase().startsWith("code:")) {
     const path = token.slice(5).trim();
@@ -625,6 +632,9 @@ export function ChatPanel({
   onEngineUpdate,
   addImage,
   addAudioTrack,
+  generatedMeshes,
+  addMesh,
+  updateMesh,
   setControls,
   chatMessages,
   chatSessionId,
@@ -633,6 +643,7 @@ export function ChatPanel({
   focusConsolePanel,
   focusImagesPanel,
   focusAudioPanel,
+  focusMeshesPanel,
   setPendingFileWrites,
   clearPendingFileWrites,
 }: ChatPanelProps) {
@@ -647,6 +658,8 @@ export function ChatPanel({
   const processedToolPayloadRef = useRef<Map<string, string>>(new Map());
   const audioPollInFlightRef = useRef(false);
   const audioPollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const meshPollInFlightRef = useRef(false);
+  const meshPollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hydratedMessageIdsRef = useRef<Set<string>>(new Set());
   const initialChatMessagesRef = useRef(chatMessages);
   const [input, setInput] = useState("");
@@ -691,9 +704,14 @@ export function ChatPanel({
           display: `audio:${toMentionSlug(track.name) || `track-${index + 1}`}`,
           meta: track.name || "audio",
         })),
+        ...generatedMeshes.map((mesh, index) => ({
+          id: `mesh:${toMentionSlug(mesh.name) || `mesh-${index + 1}`}`,
+          display: `mesh:${toMentionSlug(mesh.name) || `mesh-${index + 1}`}`,
+          meta: mesh.name || "mesh",
+        })),
       ];
     },
-    [audioTracks, generatedImages, pendingFileWrites, projectFiles]
+    [audioTracks, generatedImages, generatedMeshes, pendingFileWrites, projectFiles]
   );
 
   const handleMentionChipClick = useCallback(
@@ -712,10 +730,14 @@ export function ChatPanel({
         focusAudioPanel();
         return;
       }
+      if (mention.kind === "meshes") {
+        focusMeshesPanel();
+        return;
+      }
       if (!projectFiles.some((file) => file.path === mention.value)) return;
       focusCodeFile(mention.value);
     },
-    [focusAudioPanel, focusCodeFile, focusConsolePanel, focusImagesPanel, projectFiles]
+    [focusAudioPanel, focusCodeFile, focusConsolePanel, focusImagesPanel, focusMeshesPanel, projectFiles]
   );
 
   const renderMessageTextWithMentions = useCallback((text: string) => {
@@ -729,6 +751,7 @@ export function ChatPanel({
         ? mention.kind === "console" ||
           mention.kind === "images" ||
           mention.kind === "audio" ||
+          mention.kind === "meshes" ||
           projectFiles.some((file) => file.path === mention.value)
         : false;
       if (!isClickable) return <span key={`txt-${index}`}>{segment}</span>;
@@ -745,7 +768,9 @@ export function ChatPanel({
                 ? "Open Images panel"
                 : mention?.kind === "audio"
                   ? "Open Audio panel"
-              : `Open ${mention?.value ?? ""} in Code panel`
+                  : mention?.kind === "meshes"
+                    ? "Open Meshes panel"
+                    : `Open ${mention?.value ?? ""} in Code panel`
           }
         >
           {segment}
@@ -884,6 +909,112 @@ export function ChatPanel({
       }
     };
   }, [addAudioTrack, audioTrackById, pendingAudioIdsKey]);
+
+  const meshById = useMemo(
+    () => new Map(generatedMeshes.map((mesh) => [mesh.id, mesh])),
+    [generatedMeshes]
+  );
+
+  const pendingMeshIdsKey = useMemo(
+    () =>
+      generatedMeshes
+        .filter((mesh) => mesh.status === "pending")
+        .map((mesh) => mesh.id)
+        .sort()
+        .join("|"),
+    [generatedMeshes]
+  );
+
+  useEffect(() => {
+    if (!pendingMeshIdsKey) {
+      if (meshPollTimerRef.current) {
+        clearTimeout(meshPollTimerRef.current);
+        meshPollTimerRef.current = null;
+      }
+      return;
+    }
+
+    let cancelled = false;
+    const maxRounds = 60;
+    let round = 0;
+
+    const pollRound = async () => {
+      if (cancelled || meshPollInFlightRef.current) return;
+
+      const currentPending = Array.from(meshById.values()).filter(
+        (mesh) => mesh.status === "pending"
+      );
+      if (currentPending.length === 0) return;
+
+      round += 1;
+      meshPollInFlightRef.current = true;
+      try {
+        const results = await Promise.all(
+          currentPending.map(async (mesh) => {
+            const res = await fetch(`/api/meshes/${encodeURIComponent(mesh.id)}`);
+            if (!res.ok) return { id: mesh.id, status: "pending" as const };
+            return res.json() as Promise<{
+              id: string;
+              status: "pending" | "ready" | "error";
+              name: string;
+              prompt: string;
+              glbUrl: string | null;
+              thumbnailUrl: string | null;
+              error: string | null;
+            }>;
+          })
+        );
+
+        let hasPending = false;
+        for (const result of results) {
+          if (cancelled) break;
+          const existing = meshById.get(result.id);
+          if (!existing) continue;
+          if (result.status === "pending") {
+            hasPending = true;
+            continue;
+          }
+          updateMesh({
+            ...existing,
+            status: result.status,
+            glbUrl: result.glbUrl ?? null,
+            thumbnailUrl: result.thumbnailUrl ?? null,
+            error: result.error ?? null,
+          });
+        }
+
+        if (!cancelled && hasPending && round < maxRounds) {
+          meshPollTimerRef.current = setTimeout(() => {
+            meshPollTimerRef.current = null;
+            void pollRound();
+          }, 4000);
+        } else if (!cancelled && hasPending && round >= maxRounds) {
+          for (const mesh of currentPending) {
+            if (mesh.status !== "pending") continue;
+            updateMesh({
+              ...mesh,
+              status: "error",
+              error: "Mesh generation timed out",
+            });
+          }
+        }
+      } finally {
+        meshPollInFlightRef.current = false;
+      }
+    };
+
+    if (!meshPollTimerRef.current) {
+      void pollRound();
+    }
+
+    return () => {
+      cancelled = true;
+      if (meshPollTimerRef.current) {
+        clearTimeout(meshPollTimerRef.current);
+        meshPollTimerRef.current = null;
+      }
+    };
+  }, [updateMesh, meshById, pendingMeshIdsKey]);
 
   useEffect(() => {
     setSelectedEngine(currentEngine);
@@ -1234,6 +1365,31 @@ export function ChatPanel({
             createdAt: Date.now(),
           });
         }
+
+        if (partType === "tool-generate_mesh") {
+          const toolPart = part as {
+            state: string;
+            input?: { name?: string; prompt?: string };
+            output?: { meshId?: string; name?: string; status?: string; error?: string };
+          };
+          if (toolPart.state !== "output-available" && toolPart.state !== "output-error") continue;
+          const name = toolPart.input?.name;
+          if (!name) continue;
+          const meshId = toolPart.output?.meshId ?? `mesh:${name}`;
+          const key = `${message.id}:${partType}:${meshId}`;
+          if (processedToolPayloadRef.current.get(key) === "1") continue;
+          processedToolPayloadRef.current.set(key, "1");
+          addMesh({
+            id: meshId,
+            name,
+            prompt: toolPart.input?.prompt ?? "",
+            status: toolPart.output?.status === "error" ? "error" : "pending",
+            glbUrl: null,
+            thumbnailUrl: null,
+            error: toolPart.output?.error ?? null,
+            createdAt: Date.now(),
+          });
+        }
       }
     }
   }, [
@@ -1250,6 +1406,7 @@ export function ChatPanel({
     composerMode,
     addImage,
     addAudioTrack,
+    addMesh,
     setControls,
     setPendingFileWrites,
     clearPendingFileWrites,
@@ -1355,6 +1512,15 @@ export function ChatPanel({
         })),
         consoleLogs: consoleContext,
         generatedImages,
+        generatedMeshes: generatedMeshes.map((mesh) => ({
+          id: mesh.id,
+          name: mesh.name,
+          prompt: mesh.prompt,
+          status: mesh.status,
+          glbUrl: mesh.glbUrl,
+          thumbnailUrl: mesh.thumbnailUrl,
+          error: mesh.error ?? null,
+        })),
         composerMode,
         planningMode,
         gameEngine: effectiveEngine,

@@ -17,7 +17,8 @@ import {
   type SaveProjectSnapshotRequest,
 } from "@/lib/db/schema";
 import { compileProjectToHtml } from "@/lib/project-files";
-import type { AudioTrack } from "@/lib/game-forge-context";
+import type { AudioTrack, GeneratedMesh } from "@/lib/game-forge-context";
+import { getMesh } from "@/lib/mesh-store";
 
 function deriveTitle(snapshot: SaveProjectSnapshotRequest) {
   const fromRequest = snapshot.title?.trim();
@@ -89,6 +90,47 @@ window.__GAMEFORGE_MUSIC__ = ${JSON.stringify(musicMap)};
     return html.replace(/<head([^>]*)>/i, `<head$1>${combined}`);
   }
   return `${combined}${html}`;
+}
+
+async function injectMeshesIntoHtml(
+  html: string,
+  meshes: GeneratedMesh[],
+): Promise<string> {
+  const readyMeshes = meshes.filter((m) => m.status === "ready" && !!m.glbUrl);
+  if (readyMeshes.length === 0) return html;
+
+  const meshMap: Record<string, { glbUrl: string; name: string }> = {};
+
+  for (const mesh of readyMeshes) {
+    const stored = await getMesh(mesh.id);
+    if (stored?.artifactId) {
+      try {
+        const artifact = await readArtifactBuffer(stored.artifactId);
+        if (artifact) {
+          const base64 = artifact.buffer.toString("base64");
+          const dataUrl = `data:model/gltf-binary;base64,${base64}`;
+          meshMap[mesh.name] = { glbUrl: dataUrl, name: mesh.name };
+          continue;
+        }
+      } catch {
+        // fall through to URL
+      }
+    }
+    if (mesh.glbUrl) {
+      meshMap[mesh.name] = { glbUrl: mesh.glbUrl, name: mesh.name };
+    }
+  }
+
+  if (Object.keys(meshMap).length === 0) return html;
+
+  const meshScript = `<script>
+window.__GAMEFORGE_MESHES__ = ${JSON.stringify(meshMap)};
+</script>`;
+
+  if (/<head[^>]*>/i.test(html)) {
+    return html.replace(/<head([^>]*)>/i, `<head$1>${meshScript}`);
+  }
+  return `${meshScript}${html}`;
 }
 
 async function inlineImageUrls(html: string): Promise<string> {
@@ -163,6 +205,7 @@ async function hydrateRevision(revision: ProjectRevisionDocument) {
     controls: revision.controls,
     planningTodos: revision.planningTodos,
     generatedImages: revision.generatedImages,
+    generatedMeshes: revision.generatedMeshes ?? [],
     audioTracks: revision.audioTracks,
     currentCode: compiledHtml,
     chatMessages: (JSON.parse(rawChatMessages || "[]") as PersistedChatMessage[]),
@@ -237,6 +280,7 @@ export async function createRevisionFromSnapshot(
     controls: snapshot.controls,
     planningTodos: snapshot.planningTodos,
     generatedImages: snapshot.generatedImages,
+    generatedMeshes: snapshot.generatedMeshes ?? [],
     audioTracks: snapshot.audioTracks,
     compiledHtml,
     chatTranscript: chatMessages,
@@ -336,10 +380,11 @@ export async function publishProjectRevision(
     throw new Error("Revision not found");
   }
 
-  // Resolve the base HTML and inline all assets (images + audio) as data URLs
+  // Resolve the base HTML and inline all assets (images + audio + meshes) as data URLs
   const baseHtml = await resolveTextArtifact(revision.compiledHtml);
   const htmlWithImages = await inlineImageUrls(baseHtml);
-  const htmlWithAssets = await injectSoundsIntoHtml(htmlWithImages, revision.audioTracks ?? []);
+  const htmlWithSounds = await injectSoundsIntoHtml(htmlWithImages, revision.audioTracks ?? []);
+  const htmlWithAssets = await injectMeshesIntoHtml(htmlWithSounds, revision.generatedMeshes ?? []);
 
   const publishedCompiledHtml = await createTextArtifactRef({
     kind: "compiled-html",
@@ -429,6 +474,7 @@ export async function forkPublishedGame(gameId: string | ObjectId) {
         controls: revision.controls,
         planningTodos: [],
         generatedImages: revision.generatedImages,
+        generatedMeshes: revision.generatedMeshes ?? [],
         audioTracks: revision.audioTracks,
         chatMessages: [],
       };
@@ -448,6 +494,7 @@ export async function forkPublishedGame(gameId: string | ObjectId) {
     controls: [],
     planningTodos: [],
     generatedImages: [],
+    generatedMeshes: [],
     audioTracks: [],
     chatMessages: [],
   };

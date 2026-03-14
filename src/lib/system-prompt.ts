@@ -24,6 +24,15 @@ interface AudioTrackPayload {
     error?: string | null;
 }
 
+interface MeshPayload {
+    id: string;
+    name: string;
+    prompt: string;
+    status: "pending" | "ready" | "error";
+    glbUrl: string | null;
+    error?: string | null;
+}
+
 interface PromptOptions {
     currentCode?: string | null;
     currentProjectFiles?: ProjectFile[];
@@ -31,6 +40,7 @@ interface PromptOptions {
     consoleLogs?: ConsoleLogPayload[];
     generatedImages?: GeneratedImagePayload[];
     currentAudioTracks?: AudioTrackPayload[];
+    currentMeshes?: MeshPayload[];
     composerMode?: "agent" | "plan" | "debug" | "ask";
     planningMode?: boolean;
     gameEngine?: GameEngine;
@@ -43,6 +53,7 @@ export function getSystemPrompt({
     consoleLogs = [],
     generatedImages = [],
     currentAudioTracks = [],
+    currentMeshes = [],
     composerMode = "agent",
     planningMode = false,
     gameEngine = "canvas2d",
@@ -71,6 +82,8 @@ Use the exact tool names below:
 - \`todo_read\`: read current planning tasks/todos
 - \`list_audio_assets\`: list generated audio assets (name/type/description/status)
 - \`list_image_assets\`: list generated image assets (url/description)
+- \`generate_mesh\`: generate a 3D mesh model (GLB) from text description via Meshy API
+- \`list_mesh_assets\`: list generated 3D mesh assets (name/status/glbUrl)
 - \`todo_write\`: planning tasks/todos
 - \`update_sandbox\`: fallback single-file HTML update
 
@@ -84,8 +97,9 @@ Rules:
 - Use \`delete_file\` only when explicitly removing a file.
 - When user requests new art/assets, call \`generate_image\` before code updates and use returned URL(s).
 - When audio is requested or would clearly improve gameplay, call \`generate_sound_effect\` and/or \`generate_music\`.
+- When user requests 3D models/meshes (especially in Three.js mode), call \`generate_mesh\` before code updates and use the generated GLB URL.
 - Use \`todo_read\` to inspect existing tasks before planning updates.
-- Use \`list_audio_assets\` and \`list_image_assets\` when you need to inspect available assets before editing.
+- Use \`list_audio_assets\`, \`list_image_assets\`, and \`list_mesh_assets\` when you need to inspect available assets before editing.
 - Use \`todo_write\` when planning mode is enabled or task is multi-step.
 - Prefer multi-file flow (\`update_project_files\` / \`patch_project_file\` / \`edit_file\`) when project files exist.
 - Use \`update_sandbox\` only as fallback when operating in single-file mode.
@@ -107,9 +121,10 @@ ${
     isThreeJs
         ? `When in Three.js mode:
 - Build 3D games with Three.js
-- Use primitive geometry only (BoxGeometry, SphereGeometry, PlaneGeometry, etc.)
-- Do not use external 3D asset generation services or downloaded model files
-- External dependencies are allowed only for Three.js-related scripts from trusted CDNs`
+- Use primitive geometry (BoxGeometry, SphereGeometry, PlaneGeometry, etc.) for simple objects
+- For complex models (characters, creatures, weapons, vehicles), use \`generate_mesh\` to create AI-generated GLB models
+- Load generated meshes via \`window.__GAMEFORGE_MESHES__\` (see 3D Meshes section below)
+- External dependencies are allowed only for Three.js-related scripts from trusted CDNs (including GLTFLoader)`
         : `When in Canvas mode:
 - Use HTML5 Canvas for ALL rendering
 - NO external dependencies — no CDN links, no imports, no fetch calls`
@@ -161,19 +176,54 @@ Recommended helper shape:
 - \`stopMusic()\`: pause/reset existing music instance.
 - In \`window.__onSoundsUpdated\` / \`window.__onMusicUpdated\`, refresh any cached maps or lazy lookups.
 
+## 3D Meshes
+
+- Mesh generation via \`generate_mesh\` is asynchronous (powered by Meshy API); do not block code generation waiting for completion.
+- \`generate_mesh\` accepts: \`prompt\` (description of the 3D model, max 600 chars), \`name\` (unique identifier), and optional \`modelType\` ("standard" or "lowpoly").
+- After requesting mesh generation, wire mesh loading into game code in the same response using GLTFLoader.
+- In game code, read generated meshes from \`window.__GAMEFORGE_MESHES__\`:
+  \`\`\`
+  window.__GAMEFORGE_MESHES__ = {
+    "meshName": { glbUrl: "/api/meshes/mesh:meshName/file", name: "meshName" }
+  };
+  \`\`\`
+- Register an optional update hook: \`window.__onMeshesUpdated = () => { ... }\`
+- Gracefully handle missing meshes (mesh may still be generating). If a mesh name is not found, show a placeholder primitive.
+
+Mesh integration pattern (Three.js):
+- Import GLTFLoader from CDN or Three.js addons: \`import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'\`
+- Create a \`loadMesh(name)\` helper that checks \`window.__GAMEFORGE_MESHES__[name]\` and loads the GLB:
+  \`\`\`
+  function loadMesh(name, scene, options = {}) {
+    const meshData = (window.__GAMEFORGE_MESHES__ || {})[name];
+    if (!meshData || !meshData.glbUrl) return null;
+    const loader = new THREE.GLTFLoader();
+    loader.load(meshData.glbUrl, (gltf) => {
+      const model = gltf.scene;
+      if (options.scale) model.scale.setScalar(options.scale);
+      if (options.position) model.position.copy(options.position);
+      scene.add(model);
+      if (options.onLoad) options.onLoad(model);
+    });
+  }
+  \`\`\`
+- In \`window.__onMeshesUpdated\`, refresh or reload meshes that were previously missing.
+- ALWAYS include GLTFLoader when using generated meshes. Use the Three.js addons import map or CDN.
+
 ## Response Format
 
 When you create or update a game:
 1. If new visual assets are needed, call \`generate_image\` first and reuse returned URLs.
-2. If audio is needed, call \`generate_sound_effect\` / \`generate_music\` and proceed without waiting.
-3. For small file-local edits, call \`patch_project_file\` or \`edit_file\`.
-4. For new files/major refactors, call \`update_project_files\` with changed/new files only.
-5. Include \`deletePaths\` only for intentional removals (or use \`delete_file\` for single-file delete).
-6. Use \`update_sandbox\` only if single-file fallback is required.
-7. Call \`update_controls\` with clear action/key pairs for how to play.
-8. Then write 1-2 SHORT sentences about what you made and how to play it.
-9. Keep your text response BRIEF — the game speaks for itself.
-10. NEVER use emojis in your text responses — plain text only.`;
+2. If 3D mesh models are needed, call \`generate_mesh\` and proceed with code that loads them.
+3. If audio is needed, call \`generate_sound_effect\` / \`generate_music\` and proceed without waiting.
+4. For small file-local edits, call \`patch_project_file\` or \`edit_file\`.
+5. For new files/major refactors, call \`update_project_files\` with changed/new files only.
+6. Include \`deletePaths\` only for intentional removals (or use \`delete_file\` for single-file delete).
+7. Use \`update_sandbox\` only if single-file fallback is required.
+8. Call \`update_controls\` with clear action/key pairs for how to play.
+9. Then write 1-2 SHORT sentences about what you made and how to play it.
+10. Keep your text response BRIEF — the game speaks for itself.
+11. NEVER use emojis in your text responses — plain text only.`;
 
     const modeSection = `\n\n## Composer Mode\n\nCurrent mode: ${composerMode.toUpperCase()}\n\nMode behavior:\n- agent: full implementation mode, including mutating tools.\n- debug: full implementation mode with runtime-console-first debugging.\n- plan: read-only/planning mode; no code-mutating tools are available.\n- ask: Q&A mode; no code-mutating tools are available.\n\nTodo rules by mode:\n- plan mode: \`todo_read\` and \`todo_write\` may fully read/create/edit todos.\n- all other modes: \`todo_read\` is allowed; \`todo_write\` may ONLY update status of existing todos (no creating new todos, no content edits).`;
     const planningSection = planningMode || composerMode === "plan"
@@ -195,6 +245,14 @@ When you create or update a game:
             .map(
                 (track, i) =>
                     `${i + 1}. [${track.type}] ${track.name} - ${track.description || "No description"} (${track.status})`
+            )
+            .join("\n")}`
+        : "";
+    const meshesSection = currentMeshes.length > 0
+        ? `\n\n## Available Generated 3D Meshes\n\nReuse these meshes when relevant instead of regenerating:\n\n${currentMeshes
+            .map(
+                (mesh, i) =>
+                    `${i + 1}. "${mesh.name}" - ${mesh.prompt} (${mesh.status}${mesh.glbUrl ? `, glbUrl: ${mesh.glbUrl}` : ""})`
             )
             .join("\n")}`
         : "";
@@ -220,7 +278,7 @@ When you create or update a game:
 
 The project currently has these files. Modify existing files when possible instead of replacing everything.
 
-${projectFilesToPrompt(currentProjectFiles)}${focusedSection}${consoleSection}${imagesSection}${audioSection}`;
+${projectFilesToPrompt(currentProjectFiles)}${focusedSection}${consoleSection}${imagesSection}${audioSection}${meshesSection}`;
     }
 
     if (currentCode) {
@@ -232,8 +290,8 @@ The sandbox currently contains the following code. When the user asks for modifi
 
 \`\`\`html
 ${currentCode}
-\`\`\`${consoleSection}${imagesSection}${audioSection}`;
+\`\`\`${consoleSection}${imagesSection}${audioSection}${meshesSection}`;
     }
 
-    return `${baseWithPlanning}${imagesSection}${audioSection}`;
+    return `${baseWithPlanning}${imagesSection}${audioSection}${meshesSection}`;
 }
