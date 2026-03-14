@@ -53,6 +53,7 @@ Use the exact tool names below:
 - \`update_project_files\`: merge-create/update changed files (and optional \`deletePaths\`)
 - \`delete_file\`: remove one virtual file
 - \`generate_image\`: generate image asset URL for use in code
+- \`todo_read\`: read current planning tasks/todos
 - \`todo_write\`: planning tasks/todos
 - \`update_sandbox\`: fallback single-file HTML update
 
@@ -65,6 +66,7 @@ Rules:
 - Use \`deletePaths\` only when you intentionally remove files
 - Use \`delete_file\` only when explicitly removing a file.
 - When user requests new art/assets, call \`generate_image\` before code updates and use returned URL(s).
+- Use \`todo_read\` to inspect existing tasks before planning updates.
 - Use \`todo_write\` when planning mode is enabled or task is multi-step.
 - Prefer multi-file flow (\`update_project_files\` / \`patch_project_file\` / \`edit_file\`) when project files exist.
 - Use \`update_sandbox\` only as fallback when operating in single-file mode.
@@ -127,7 +129,7 @@ When you create or update a game:
 
     const modeSection = `\n\n## Composer Mode\n\nCurrent mode: ${composerMode.toUpperCase()}\n\nMode behavior:\n- agent: full implementation mode, including mutating tools.\n- debug: full implementation mode with runtime-console-first debugging.\n- plan: read-only/planning mode; no code-mutating tools are available.\n- ask: Q&A mode; no code-mutating tools are available.`;
     const planningSection = planningMode || composerMode === "plan"
-      ? `\n\n## Planning Mode\n\nPlanning mode is ON. Before major edits, write/update concise todos with \`todo_write\` and keep statuses accurate.\n\nWhen calling \`todo_write\`, the input MUST be a JSON object (dictionary), never an array/string/number. Use this exact shape:\n{\n  "merge": true,\n  "todos": [\n    { "id": "task-1", "content": "Describe task", "status": "in_progress" }\n  ]\n}\n\nIn planning mode, call \`todo_write\` first and avoid unnecessary additional tool calls.`
+      ? `\n\n## Planning Mode\n\nPlanning mode is ON. Before major edits, read current tasks with \`todo_read\`, then write/update concise todos with \`todo_write\` and keep statuses accurate.\n\nWhen calling \`todo_write\`, the input MUST be a JSON object (dictionary), never an array/string/number. Use this exact shape:\n{\n  "merge": true,\n  "todos": [\n    { "id": "task-1", "content": "Describe task", "status": "in_progress" }\n  ]\n}\n\nIn planning mode, call \`todo_read\` first, then \`todo_write\`, and avoid unnecessary additional tool calls.`
       : "";
     const debugSection = composerMode === "debug"
       ? `\n\n## Debug Priority\n\nDebug mode is ON. Treat runtime console logs as first-class evidence. Diagnose from logs first, then propose/apply minimal fixes.`

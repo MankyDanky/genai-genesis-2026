@@ -273,6 +273,11 @@ function ToolCallCard({ part }: {
       return `${todos} planning todo${todos === 1 ? "" : "s"} updated`;
     }
 
+    if (rawToolName === "todo_read") {
+      const status = typeof input.status === "string" ? input.status : "all";
+      return `Read planning todos (${status})`;
+    }
+
     if (rawToolName === "update_sandbox") {
       const code = typeof input.code === "string" ? input.code : "";
       return `Sandbox HTML (${code.length.toLocaleString()} chars)`;
@@ -804,6 +809,7 @@ export function ChatPanel({
       body: {
         currentCode,
         currentProjectFiles: projectFiles,
+        planningTodos,
         mentionedFiles,
         consoleLogs: consoleContext,
         generatedImages,

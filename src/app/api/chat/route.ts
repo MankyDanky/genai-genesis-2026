@@ -21,6 +21,12 @@ interface GeneratedImagePayload {
   prompt: string;
 }
 
+interface PlanningTodoPayload {
+  id: string;
+  content: string;
+  status: "pending" | "in_progress" | "completed" | "cancelled";
+}
+
 type ComposerMode = "agent" | "plan" | "debug" | "ask";
 
 function isComposerMode(value: unknown): value is ComposerMode {
@@ -456,6 +462,7 @@ export async function POST(req: Request) {
       messages?: unknown;
       currentCode?: unknown;
       currentProjectFiles?: unknown;
+      planningTodos?: unknown;
       mentionedFiles?: unknown;
       consoleLogs?: unknown;
       generatedImages?: unknown;
@@ -470,6 +477,22 @@ export async function POST(req: Request) {
       ? normalizeProjectFiles(parsed.currentProjectFiles as Array<Partial<ProjectFile>>)
       : [];
     const fileMap = toFileMap(currentProjectFiles);
+    const planningTodos: PlanningTodoPayload[] = Array.isArray(parsed.planningTodos)
+      ? parsed.planningTodos
+          .filter((v): v is PlanningTodoPayload => {
+            if (!v || typeof v !== "object") return false;
+            const candidate = v as Partial<PlanningTodoPayload>;
+            return (
+              typeof candidate.id === "string" &&
+              typeof candidate.content === "string" &&
+              (candidate.status === "pending" ||
+                candidate.status === "in_progress" ||
+                candidate.status === "completed" ||
+                candidate.status === "cancelled")
+            );
+          })
+          .slice(-400)
+      : [];
     const mentionedFiles = Array.isArray(parsed.mentionedFiles)
       ? parsed.mentionedFiles.filter((v): v is string => typeof v === "string" && v.length > 0)
       : [];
@@ -552,6 +575,7 @@ export async function POST(req: Request) {
             "patch_project_file",
             "update_sandbox",
             "generate_image",
+            "todo_read",
             "read_file",
             "list_dir",
             "dir_tree",
@@ -639,6 +663,18 @@ export async function POST(req: Request) {
                 prompt,
               };
             }
+          },
+        }),
+        todo_read: tool({
+          description: "Read the current planning todo list. Use this before writing todos when unsure.",
+          inputSchema: z.object({
+            status: z.enum(["pending", "in_progress", "completed", "cancelled"]).optional(),
+            limit: z.number().int().positive().max(200).optional(),
+          }),
+          execute: async ({ status, limit }) => {
+            const filtered = status ? planningTodos.filter((todo) => todo.status === status) : planningTodos;
+            const items = typeof limit === "number" ? filtered.slice(0, limit) : filtered;
+            return { count: items.length, todos: items };
           },
         }),
         read_file: tool({
