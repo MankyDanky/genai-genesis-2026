@@ -124,6 +124,7 @@ ${
 - Keep files self-contained and runnable in browser
 - Keep assets as separate files in \`assets/\` when needed
 - IMPORTANT runtime constraint: project files are compiled into one \`about:srcdoc\` HTML document.
+- The sandbox supports \`allow-scripts\` and \`allow-pointer-lock\`, so \`requestPointerLock()\` works for FPS-style games.
 - Do NOT use ES module syntax in browser game files (\`import\` / \`export\`) unless you also ensure a true module runtime.
 - Preferred pattern: plain scripts + global namespaces/functions loaded in order via \`<script src=\"...\">\`.
 - If splitting code across files, attach shared APIs to \`window\` (for example \`window.Game\`, \`window.Net\`) and consume them from later scripts.
