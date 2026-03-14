@@ -21,6 +21,82 @@ interface GeneratedImagePayload {
   prompt: string;
 }
 
+function safeJsonPreview(value: unknown, max = 300): string {
+  try {
+    const raw = JSON.stringify(value);
+    if (!raw) return "";
+    return raw.length > max ? `${raw.slice(0, max)}…` : raw;
+  } catch {
+    return String(value);
+  }
+}
+
+function summarizeIncomingMessages(messages: unknown[]) {
+  return messages.map((raw, index) => {
+    if (!raw || typeof raw !== "object") {
+      return { index, valid: false, reason: "not-object" };
+    }
+
+    const message = raw as { role?: unknown; content?: unknown; parts?: unknown };
+    const partTypes = Array.isArray(message.parts)
+      ? message.parts
+          .map((p) => (p && typeof p === "object" ? (p as { type?: unknown }).type : null))
+          .filter((t): t is string => typeof t === "string")
+      : [];
+
+    const toolParts = Array.isArray(message.parts)
+      ? message.parts.filter(
+          (p) => p && typeof p === "object" && typeof (p as { type?: unknown }).type === "string" && String((p as { type?: unknown }).type).startsWith("tool-")
+        )
+      : [];
+
+    const invalidToolInputs = toolParts
+      .map((p) => p as { type?: unknown; input?: unknown })
+      .filter((p) => p.input !== undefined && (typeof p.input !== "object" || p.input === null))
+      .map((p) => ({
+        type: p.type,
+        inputType: typeof p.input,
+        inputPreview: safeJsonPreview(p.input, 120),
+      }));
+
+    return {
+      index,
+      role: message.role,
+      contentType: typeof message.content,
+      partTypes,
+      invalidToolInputs,
+    };
+  });
+}
+
+function extractErrorDetails(error: unknown) {
+  const e = error as {
+    name?: string;
+    message?: string;
+    stack?: string;
+    cause?: unknown;
+    status?: unknown;
+    responseBody?: unknown;
+    body?: unknown;
+  };
+
+  const cause = e.cause as {
+    message?: string;
+    status?: unknown;
+    responseBody?: unknown;
+    body?: unknown;
+  } | undefined;
+
+  return {
+    name: e.name,
+    message: e.message,
+    status: e.status ?? cause?.status,
+    responseBody: e.responseBody ?? e.body ?? cause?.responseBody ?? cause?.body,
+    causeMessage: cause?.message,
+    stack: e.stack,
+  };
+}
+
 function isGameEngine(value: unknown): value is GameEngine {
   return value === "canvas2d" || value === "threejs";
 }
@@ -311,6 +387,7 @@ async function generateImage(prompt: string, origin: string, shouldRemoveBg: boo
 }
 
 export async function POST(req: Request) {
+  const requestId = `chat_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
   try {
     const body: unknown = await req.json();
     const parsed = body as {
@@ -366,8 +443,26 @@ export async function POST(req: Request) {
       });
     }
 
+    console.log("[API] /api/chat request", {
+      requestId,
+      messageCount: messages.length,
+      planningMode,
+      gameEngine,
+      projectFileCount: currentProjectFiles.length,
+      generatedImageCount: generatedImages.length,
+      mentionedFilesCount: mentionedFiles.length,
+      incomingMessageSummary: summarizeIncomingMessages(messages).slice(-8),
+    });
+
     const sanitizedMessages = sanitizeMessagesForModel(messages);
     const modelMessages = await convertToModelMessages(sanitizedMessages);
+
+    console.log("[API] model message summary", {
+      requestId,
+      sanitizedCount: sanitizedMessages.length,
+      modelMessageCount: modelMessages.length,
+      modelRoles: modelMessages.map((m) => m.role),
+    });
 
     const result = streamText({
       model: anthropic("claude-sonnet-4-6"),
@@ -550,13 +645,36 @@ export async function POST(req: Request) {
         },
       },
       stopWhen: stepCountIs(planningMode ? 1 : 5),
+      onStepFinish: (step) => {
+        const toolCalls = (step.toolCalls ?? []).map((call) => ({
+          toolName: call.toolName,
+          inputType: typeof call.input,
+          inputPreview: safeJsonPreview(call.input, 220),
+        }));
+
+        console.log("[API] step finish", {
+          requestId,
+          finishReason: step.finishReason,
+          usage: step.usage,
+          textPreview: safeJsonPreview(step.text?.slice(0, 180), 220),
+          toolCallCount: toolCalls.length,
+          toolCalls,
+        });
+      },
       onError: ({ error }) => {
-        console.error("[API] streamText error:", error);
+        console.error("[API] streamText error", {
+          requestId,
+          ...extractErrorDetails(error),
+        });
       },
     });
 
     return result.toUIMessageStreamResponse({ sendReasoning: true });
   } catch (error) {
+    console.error("[API] /api/chat unhandled error", {
+      requestId,
+      ...extractErrorDetails(error),
+    });
     return new Response(
       JSON.stringify({ error: error instanceof Error ? error.message : "Internal server error" }),
       { status: 500, headers: { "Content-Type": "application/json" } }
