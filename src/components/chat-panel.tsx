@@ -718,6 +718,22 @@ export function ChatPanel({
     textareaRef.current?.focus();
   };
 
+  const handleUpdateTodo = (todoId: string, updates: Partial<PlanningTodo>) => {
+    const next = planningTodos.map((todo) =>
+      todo.id === todoId ? { ...todo, ...updates } : todo
+    );
+    writePlanningTodos(false, next);
+  };
+
+  const handleDeleteTodo = (todoId: string) => {
+    const next = planningTodos.filter((todo) => todo.id !== todoId);
+    writePlanningTodos(false, next);
+  };
+
+  const handleClearTodos = () => {
+    writePlanningTodos(false, []);
+  };
+
   const isEmpty = messages.length === 0;
   const canSend = input.trim().length > 0 && !isLoading;
 
@@ -915,14 +931,47 @@ export function ChatPanel({
 
         {planningMode && planningTodos.length > 0 && (
           <div className="mt-1 border border-[var(--color-border)] bg-[var(--color-surface)]">
-            <div className="px-2 py-1 text-[9px] uppercase tracking-[0.12em] text-[var(--color-text-muted)]">
-              Todo List
+            <div className="px-2 py-1 text-[9px] uppercase tracking-[0.12em] text-[var(--color-text-muted)] flex items-center justify-between gap-2">
+              <span>Todo List</span>
+              <button
+                type="button"
+                onClick={handleClearTodos}
+                className="text-[9px] uppercase tracking-[0.12em] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+              >
+                Clear
+              </button>
             </div>
             <div className="max-h-28 overflow-y-auto border-t border-[var(--color-border)]">
               {planningTodos.map((todo) => (
-                <div key={todo.id} className="px-2 py-1.5 text-[10px] text-[var(--color-text-secondary)] border-b border-[var(--color-border)] last:border-b-0">
-                  <span className="uppercase mr-2 text-[var(--color-text-muted)]">{todo.status}</span>
-                  {todo.content}
+                <div key={todo.id} className="px-2 py-1.5 text-[10px] text-[var(--color-text-secondary)] border-b border-[var(--color-border)] last:border-b-0 space-y-1">
+                  <div className="flex items-center gap-1">
+                    <select
+                      value={todo.status}
+                      onChange={(e) =>
+                        handleUpdateTodo(todo.id, {
+                          status: e.target.value as PlanningTodo["status"],
+                        })
+                      }
+                      className="bg-[var(--color-surface-light)] border border-[var(--color-border)] text-[9px] uppercase tracking-wider text-[var(--color-text-muted)] px-1 py-0.5"
+                    >
+                      <option value="pending">pending</option>
+                      <option value="in_progress">in_progress</option>
+                      <option value="completed">completed</option>
+                      <option value="cancelled">cancelled</option>
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteTodo(todo.id)}
+                      className="ml-auto text-[9px] uppercase tracking-wider text-[var(--color-text-muted)] hover:text-[var(--color-danger)]"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                  <input
+                    value={todo.content}
+                    onChange={(e) => handleUpdateTodo(todo.id, { content: e.target.value })}
+                    className="w-full bg-[var(--color-surface-light)] border border-[var(--color-border)] text-[10px] text-[var(--color-text-secondary)] px-1.5 py-1 outline-none"
+                  />
                 </div>
               ))}
             </div>
