@@ -28,7 +28,7 @@ async function fetchMeshyTask(meshyTaskId: string) {
   }>;
 }
 
-async function createRefineTask(previewTaskId: string): Promise<string> {
+async function createRefineTask(previewTaskId: string, texturePrompt?: string): Promise<string> {
   const key = process.env.MESHY_API_KEY;
   if (!key) throw new Error("MESHY_API_KEY is not set");
 
@@ -42,6 +42,7 @@ async function createRefineTask(previewTaskId: string): Promise<string> {
       mode: "refine",
       preview_task_id: previewTaskId,
       enable_pbr: true,
+      ...(texturePrompt ? { texture_prompt: texturePrompt } : {}),
     }),
   });
 
@@ -85,7 +86,7 @@ async function finalizeMesh(id: string, mesh: StoredMesh, origin: string) {
   // --- Preview just succeeded → kick off refine ---
   if (mesh.status === "pending") {
     try {
-      const refineTaskId = await createRefineTask(mesh.meshyTaskId);
+      const refineTaskId = await createRefineTask(mesh.meshyTaskId, mesh.prompt);
       await putMesh(id, { ...mesh, status: "refining", refineTaskId });
       return getMesh(id);
     } catch (error) {

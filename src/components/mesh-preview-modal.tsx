@@ -1,12 +1,13 @@
 "use client";
 
 import { useRef, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { GeneratedMesh } from "@/lib/game-forge-context";
 
-export default function MeshPreviewModal({
+function MeshViewer({
   mesh,
   onClose,
 }: {
@@ -15,8 +16,8 @@ export default function MeshPreviewModal({
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const backdropRef = useRef<HTMLDivElement>(null);
-  const cleanupRef = useRef<(() => void) | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const handleEsc = (e: globalThis.KeyboardEvent) => {
@@ -30,25 +31,33 @@ export default function MeshPreviewModal({
     const canvas = canvasRef.current;
     if (!canvas || !mesh.glbUrl) {
       if (!mesh.glbUrl) setLoadError("No GLB URL available for this mesh");
+      setLoading(false);
       return;
     }
 
     setLoadError(null);
+    setLoading(true);
     let cancelled = false;
+    let animId = 0;
 
-    const width = canvas.clientWidth || 400;
-    const height = canvas.clientHeight || 400;
+    const rect = canvas.getBoundingClientRect();
+    const width = Math.round(rect.width) || 400;
+    const height = Math.round(rect.height) || 400;
 
     let renderer: THREE.WebGLRenderer;
     try {
       renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
     } catch {
       setLoadError("Failed to create WebGL context");
+      setLoading(false);
       return;
     }
 
-    renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    const dpr = Math.min(window.devicePixelRatio, 2);
+    renderer.setSize(width, height, false);
+    renderer.setPixelRatio(dpr);
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
 
     const scene = new THREE.Scene();
@@ -63,14 +72,16 @@ export default function MeshPreviewModal({
     controls.autoRotate = true;
     controls.autoRotateSpeed = 2;
 
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-    scene.add(ambientLight);
-    const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
     dirLight.position.set(3, 5, 4);
     scene.add(dirLight);
-    const fillLight = new THREE.DirectionalLight(0xaaccff, 0.4);
+    const fillLight = new THREE.DirectionalLight(0xaaccff, 0.6);
     fillLight.position.set(-3, 0, -2);
     scene.add(fillLight);
+    const backLight = new THREE.DirectionalLight(0xffddaa, 0.4);
+    backLight.position.set(0, -2, -4);
+    scene.add(backLight);
 
     const gridHelper = new THREE.GridHelper(10, 20, 0x333355, 0x222244);
     scene.add(gridHelper);
@@ -87,19 +98,23 @@ export default function MeshPreviewModal({
         const maxDim = Math.max(size.x, size.y, size.z);
         const scale = maxDim > 0 ? 2 / maxDim : 1;
         model.scale.setScalar(scale);
-        model.position.sub(center.multiplyScalar(scale));
+        model.position.sub(center.clone().multiplyScalar(scale));
         model.position.y += (size.y * scale) / 2;
         scene.add(model);
         controls.target.set(0, (size.y * scale) / 2, 0);
         controls.update();
+        setLoading(false);
       },
       undefined,
-      () => {
-        if (!cancelled) setLoadError("Failed to load 3D model");
+      (err) => {
+        if (!cancelled) {
+          console.error("GLB load error:", err);
+          setLoadError("Failed to load 3D model");
+          setLoading(false);
+        }
       },
     );
 
-    let animId = 0;
     const animate = () => {
       if (cancelled) return;
       animId = requestAnimationFrame(animate);
@@ -108,16 +123,11 @@ export default function MeshPreviewModal({
     };
     animate();
 
-    cleanupRef.current = () => {
+    return () => {
+      cancelled = true;
       cancelAnimationFrame(animId);
       controls.dispose();
       renderer.dispose();
-    };
-
-    return () => {
-      cancelled = true;
-      cleanupRef.current?.();
-      cleanupRef.current = null;
     };
   }, [mesh.glbUrl]);
 
@@ -129,7 +139,7 @@ export default function MeshPreviewModal({
     <div
       ref={backdropRef}
       onClick={handleBackdropClick}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
+      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80"
       style={{ animation: "fadeIn 0.15s ease-out" }}
     >
       <div className="flex flex-col items-center gap-3 max-w-[600px] w-full mx-4">
@@ -161,11 +171,19 @@ export default function MeshPreviewModal({
               </div>
             </div>
           ) : (
-            <canvas
-              ref={canvasRef}
-              className="w-full aspect-square"
-              style={{ display: "block" }}
-            />
+            <div className="relative">
+              <canvas
+                ref={canvasRef}
+                className="w-full aspect-square block"
+              />
+              {loading && (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <svg width="28" height="28" viewBox="0 0 24 24" className="animate-spin">
+                    <circle cx="12" cy="12" r="10" fill="none" stroke="var(--color-accent)" strokeWidth="2" strokeDasharray="40" strokeLinecap="round" opacity="0.5" />
+                  </svg>
+                </div>
+              )}
+            </div>
           )}
         </div>
 
@@ -179,5 +197,26 @@ export default function MeshPreviewModal({
         </div>
       </div>
     </div>
+  );
+}
+
+export default function MeshPreviewModal({
+  mesh,
+  onClose,
+}: {
+  mesh: GeneratedMesh;
+  onClose: () => void;
+}) {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) return null;
+
+  return createPortal(
+    <MeshViewer mesh={mesh} onClose={onClose} />,
+    document.body,
   );
 }

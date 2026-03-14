@@ -1635,7 +1635,7 @@ export function ChatPanel({
 
   return (
     <div className="flex h-full flex-col bg-[var(--color-bg)]">
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto overflow-x-hidden px-3 py-3 space-y-3">
         {isEmpty ? (
           <div className="flex flex-col items-center justify-center h-full gap-4 px-2">
             <div className="text-center space-y-2">
