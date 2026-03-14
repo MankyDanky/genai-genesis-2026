@@ -408,6 +408,7 @@ export function ChatPanel({
   const modeMenuRef = useRef<HTMLDivElement>(null);
   const modeMenuPopupRef = useRef<HTMLDivElement>(null);
   const modeMenuButtonRef = useRef<HTMLButtonElement>(null);
+  const planListRef = useRef<HTMLDivElement>(null);
   const mentionItemRefs = useRef<Map<string, HTMLButtonElement | null>>(new Map());
   const processedToolPayloadRef = useRef<Map<string, string>>(new Map());
   const [input, setInput] = useState("");
@@ -420,6 +421,7 @@ export function ChatPanel({
   const [modeMenuPos, setModeMenuPos] = useState({ x: 0, y: 0 });
   const [isPlanCollapsed, setIsPlanCollapsed] = useState(false);
   const [dragTodoId, setDragTodoId] = useState<string | null>(null);
+  const [planDropTarget, setPlanDropTarget] = useState<{ id: string; position: "before" | "after" } | null>(null);
   const planningMode = composerMode === "plan";
   const canPortal = typeof document !== "undefined";
 
@@ -928,7 +930,7 @@ export function ChatPanel({
     writePlanningTodos(false, next);
   };
 
-  const handleReorderTodos = (targetId: string) => {
+  const handleReorderTodos = (targetId: string, position: "before" | "after" = "before") => {
     if (!dragTodoId || dragTodoId === targetId) return;
     const fromIndex = planningTodos.findIndex((todo) => todo.id === dragTodoId);
     const toIndex = planningTodos.findIndex((todo) => todo.id === targetId);
@@ -937,8 +939,24 @@ export function ChatPanel({
     const next = [...planningTodos];
     const [moved] = next.splice(fromIndex, 1);
     if (!moved) return;
-    next.splice(toIndex, 0, moved);
+    let insertIndex = toIndex + (position === "after" ? 1 : 0);
+    if (fromIndex < insertIndex) insertIndex -= 1;
+    insertIndex = Math.max(0, Math.min(next.length, insertIndex));
+    next.splice(insertIndex, 0, moved);
     writePlanningTodos(false, next);
+  };
+
+  const autoScrollPlanList = (clientY: number) => {
+    const listEl = planListRef.current;
+    if (!listEl) return;
+    const rect = listEl.getBoundingClientRect();
+    const threshold = 28;
+    const speed = 14;
+    if (clientY - rect.top < threshold) {
+      listEl.scrollTop -= speed;
+    } else if (rect.bottom - clientY < threshold) {
+      listEl.scrollTop += speed;
+    }
   };
 
   const isEmpty = messages.length === 0;
@@ -1106,24 +1124,49 @@ export function ChatPanel({
                     No tasks yet. Add one to start planning.
                   </div>
                 ) : (
-                  <div className="max-h-48 overflow-y-auto p-1.5 space-y-1.5">
+                  <div
+                    ref={planListRef}
+                    className="max-h-48 overflow-y-auto p-1.5 space-y-1.5"
+                    onDragOver={(e) => {
+                      if (!dragTodoId) return;
+                      e.preventDefault();
+                      autoScrollPlanList(e.clientY);
+                    }}
+                  >
                     {planningTodos.map((todo) => (
                       <div
                         key={todo.id}
                         draggable
                         onDragStart={() => setDragTodoId(todo.id)}
-                        onDragEnd={() => setDragTodoId(null)}
+                        onDragEnd={() => {
+                          setDragTodoId(null);
+                          setPlanDropTarget(null);
+                        }}
                         onDragOver={(e) => {
                           if (!dragTodoId) return;
                           e.preventDefault();
+                          autoScrollPlanList(e.clientY);
+                          const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+                          const middle = rect.top + rect.height / 2;
+                          const position: "before" | "after" = e.clientY < middle ? "before" : "after";
+                          setPlanDropTarget({ id: todo.id, position });
                         }}
                         onDrop={(e) => {
                           e.preventDefault();
-                          handleReorderTodos(todo.id);
+                          const position =
+                            planDropTarget?.id === todo.id ? planDropTarget.position : "before";
+                          handleReorderTodos(todo.id, position);
                           setDragTodoId(null);
+                          setPlanDropTarget(null);
                         }}
-                        className="border border-[var(--color-border)] bg-[var(--color-surface-light)] p-1.5 space-y-1.5 cursor-grab active:cursor-grabbing"
+                        className="relative border border-[var(--color-border)] bg-[var(--color-surface-light)] p-1.5 space-y-1.5 cursor-grab active:cursor-grabbing"
                       >
+                        {dragTodoId && planDropTarget?.id === todo.id && planDropTarget.position === "before" ? (
+                          <div className="absolute -top-[2px] left-1 right-1 h-[2px] bg-[var(--color-accent)]" />
+                        ) : null}
+                        {dragTodoId && planDropTarget?.id === todo.id && planDropTarget.position === "after" ? (
+                          <div className="absolute -bottom-[2px] left-1 right-1 h-[2px] bg-[var(--color-accent)]" />
+                        ) : null}
                         <div className="flex items-center gap-1.5">
                           <span className="text-[9px] text-[var(--color-text-muted)]">⋮⋮</span>
                           <select
