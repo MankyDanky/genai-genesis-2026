@@ -574,16 +574,10 @@ export function ChatPanel({ currentCode, onCodeUpdate, generatedImages, addImage
             </svg>
           </button>
         </form>
-        <div className="flex items-center justify-between px-1 pt-1">
+        <div className="px-1 pt-1">
           <span className="text-[9px] text-[var(--color-text-muted)]">
             Enter to send, Shift+Enter for newline
           </span>
-          {currentCode && (
-            <span className="text-[9px] text-[var(--color-success)] flex items-center gap-1">
-              <span className="w-1.5 h-1.5 bg-[var(--color-success)] rounded-full inline-block" />
-              Game loaded
-            </span>
-          )}
         </div>
       </div>
     </div>
