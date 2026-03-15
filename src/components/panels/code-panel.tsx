@@ -922,34 +922,40 @@ export function CodePanel() {
   }, [importFolderEntries]);
 
   const handleDragEnter = useCallback((e: React.DragEvent<HTMLDivElement>) => {
-    if (!e.dataTransfer?.types?.includes("Files")) return;
+    if (!draggedFilePath && !e.dataTransfer?.types?.includes("Files")) return;
     e.preventDefault();
     dragDepthRef.current += 1;
     setIsFolderDropActive(true);
-  }, []);
+  }, [draggedFilePath]);
 
   const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
-    if (!e.dataTransfer?.types?.includes("Files")) return;
+    if (!draggedFilePath && !e.dataTransfer?.types?.includes("Files")) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "copy";
     if (!isFolderDropActive) setIsFolderDropActive(true);
-  }, [isFolderDropActive]);
+  }, [draggedFilePath, isFolderDropActive]);
 
   const handleDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => {
-    if (!e.dataTransfer?.types?.includes("Files")) return;
+    if (!draggedFilePath && !e.dataTransfer?.types?.includes("Files")) return;
     e.preventDefault();
     dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
     if (dragDepthRef.current === 0) {
       setIsFolderDropActive(false);
     }
-  }, []);
+  }, [draggedFilePath]);
 
   const handleDrop = useCallback(async (e: React.DragEvent<HTMLDivElement>) => {
-    if (!e.dataTransfer?.files?.length) return;
     e.preventDefault();
     dragDepthRef.current = 0;
     setIsFolderDropActive(false);
 
+    if (draggedFilePath) {
+      moveFileToDirectory(draggedFilePath, "");
+      setDraggedFilePath(null);
+      return;
+    }
+
+    if (!e.dataTransfer?.files?.length) return;
     const files = Array.from(e.dataTransfer.files);
     const entries = files.map((file) => {
       const withRelative = file as File & { webkitRelativePath?: string };
@@ -961,7 +967,7 @@ export function CodePanel() {
       };
     });
     await importFolderEntries(entries);
-  }, [importFolderEntries]);
+  }, [draggedFilePath, importFolderEntries, moveFileToDirectory]);
 
   useEffect(() => {
     const input = folderUploadInputRef.current as (HTMLInputElement & { webkitdirectory?: boolean; directory?: boolean }) | null;
@@ -1054,10 +1060,35 @@ export function CodePanel() {
           </div>
         </div>
 
+        <button
+          type="button"
+          onClick={() => {
+            setSelectedFolderPath(null);
+            setActiveCodePath(null);
+          }}
+          onDragOver={(e) => {
+            if (!draggedFilePath) return;
+            e.preventDefault();
+          }}
+          onDrop={(e) => {
+            if (!draggedFilePath) return;
+            e.preventDefault();
+            moveFileToDirectory(draggedFilePath, "");
+            setDraggedFilePath(null);
+          }}
+          className={`w-full text-left px-2 py-1 text-[9px] uppercase tracking-[0.12em] border-b border-[var(--color-border)] ${
+            selectedFolderPath === null
+              ? "text-[var(--color-accent)] bg-[var(--color-accent-glow)]"
+              : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-light)]"
+          }`}
+        >
+          Root
+        </button>
+
         {isFolderDropActive ? (
           <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center border-2 border-dashed border-[var(--color-accent)] bg-[var(--color-accent-glow)]/20">
             <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--color-accent)]">
-              Drop folder to import files
+              Drop files/folder to import or move to root
             </div>
           </div>
         ) : null}
