@@ -223,7 +223,7 @@ export function ImagesPanel({ images, onAddImage }: ImagesPanelProps) {
 
   if (images.length === 0) {
     return (
-      <div className="relative flex h-full flex-col bg-[var(--color-bg)]">
+      <div className="absolute inset-0 flex flex-col bg-[var(--color-bg)]">
         <div className="absolute top-2 right-2 z-10">
           <ImportButton onAddImage={onAddImage} />
         </div>
@@ -249,12 +249,12 @@ export function ImagesPanel({ images, onAddImage }: ImagesPanelProps) {
   }
 
   return (
-    <div className="h-full w-full bg-[var(--color-bg)] flex flex-col overflow-hidden">
-      <div className="shrink-0 px-2 py-2 flex justify-end">
+    <div className="absolute inset-0 bg-[var(--color-bg)] flex flex-col">
+      <div className="absolute top-2 right-2 z-10">
         <ImportButton onAddImage={onAddImage} />
       </div>
 
-      <div className="flex-1 overflow-y-auto px-2 pb-2">
+      <div className="flex-1 overflow-y-auto px-2 py-2">
         <div className="grid grid-cols-2 gap-2">
           {images.map((image, i) => (
             <div
