@@ -96,6 +96,76 @@ function isLikelyBinaryPath(path: string): boolean {
   return false;
 }
 
+function writeAscii(target: Uint8Array, offset: number, length: number, value: string) {
+  const encoded = new TextEncoder().encode(value);
+  target.set(encoded.slice(0, length), offset);
+}
+
+function writeOctal(target: Uint8Array, offset: number, length: number, value: number) {
+  const oct = Math.max(0, value).toString(8);
+  const padded = oct.padStart(Math.max(0, length - 2), "0");
+  const field = `${padded}\0 `;
+  writeAscii(target, offset, length, field.slice(-length));
+}
+
+function splitTarPath(path: string): { name: string; prefix: string } {
+  const normalized = normalizeUserPath(path);
+  if (normalized.length <= 100) return { name: normalized, prefix: "" };
+
+  const parts = normalized.split("/");
+  for (let i = parts.length - 1; i > 0; i -= 1) {
+    const prefix = parts.slice(0, i).join("/");
+    const name = parts.slice(i).join("/");
+    if (prefix.length <= 155 && name.length <= 100) {
+      return { name, prefix };
+    }
+  }
+
+  return {
+    name: normalized.slice(-100),
+    prefix: normalized.slice(0, Math.max(0, normalized.length - 100)).slice(0, 155),
+  };
+}
+
+function buildTarBlob(files: Array<{ path: string; content: string }>): Blob {
+  const encoder = new TextEncoder();
+  const blocks: Uint8Array[] = [];
+
+  for (const file of files) {
+    const { name, prefix } = splitTarPath(file.path);
+    const data = encoder.encode(file.content ?? "");
+    const header = new Uint8Array(512);
+
+    writeAscii(header, 0, 100, name);
+    writeOctal(header, 100, 8, 0o644);
+    writeOctal(header, 108, 8, 0);
+    writeOctal(header, 116, 8, 0);
+    writeOctal(header, 124, 12, data.length);
+    writeOctal(header, 136, 12, Math.floor(Date.now() / 1000));
+    writeAscii(header, 148, 8, "        ");
+    writeAscii(header, 156, 1, "0");
+    writeAscii(header, 257, 6, "ustar\0");
+    writeAscii(header, 263, 2, "00");
+    writeAscii(header, 265, 32, "root");
+    writeAscii(header, 297, 32, "root");
+    writeAscii(header, 345, 155, prefix);
+
+    let checksum = 0;
+    for (const byte of header) checksum += byte;
+    const checkField = `${checksum.toString(8).padStart(6, "0")}\0 `;
+    writeAscii(header, 148, 8, checkField);
+
+    blocks.push(header);
+    blocks.push(data);
+
+    const pad = (512 - (data.length % 512)) % 512;
+    if (pad > 0) blocks.push(new Uint8Array(pad));
+  }
+
+  blocks.push(new Uint8Array(1024));
+  return new Blob(blocks, { type: "application/x-tar" });
+}
+
 function getPrismLanguage(path: string): string {
   const lower = path.toLowerCase();
   if (lower.endsWith(".html") || lower.endsWith(".htm")) return "markup";
@@ -976,6 +1046,22 @@ export function CodePanel() {
     input.directory = true;
   }, []);
 
+  const handleDownloadAll = useCallback(() => {
+    if (projectFiles.length === 0) return;
+    const archive = buildTarBlob(
+      projectFiles.map((file) => ({
+        path: file.path,
+        content: file.content,
+      }))
+    );
+    const url = URL.createObjectURL(archive);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `game-forge-project-${Date.now()}.tar`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [projectFiles]);
+
   const openContextMenu = (e: React.MouseEvent, target: ContextTarget) => {
     e.preventDefault();
     if (target.kind === "file") {
@@ -1028,6 +1114,13 @@ export function CodePanel() {
                 className="hidden"
                 onChange={handleImportInputChange}
               />
+              <button
+                type="button"
+                onClick={handleDownloadAll}
+                className="px-1.5 py-0.5 text-[9px] uppercase tracking-wider border border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+              >
+                Download
+              </button>
               <button
                 type="button"
                 onClick={() => fileUploadInputRef.current?.click()}
