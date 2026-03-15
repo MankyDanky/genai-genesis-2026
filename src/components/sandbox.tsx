@@ -3,6 +3,11 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from "react";
 import type { AudioTrack, GeneratedMesh } from "@/lib/game-forge-context";
 import type { RuntimeEnvMap } from "@/lib/runtime-env";
+import {
+  injectCompatibilityLayer,
+  injectPointerLockShim,
+  injectFocusBridge,
+} from "@/lib/iframe-injections";
 
 const CODE_SYMBOLS = [
   { char: "{", x: 8, size: 18, duration: 4.2, delay: 0 },
@@ -204,41 +209,6 @@ function ShareBar({
   );
 }
 
-/**
- * Injects cross-browser/cross-device compatibility CSS and meta tags
- * to ensure the iframe game works on all browsers and devices.
- */
-function injectCompatibilityLayer(html: string): string {
-  const compatCSS = `<style data-gameforge-compat>
-*, *::before, *::after { box-sizing: border-box; }
-html, body {
-  margin: 0; padding: 0; overflow: hidden; width: 100%; height: 100%;
-  touch-action: none;
-  -webkit-touch-callout: none;
-  -webkit-user-select: none;
-  user-select: none;
-  -webkit-tap-highlight-color: transparent;
-}
-canvas { display: block; touch-action: none; }
-</style>`;
-
-  const compatMeta = `<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">`;
-
-  const hasViewport = /name\s*=\s*["']viewport["']/i.test(html);
-
-  if (/<head[^>]*>/i.test(html)) {
-    let result = html;
-    if (!hasViewport) {
-      result = result.replace(/<head([^>]*)>/i, `<head$1>${compatMeta}`);
-    }
-    // Insert compat CSS right after <head> (after potential meta injection)
-    result = result.replace(/<head([^>]*)>/i, `<head$1>${compatCSS}`);
-    return result;
-  }
-
-  return `${!hasViewport ? compatMeta : ""}${compatCSS}${html}`;
-}
-
 function buildInstrumentedSrcDoc(code: string, session: string): string {
   const bridge = `<script>(function(){\n  var SESSION = "${session}";\n  var hasError = false;\n  function safe(v){\n    if (typeof v === "string") return v;\n    try { return JSON.stringify(v); } catch (_e) { return String(v); }\n  }\n  function send(level,args,source){\n    try{\n      parent.postMessage({\n        __gameForgeConsole: true,\n        session: SESSION,\n        level: level,\n        source: source || "console",\n        args: Array.isArray(args) ? args.map(safe) : [safe(args)]\n      }, "*");\n    }catch(_err){}\n  }\n  function sendLifecycle(type){\n    try{\n      parent.postMessage({ __gameForgeLifecycle: true, session: SESSION, type: type }, "*");\n    }catch(_err){}\n  }\n  ["log","info","warn","error"].forEach(function(level){\n    var orig = console[level];\n    console[level] = function(){\n      var args = Array.prototype.slice.call(arguments);\n      send(level,args,"console");\n      return orig.apply(console,args);\n    };\n  });\n  window.addEventListener("error", function(e){\n    hasError = true;\n    send("error", [e.message || "Unknown error", e.filename || "", String(e.lineno || 0) + ":" + String(e.colno || 0)], "error");\n    sendLifecycle("frame-error");\n  });\n  window.addEventListener("unhandledrejection", function(e){\n    hasError = true;\n    var reason = e.reason && e.reason.message ? e.reason.message : e.reason;\n    send("error", ["Unhandled promise rejection", safe(reason)], "unhandledrejection");\n    sendLifecycle("frame-error");\n  });\n  document.addEventListener("DOMContentLoaded", function(){\n    setTimeout(function(){ if (!hasError) sendLifecycle("frame-ready"); }, 150);\n  });\n})();<\/script>`;
 
@@ -249,59 +219,6 @@ function buildInstrumentedSrcDoc(code: string, session: string): string {
     return code.replace(/<body([^>]*)>/i, `<body$1>${bridge}`);
   }
   return `${bridge}${code}`;
-}
-
-/**
- * Patches Element.requestPointerLock so that failures (e.g. sandbox restrictions)
- * are silently caught instead of throwing and crashing the game.
- * Injected before any game code runs.
- */
-function injectPointerLockShim(html: string): string {
-  const shim = `<script>(function(){
-  var orig = Element.prototype.requestPointerLock;
-  if (!orig) return;
-  Element.prototype.requestPointerLock = function() {
-    try {
-      var result = orig.apply(this, arguments);
-      if (result && typeof result.catch === "function") {
-        return result.catch(function() {});
-      }
-      return result;
-    } catch(_e) {}
-  };
-})();<\/script>`;
-
-  if (/<head[^>]*>/i.test(html)) {
-    return html.replace(/<head([^>]*)>/i, `<head$1>${shim}`);
-  }
-  if (/<body[^>]*>/i.test(html)) {
-    return html.replace(/<body([^>]*)>/i, `<body$1>${shim}`);
-  }
-  return `${shim}${html}`;
-}
-
-/**
- * Injects a script that ensures the iframe window grabs focus on any
- * pointerdown/click. This is critical when embedded inside Dockview,
- * which steals focus to the panel container on activation.
- */
-function injectFocusBridge(html: string): string {
-  const script = `<script>(function(){
-  function grab(){window.focus();}
-  document.addEventListener("pointerdown",grab,true);
-  document.addEventListener("click",grab,true);
-  window.addEventListener("load",function(){
-    setTimeout(grab,50);
-  });
-})();<\/script>`;
-
-  if (/<head[^>]*>/i.test(html)) {
-    return html.replace(/<head([^>]*)>/i, `<head$1>${script}`);
-  }
-  if (/<body[^>]*>/i.test(html)) {
-    return html.replace(/<body([^>]*)>/i, `<body$1>${script}`);
-  }
-  return `${script}${html}`;
 }
 
 const SOUND_BRIDGE_SCRIPT = `<script>
@@ -706,13 +623,15 @@ export function Sandbox({ code, isGenerating = false, audioTracks = EMPTY_AUDIO_
     onReload?.();
   }, [onReload]);
 
-  // Focus the active iframe's contentWindow. Uses setTimeout(0) to run
-  // after Dockview's synchronous focus-steal on panel activation.
+  // Focus the active iframe's contentWindow. Uses rAF + setTimeout(0) to
+  // reliably run after Dockview's synchronous focus-steal on panel activation.
   const focusActiveIframe = useCallback(() => {
-    setTimeout(() => {
-      const ref = activeIndexRef.current === 0 ? iframe0Ref : iframe1Ref;
-      try { ref.current?.contentWindow?.focus(); } catch (_e) { /* cross-origin */ }
-    }, 0);
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        const ref = activeIndexRef.current === 0 ? iframe0Ref : iframe1Ref;
+        try { ref.current?.contentWindow?.focus(); } catch (_e) { /* cross-origin */ }
+      }, 0);
+    });
   }, []);
 
   const pendingMeshes = generatedMeshes.filter(
@@ -810,6 +729,7 @@ export function Sandbox({ code, isGenerating = false, audioTracks = EMPTY_AUDIO_
         className="border-none"
         style={activeIndex === 0 ? visibleStyle : hiddenStyle}
         tabIndex={activeIndex === 0 ? 0 : -1}
+        onLoad={focusActiveIframe}
       />
       <iframe
         ref={iframe1Ref}
@@ -820,6 +740,7 @@ export function Sandbox({ code, isGenerating = false, audioTracks = EMPTY_AUDIO_
         className="border-none"
         style={activeIndex === 1 ? visibleStyle : hiddenStyle}
         tabIndex={activeIndex === 1 ? 0 : -1}
+        onLoad={focusActiveIframe}
       />
       {hasPendingMeshes && (
         <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 pointer-events-none animate-[fadeIn_0.3s_ease-out]">

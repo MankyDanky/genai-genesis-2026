@@ -251,6 +251,10 @@ export function DockLayout({ onShowSplash }: { onShowSplash?: () => void }) {
     prevCodeSnapshotRef.current = currentCode;
     if (isFirstRender) return;
 
+    // Don't steal focus from the game iframe when it's the active panel
+    const activePanel = api.activePanel;
+    if (activePanel?.id === "sandbox") return;
+
     const codePanel = api.panels.find((p) => p.id === "code");
     if (codePanel) {
       const panelApi = codePanel as unknown as { api?: { setActive?: () => void } };
