@@ -13,6 +13,7 @@ import "prismjs/components/prism-typescript";
 import "prismjs/components/prism-tsx";
 import "prismjs/components/prism-json";
 import { useGameForge } from "@/lib/game-forge-context";
+import { computeHighlightedDiff, type DiffLine } from "@/lib/diff-utils";
 import styles from "./code-panel.module.css";
 
 interface FileNode {
@@ -63,7 +64,7 @@ function normalizeUserPath(name: string): string {
   return name.trim().replace(/^\.\//, "").replace(/\\/g, "/").replace(/^\/+/, "");
 }
 
-function getPrismLanguage(path: string): keyof typeof Prism.languages {
+function getPrismLanguage(path: string): string {
   const lower = path.toLowerCase();
   if (lower.endsWith(".html") || lower.endsWith(".htm")) return "markup";
   if (lower.endsWith(".css")) return "css";
@@ -389,14 +390,82 @@ function TreeView({
   );
 }
 
+function DiffView({
+  lines,
+}: {
+  lines: DiffLine[];
+}) {
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const firstChangeRef = useRef<HTMLDivElement>(null);
+  const prevDiffLenRef = useRef<number>(0);
+
+  useEffect(() => {
+    if (!firstChangeRef.current) return;
+    if (prevDiffLenRef.current === 0 && lines.length > 0) {
+      firstChangeRef.current.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+    prevDiffLenRef.current = lines.length;
+  }, [lines]);
+
+  const firstChangeIdx = useMemo(() => {
+    return lines.findIndex((line) => line.type !== "context");
+  }, [lines]);
+
+  return (
+    <div ref={scrollContainerRef} className={`flex-1 min-h-0 overflow-auto font-[var(--font-mono)] text-[11px] leading-[1.25rem] ${styles.editorRoot}`}>
+      {lines.map((line, i) => {
+        const refProp = i === firstChangeIdx ? firstChangeRef : undefined;
+
+        const bgClass =
+          line.type === "added"
+            ? "bg-[rgba(63,185,80,0.08)] border-l-2 border-l-[var(--color-success)]"
+            : line.type === "removed"
+              ? "bg-[rgba(248,81,73,0.08)] border-l-2 border-l-[var(--color-danger)]"
+              : "border-l-2 border-l-transparent";
+
+        const prefix =
+          line.type === "added" ? "+" : line.type === "removed" ? "-" : " ";
+
+        const prefixClass =
+          line.type === "added"
+            ? "text-[var(--color-success)]"
+            : line.type === "removed"
+              ? "text-[var(--color-danger)]"
+              : "text-[var(--color-text-muted)]";
+
+        return (
+          <div key={i} ref={refProp} className={`flex ${bgClass}`}>
+            <span className="w-10 shrink-0 text-right pr-1 text-[var(--color-text-muted)] opacity-40 select-none">
+              {line.oldLineNum ?? ""}
+            </span>
+            <span className="w-10 shrink-0 text-right pr-2 text-[var(--color-text-muted)] opacity-40 select-none">
+              {line.newLineNum ?? ""}
+            </span>
+            <span className={`shrink-0 w-4 text-center select-none ${prefixClass}`}>
+              {prefix}
+            </span>
+            <span
+              className="flex-1 whitespace-pre-wrap break-all"
+              dangerouslySetInnerHTML={{ __html: line.html || "&nbsp;" }}
+            />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function CodePanel() {
   const {
     projectFiles,
+    previousProjectFiles,
     pendingFileWrites,
     activeCodePath,
     setActiveCodePath,
     updateProjectFile,
     deleteProjectFile,
+    streamingCode,
+    currentCode,
   } = useGameForge();
   const codeFiles = useMemo(() => projectFiles.filter((file) => file.kind !== "asset"), [projectFiles]);
   const pendingByPath = useMemo(
@@ -425,6 +494,8 @@ export function CodePanel() {
     }
     return Array.from(byPath.values());
   }, [codeFiles, pendingFileWrites]);
+
+  const [viewMode, setViewMode] = useState<"edit" | "diff">("edit");
 
   const explorerRef = useRef<HTMLDivElement>(null);
   const createInputRef = useRef<HTMLInputElement>(null);
@@ -466,10 +537,75 @@ export function CodePanel() {
     return next;
   }, [effectiveSelectedFilePath, expanded]);
   const highlightCode = useCallback((code: string) => {
-    const language = selectedFile ? getPrismLanguage(selectedFile.path) : "plain";
+    const language: string = selectedFile ? getPrismLanguage(selectedFile.path) : "plain";
     const grammar = Prism.languages[language] ?? Prism.languages.plain ?? Prism.languages.plaintext;
     return Prism.highlight(code, grammar, language);
   }, [selectedFile]);
+
+  // Per-file diff computation
+  const activeFile = effectiveSelectedFilePath;
+  const { fileDiff, isDiffStreaming, diffStats } = useMemo(() => {
+    if (!activeFile) return { fileDiff: null, isDiffStreaming: false, diffStats: null };
+
+    let oldContent = "";
+    let newContent = "";
+    let streaming = false;
+
+    // Case 1: streaming via update_sandbox for index.html
+    if (streamingCode && activeFile === "index.html") {
+      oldContent = currentCode ?? "";
+      newContent = streamingCode;
+      streaming = true;
+    }
+    // Case 2: pending file write with content
+    else {
+      const pendingEntry = pendingFileWrites.find((e) => e.path === activeFile);
+      if (pendingEntry && typeof pendingEntry.content === "string") {
+        const existing = projectFiles.find((f) => f.path === activeFile);
+        oldContent = existing?.content ?? "";
+        newContent = pendingEntry.content;
+        streaming = true;
+      }
+      // Case 3: finalized diff (previous vs current)
+      else {
+        const prevFile = previousProjectFiles.find((f) => f.path === activeFile);
+        const curFile = previewCodeFiles.find((f) => f.path === activeFile);
+        oldContent = prevFile?.content ?? "";
+        newContent = curFile?.content ?? "";
+      }
+    }
+
+    if (!newContent && !oldContent) return { fileDiff: null, isDiffStreaming: false, diffStats: null };
+
+    const language = getPrismLanguage(activeFile);
+    const grammar = Prism.languages[language] ?? Prism.languages.plain ?? Prism.languages.plaintext;
+    const highlight = (code: string) => Prism.highlight(code, grammar, language);
+
+    const lines = computeHighlightedDiff(oldContent, newContent, highlight);
+
+    let added = 0;
+    let removed = 0;
+    for (const line of lines) {
+      if (line.type === "added") added++;
+      else if (line.type === "removed") removed++;
+    }
+
+    return {
+      fileDiff: lines,
+      isDiffStreaming: streaming,
+      diffStats: added > 0 || removed > 0 ? { added, removed } : null,
+    };
+  }, [activeFile, streamingCode, currentCode, pendingFileWrites, projectFiles, previousProjectFiles, previewCodeFiles]);
+
+  // Auto-switch to diff mode when streaming starts (derived state, no effect needed)
+  const isCurrentlyStreaming = !!streamingCode || pendingFileWrites.some((e) => typeof e.content === "string");
+  const [prevStreaming, setPrevStreaming] = useState(false);
+  if (isCurrentlyStreaming && !prevStreaming) {
+    setViewMode("diff");
+  }
+  if (isCurrentlyStreaming !== prevStreaming) {
+    setPrevStreaming(isCurrentlyStreaming);
+  }
 
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
 
@@ -788,29 +924,88 @@ export function CodePanel() {
       <div className="flex-1 flex flex-col min-w-0">
         {selectedFile ? (
           <>
-            <div className="px-3 py-1.5 border-b border-[var(--color-border)] text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
-              {selectedFile.path}
+            <div className="px-3 py-1.5 border-b border-[var(--color-border)] flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
+                  {selectedFile.path}
+                </span>
+                {isDiffStreaming && viewMode === "diff" ? (
+                  <span className="text-[10px] text-[var(--color-accent)] animate-pulse">Streaming</span>
+                ) : null}
+                {viewMode === "diff" && diffStats ? (
+                  <span className="text-[10px]">
+                    <span className="text-[var(--color-success)]">+{diffStats.added}</span>
+                    {" / "}
+                    <span className="text-[var(--color-danger)]">-{diffStats.removed}</span>
+                  </span>
+                ) : null}
+              </div>
+              <div className="flex border border-[var(--color-border)]">
+                <button
+                  type="button"
+                  onClick={() => setViewMode("edit")}
+                  className={`px-2 py-0.5 text-[9px] uppercase tracking-wider ${
+                    viewMode === "edit"
+                      ? "bg-[var(--color-surface-light)] text-[var(--color-text)]"
+                      : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                  }`}
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode("diff")}
+                  className={`px-2 py-0.5 text-[9px] uppercase tracking-wider border-l border-[var(--color-border)] ${
+                    viewMode === "diff"
+                      ? "bg-[var(--color-surface-light)] text-[var(--color-text)]"
+                      : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                  }`}
+                >
+                  Diff
+                </button>
+              </div>
             </div>
-            <div className={`flex-1 min-h-0 overflow-auto ${styles.editorRoot}`}>
-              <Editor
-                value={selectedFile.content}
-                onValueChange={(value) => updateProjectFile(selectedFile.path, value)}
-                highlight={highlightCode}
-                textareaClassName={styles.editorTextarea}
-                className={styles.editor}
-                padding={12}
-                style={{
-                  minHeight: "100%",
-                  fontFamily: "var(--font-mono)",
-                  fontSize: 11,
-                  lineHeight: "1.25rem",
-                  background: "var(--color-bg)",
-                  color: "var(--color-text-secondary)",
-                  outline: "none",
-                }}
-                spellCheck={false}
-              />
-            </div>
+            {viewMode === "edit" ? (
+              <div className={`flex-1 min-h-0 overflow-auto ${styles.editorRoot}`}>
+                <Editor
+                  value={selectedFile.content}
+                  onValueChange={(value) => updateProjectFile(selectedFile.path, value)}
+                  highlight={highlightCode}
+                  textareaClassName={styles.editorTextarea}
+                  className={styles.editor}
+                  padding={12}
+                  style={{
+                    minHeight: "100%",
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 11,
+                    lineHeight: "1.25rem",
+                    background: "var(--color-bg)",
+                    color: "var(--color-text-secondary)",
+                    outline: "none",
+                  }}
+                  spellCheck={false}
+                />
+              </div>
+            ) : fileDiff && fileDiff.length > 0 ? (
+              <DiffView lines={fileDiff} />
+            ) : (
+              <div className="flex-1 flex items-center justify-center">
+                <div className="text-center animate-[fadeIn_0.4s_ease-out] space-y-3">
+                  <div className="mx-auto w-10 h-10 border border-[var(--color-border-light)] flex items-center justify-center">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--color-text-muted)" strokeWidth="1.2">
+                      <path d="M5 8l2 2 4-4" />
+                      <circle cx="8" cy="8" r="6" />
+                    </svg>
+                  </div>
+                  <p className="text-[11px] text-[var(--color-text-muted)] uppercase tracking-[0.15em] font-semibold">
+                    No Changes
+                  </p>
+                  <p className="text-[10px] text-[var(--color-text-muted)] opacity-60">
+                    No differences detected
+                  </p>
+                </div>
+              </div>
+            )}
           </>
         ) : (
           <div className="relative flex-1 flex items-center justify-center overflow-hidden">
@@ -845,14 +1040,14 @@ export function CodePanel() {
             <>
               <button
                 type="button"
-                onClick={() => startCreate("file", contextMenu.target.path)}
+                onClick={() => { const t = contextMenu.target; if (t.kind !== "root") startCreate("file", t.path); }}
                 className="w-full text-left px-2 py-1.5 text-[10px] uppercase tracking-wider text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-light)]"
               >
                 Add File
               </button>
               <button
                 type="button"
-                onClick={() => startCreate("folder", contextMenu.target.path)}
+                onClick={() => { const t = contextMenu.target; if (t.kind !== "root") startCreate("folder", t.path); }}
                 className="w-full text-left px-2 py-1.5 text-[10px] uppercase tracking-wider text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-light)]"
               >
                 Add Folder
@@ -860,7 +1055,8 @@ export function CodePanel() {
               <button
                 type="button"
                 onClick={() => {
-                  deleteFolder(contextMenu.target.path);
+                  const t = contextMenu.target;
+                  if (t.kind !== "root") deleteFolder(t.path);
                   closeContextMenu();
                 }}
                 className="w-full text-left px-2 py-1.5 text-[10px] uppercase tracking-wider text-[var(--color-danger)] hover:bg-[var(--color-surface-light)]"
@@ -874,14 +1070,14 @@ export function CodePanel() {
             <>
               <button
                 type="button"
-                onClick={() => startCreate("file", dirname(contextMenu.target.path))}
+                onClick={() => { const t = contextMenu.target; if (t.kind !== "root") startCreate("file", dirname(t.path)); }}
                 className="w-full text-left px-2 py-1.5 text-[10px] uppercase tracking-wider text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-light)]"
               >
                 Add File
               </button>
               <button
                 type="button"
-                onClick={() => startCreate("folder", dirname(contextMenu.target.path))}
+                onClick={() => { const t = contextMenu.target; if (t.kind !== "root") startCreate("folder", dirname(t.path)); }}
                 className="w-full text-left px-2 py-1.5 text-[10px] uppercase tracking-wider text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-light)]"
               >
                 Add Folder
@@ -889,7 +1085,8 @@ export function CodePanel() {
               <button
                 type="button"
                 onClick={() => {
-                  deleteFile(contextMenu.target.path);
+                  const t = contextMenu.target;
+                  if (t.kind !== "root") deleteFile(t.path);
                   closeContextMenu();
                 }}
                 className="w-full text-left px-2 py-1.5 text-[10px] uppercase tracking-wider text-[var(--color-danger)] hover:bg-[var(--color-surface-light)]"

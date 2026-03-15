@@ -9,6 +9,7 @@ import { getGeneratedAudioId, type GeneratedAudioKind } from "@/lib/generated-au
 import { storeImage } from "@/lib/image-store";
 import { putSound } from "@/lib/sound-store";
 import { buildPartyKitScaffold } from "@/lib/multiplayer/partykit-scaffold";
+import { putMesh } from "@/lib/mesh-store";
 
 export const maxDuration = 60;
 
@@ -83,6 +84,16 @@ interface AudioTrackPayload {
   description: string;
   status: "pending" | "ready" | "error";
   duration: number | null;
+  error?: string | null;
+}
+
+interface GeneratedMeshPayload {
+  id: string;
+  name: string;
+  prompt: string;
+  status: "pending" | "ready" | "error";
+  glbUrl: string | null;
+  thumbnailUrl: string | null;
   error?: string | null;
 }
 
@@ -175,7 +186,7 @@ function extractErrorDetails(error: unknown) {
 }
 
 function isGameEngine(value: unknown): value is GameEngine {
-  return value === "canvas2d" || value === "threejs";
+  return value === "canvas2d" || value === "threejs" || value === "phaser";
 }
 
 function sanitizeMessagesForModel(messages: unknown[]): Array<{ role: "user" | "assistant"; parts: Array<{ type: "text"; text: string }> }> {
@@ -535,9 +546,11 @@ export async function POST(req: Request) {
       consoleLogs?: unknown;
       generatedImages?: unknown;
       audioTracks?: unknown;
+      generatedMeshes?: unknown;
       composerMode?: unknown;
       planningMode?: unknown;
       gameEngine?: unknown;
+      templateSkills?: unknown;
     };
 
     const messages = parsed.messages;
@@ -586,6 +599,7 @@ export async function POST(req: Request) {
             const candidate = v as Partial<GeneratedImagePayload>;
             return typeof candidate.url === "string" && typeof candidate.prompt === "string";
           })
+          .map((v) => ({ url: v.url, prompt: v.prompt }))
           .slice(-120)
       : [];
     const audioTracks: AudioTrackPayload[] = Array.isArray(parsed.audioTracks)
@@ -604,6 +618,20 @@ export async function POST(req: Request) {
           })
           .slice(-240)
       : [];
+    const generatedMeshes: GeneratedMeshPayload[] = Array.isArray(parsed.generatedMeshes)
+      ? parsed.generatedMeshes
+          .filter((v): v is GeneratedMeshPayload => {
+            if (!v || typeof v !== "object") return false;
+            const candidate = v as Partial<GeneratedMeshPayload>;
+            return (
+              typeof candidate.id === "string" &&
+              typeof candidate.name === "string" &&
+              typeof candidate.prompt === "string" &&
+              (candidate.status === "pending" || candidate.status === "ready" || candidate.status === "error")
+            );
+          })
+          .slice(-100)
+      : [];
     const composerMode: ComposerMode = isComposerMode(parsed.composerMode)
       ? parsed.composerMode
       : parsed.planningMode === true
@@ -611,6 +639,8 @@ export async function POST(req: Request) {
         : "agent";
     const planningMode = composerMode === "plan";
     const gameEngine: GameEngine = isGameEngine(parsed.gameEngine) ? parsed.gameEngine : "canvas2d";
+    const templateSkills = typeof parsed.templateSkills === "string"
+      ? parsed.templateSkills.slice(0, 4000) : null;
 
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return new Response(JSON.stringify({ error: "Messages array is required" }), {
@@ -649,9 +679,11 @@ export async function POST(req: Request) {
         consoleLogs,
         generatedImages,
         currentAudioTracks: audioTracks,
+        currentMeshes: generatedMeshes,
         composerMode,
         gameEngine,
         planningMode,
+        templateSkills,
       }),
       messages: modelMessages,
       activeTools: (
@@ -668,6 +700,8 @@ export async function POST(req: Request) {
             "todo_read",
             "list_audio_assets",
             "list_image_assets",
+            "generate_mesh",
+            "list_mesh_assets",
             "read_file",
             "list_dir",
             "dir_tree",
@@ -677,6 +711,7 @@ export async function POST(req: Request) {
             "read_lints",
             "edit_file",
             "todo_write",
+            "set_engine",
           ] as const;
 
           const mutatingTools = new Set<string>([
@@ -894,6 +929,96 @@ export async function POST(req: Request) {
             };
           },
         }),
+        generate_mesh: tool({
+          description:
+            "Generate a textured 3D mesh model from a text description using the Meshy API. The mesh goes through two stages: geometry generation (preview) then automatic texturing (refine). Returns a mesh id/name and schedules async generation. The mesh will be available as a textured GLB file once both stages complete.",
+          inputSchema: z.object({
+            prompt: z.string().min(1).max(600),
+            name: z.string().min(1),
+            modelType: z.enum(["standard", "lowpoly"]).optional(),
+          }),
+          execute: async ({ prompt, name, modelType }) => {
+            try {
+              const key = process.env.MESHY_API_KEY;
+              if (!key) throw new Error("MESHY_API_KEY is not set");
+
+              const res = await fetch("https://api.meshy.ai/openapi/v2/text-to-3d", {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${key}`,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  mode: "preview",
+                  prompt,
+                  ai_model: "latest",
+                  ...(modelType ? { model_type: modelType } : {}),
+                }),
+              });
+
+              if (!res.ok) {
+                const text = await res.text();
+                throw new Error(`Meshy API error (${res.status}): ${text}`);
+              }
+
+              const data = (await res.json()) as { result: string };
+              const meshId = `mesh:${name}`;
+              await putMesh(meshId, {
+                name,
+                prompt,
+                status: "pending",
+                meshyTaskId: data.result,
+                refineTaskId: null,
+                glbUrl: null,
+                thumbnailUrl: null,
+                artifactId: null,
+                thumbnailArtifactId: null,
+                createdAt: Date.now(),
+              });
+
+              return { meshId, name, status: "pending", meshyTaskId: data.result };
+            } catch (error) {
+              const meshId = `mesh:${name}`;
+              await putMesh(meshId, {
+                name,
+                prompt,
+                status: "error",
+                meshyTaskId: "",
+                refineTaskId: null,
+                glbUrl: null,
+                thumbnailUrl: null,
+                artifactId: null,
+                thumbnailArtifactId: null,
+                error: error instanceof Error ? error.message : "Mesh generation failed",
+                createdAt: Date.now(),
+              });
+              return { meshId, name, status: "error", error: error instanceof Error ? error.message : "Mesh generation failed" };
+            }
+          },
+        }),
+        list_mesh_assets: tool({
+          description: "List known generated 3D mesh assets with prompt descriptions and statuses.",
+          inputSchema: z.object({
+            status: z.enum(["pending", "refining", "ready", "error"]).optional(),
+            limit: z.number().int().positive().max(100).optional(),
+          }),
+          execute: async ({ status, limit }) => {
+            let items = [...generatedMeshes];
+            if (status) items = items.filter((mesh) => mesh.status === status);
+            if (typeof limit === "number") items = items.slice(0, limit);
+            return {
+              count: items.length,
+              meshes: items.map((mesh) => ({
+                id: mesh.id,
+                name: mesh.name,
+                prompt: mesh.prompt,
+                status: mesh.status,
+                glbUrl: mesh.glbUrl,
+                error: mesh.error ?? null,
+              })),
+            };
+          },
+        }),
         read_file: tool({
           description: "Read a virtual file with optional line slicing.",
           inputSchema: z.object({
@@ -1006,6 +1131,20 @@ export async function POST(req: Request) {
             ).min(1),
           }),
           execute: async ({ merge, todos }) => ({ success: true, merge, count: todos.length }),
+        }),
+        set_engine: tool({
+          description:
+            "Switch the rendering engine. Call once before generating code on the first message if the best engine differs from the current one.",
+          inputSchema: z.object({
+            engine: z.enum(["canvas2d", "phaser", "threejs"]),
+            reason: z.string().optional(),
+          }),
+          execute: async ({ engine, reason }) => ({
+            success: true,
+            engine,
+            label: engine === "threejs" ? "Three.js / WebGL" : engine === "phaser" ? "Phaser.js" : "HTML5 Canvas",
+            reason: reason ?? null,
+          }),
         }),
       },
       providerOptions: {

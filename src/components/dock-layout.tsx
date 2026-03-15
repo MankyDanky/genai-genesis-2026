@@ -16,6 +16,7 @@ import { ConsolePanel } from "@/components/panels/console-panel";
 import { InspectorPanel } from "@/components/panels/inspector-panel";
 import { ImagesPanelWrapper } from "@/components/panels/images-panel-wrapper";
 import { AudioPanelWrapper } from "@/components/panels/audio-panel-wrapper";
+import { MeshesPanelWrapper } from "@/components/panels/meshes-panel-wrapper";
 import { Toolbar } from "@/components/toolbar";
 import { ShareModal } from "@/components/share-modal";
 import { OpenProjectModal } from "@/components/open-project-modal";
@@ -32,6 +33,7 @@ const components = {
   inspector: InspectorPanel,
   images: ImagesPanelWrapper,
   audio: AudioPanelWrapper,
+  meshes: MeshesPanelWrapper,
 };
 
 interface PanelDef {
@@ -48,6 +50,7 @@ const ALL_PANELS: PanelDef[] = [
   { id: "code", component: "code", title: "Code" },
   { id: "console", component: "console", title: "Console" },
   { id: "images", component: "images", title: "Images" },
+  { id: "meshes", component: "meshes", title: "Meshes" },
 ];
 
 function buildDefaultLayout(api: DockviewApi) {
@@ -103,6 +106,14 @@ function buildDefaultLayout(api: DockviewApi) {
     id: "audio",
     component: "audio",
     title: "Audio",
+    inactive: true,
+    position: { referencePanel: "images", direction: "within" },
+  });
+
+  api.addPanel({
+    id: "meshes",
+    component: "meshes",
+    title: "Meshes",
     inactive: true,
     position: { referencePanel: "images", direction: "within" },
   });
@@ -229,6 +240,23 @@ export function DockLayout() {
     const panelApi = panel as unknown as { api?: { setActive?: () => void } };
     panelApi.api?.setActive?.();
   }, [panelFocusRequest]);
+
+  // Auto-activate code panel when code changes
+  const prevCodeSnapshotRef = useRef<string | null>(null);
+  useEffect(() => {
+    const api = apiRef.current;
+    if (!api || !currentCode) return;
+    if (prevCodeSnapshotRef.current === currentCode) return;
+    const isFirstRender = prevCodeSnapshotRef.current === null;
+    prevCodeSnapshotRef.current = currentCode;
+    if (isFirstRender) return;
+
+    const codePanel = api.panels.find((p) => p.id === "code");
+    if (codePanel) {
+      const panelApi = codePanel as unknown as { api?: { setActive?: () => void } };
+      panelApi.api?.setActive?.();
+    }
+  }, [currentCode]);
 
   // Load project from ?project= URL param (e.g. after forking)
   useEffect(() => {

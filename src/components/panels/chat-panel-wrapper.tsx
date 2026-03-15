@@ -23,16 +23,28 @@ export function ChatPanelWrapper() {
     onEngineUpdate,
     addImage,
     addAudioTrack,
+    generatedMeshes,
+    addMesh,
+    updateMesh,
     setControls,
     chatMessages,
     chatSessionId,
+    chatTabs,
+    activeChatTabId,
     setChatMessages,
+    createChatTab,
+    deleteChatTab,
+    switchChatTab,
+    renameChatTab,
     focusCodeFile,
     focusConsolePanel,
     focusImagesPanel,
     focusAudioPanel,
+    focusMeshesPanel,
     setPendingFileWrites,
     clearPendingFileWrites,
+    setRepromptAudioHandler,
+    setStreamingCode,
   } = useGameForge();
   return (
     <ChatPanel
@@ -54,16 +66,28 @@ export function ChatPanelWrapper() {
       onEngineUpdate={onEngineUpdate}
       addImage={addImage}
       addAudioTrack={addAudioTrack}
+      generatedMeshes={generatedMeshes}
+      addMesh={addMesh}
+      updateMesh={updateMesh}
       setControls={setControls}
       chatMessages={chatMessages}
       chatSessionId={chatSessionId}
+      chatTabs={chatTabs}
+      activeChatTabId={activeChatTabId}
       setChatMessages={setChatMessages}
+      createChatTab={createChatTab}
+      deleteChatTab={deleteChatTab}
+      switchChatTab={switchChatTab}
+      renameChatTab={renameChatTab}
       focusCodeFile={focusCodeFile}
       focusConsolePanel={focusConsolePanel}
       focusImagesPanel={focusImagesPanel}
       focusAudioPanel={focusAudioPanel}
+      focusMeshesPanel={focusMeshesPanel}
       setPendingFileWrites={setPendingFileWrites}
       clearPendingFileWrites={clearPendingFileWrites}
+      setRepromptAudioHandler={setRepromptAudioHandler}
+      setStreamingCode={setStreamingCode}
     />
   );
 }
