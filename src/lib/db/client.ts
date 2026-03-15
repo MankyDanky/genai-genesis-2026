@@ -11,6 +11,7 @@ const options = {
   serverSelectionTimeoutMS: 5_000,
   retryWrites: true,
   retryReads: true,
+  readPreference: "primary" as const,
 };
 
 declare global {
