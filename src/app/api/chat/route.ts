@@ -107,6 +107,8 @@ interface PlanningTodoPayload {
 type ComposerMode = "agent" | "plan" | "debug" | "ask";
 type ModelChoice =
   | "claude-sonnet-4-6"
+  | "claude-opus-4-6"
+  | "claude-haiku-4-5-20251001"
   | "grok-code-fast-1"
   | "grok-4.20-multi-agent-beta-0309"
   | "grok-4.20-beta-latest-non-reasoning";
@@ -118,6 +120,8 @@ function isComposerMode(value: unknown): value is ComposerMode {
 function isModelChoice(value: unknown): value is ModelChoice {
   return (
     value === "claude-sonnet-4-6" ||
+    value === "claude-opus-4-6" ||
+    value === "claude-haiku-4-5-20251001" ||
     value === "grok-code-fast-1" ||
     value === "grok-4.20-multi-agent-beta-0309" ||
     value === "grok-4.20-beta-latest-non-reasoning"
