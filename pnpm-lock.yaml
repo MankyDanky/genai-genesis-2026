@@ -35,6 +35,9 @@ importers:
       dockview:
         specifier: ^5.1.0
         version: 5.1.0(react@19.2.3)
+      dockview-core:
+        specifier: ^5.1.0
+        version: 5.1.0
       mongodb:
         specifier: ^6.18.0
         version: 6.21.0
