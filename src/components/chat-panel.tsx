@@ -62,7 +62,8 @@ type ComposerMode = "agent" | "plan" | "debug" | "ask";
 type ModelChoice =
   | "claude-sonnet-4-6"
   | "grok-code-fast-1"
-  | "grok-4.20-multi-agent-beta-0309";
+  | "grok-4.20-multi-agent-beta-0309"
+  | "grok-4.20-beta-latest-non-reasoning";
 
 const EXAMPLE_PROMPTS = [
   "Space Invaders",
@@ -2081,6 +2082,7 @@ export function ChatPanel({
             <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
             <option value="grok-code-fast-1">Grok Code Fast 1</option>
             <option value="grok-4.20-multi-agent-beta-0309">Grok 4.20 Multi-Agent Beta</option>
+            <option value="grok-4.20-beta-latest-non-reasoning">Grok 4.20 Non-Reasoning</option>
           </select>
         </div>
 

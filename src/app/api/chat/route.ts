@@ -108,7 +108,8 @@ type ComposerMode = "agent" | "plan" | "debug" | "ask";
 type ModelChoice =
   | "claude-sonnet-4-6"
   | "grok-code-fast-1"
-  | "grok-4.20-multi-agent-beta-0309";
+  | "grok-4.20-multi-agent-beta-0309"
+  | "grok-4.20-beta-latest-non-reasoning";
 
 function isComposerMode(value: unknown): value is ComposerMode {
   return value === "agent" || value === "plan" || value === "debug" || value === "ask";
@@ -118,7 +119,8 @@ function isModelChoice(value: unknown): value is ModelChoice {
   return (
     value === "claude-sonnet-4-6" ||
     value === "grok-code-fast-1" ||
-    value === "grok-4.20-multi-agent-beta-0309"
+    value === "grok-4.20-multi-agent-beta-0309" ||
+    value === "grok-4.20-beta-latest-non-reasoning"
   );
 }
 
