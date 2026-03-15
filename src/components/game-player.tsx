@@ -209,7 +209,7 @@ export function GamePlayer({
       {/* Game iframe */}
       <iframe
         srcDoc={runtimeCode}
-        sandbox="allow-scripts allow-same-origin"
+        sandbox="allow-scripts allow-same-origin allow-pointer-lock"
         title={title}
         className="flex-1 w-full border-none"
       />

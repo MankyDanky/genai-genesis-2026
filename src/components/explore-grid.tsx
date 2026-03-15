@@ -233,7 +233,7 @@ function ExploreCard({ game, index }: { game: ExploreGameItem; index: number }) 
       <iframe
         title={`${game.title} preview`}
         srcDoc={buildFittedPreviewSrcDoc(code)}
-        sandbox="allow-scripts allow-same-origin"
+        sandbox="allow-scripts allow-same-origin allow-pointer-lock"
         loading="lazy"
         className="h-full w-full border-none pointer-events-none"
       />
