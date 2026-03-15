@@ -1,0 +1,31 @@
+import { getImage } from "@/lib/image-store";
+
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+};
+
+export async function OPTIONS() {
+  return new Response(null, { status: 204, headers: CORS_HEADERS });
+}
+
+export async function GET(
+  _req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const image = await getImage(id);
+
+  if (!image) {
+    return new Response("Not found", { status: 404, headers: CORS_HEADERS });
+  }
+
+  return new Response(new Uint8Array(image.data), {
+    headers: {
+      ...CORS_HEADERS,
+      "Content-Type": image.mimeType,
+      "Cache-Control": "public, max-age=1800, immutable",
+    },
+  });
+}

@@ -1,0 +1,66 @@
+.editorRoot {
+  background: var(--color-bg);
+}
+
+.editor {
+  min-height: 100%;
+}
+
+.editorTextarea {
+  outline: none;
+}
+
+.editorRoot :global(.token.comment),
+.editorRoot :global(.token.prolog),
+.editorRoot :global(.token.doctype),
+.editorRoot :global(.token.cdata) {
+  color: #5c6370;
+}
+
+.editorRoot :global(.token.punctuation) {
+  color: #abb2bf;
+}
+
+.editorRoot :global(.token.property),
+.editorRoot :global(.token.tag),
+.editorRoot :global(.token.boolean),
+.editorRoot :global(.token.number),
+.editorRoot :global(.token.constant),
+.editorRoot :global(.token.symbol),
+.editorRoot :global(.token.deleted) {
+  color: #d19a66;
+}
+
+.editorRoot :global(.token.selector),
+.editorRoot :global(.token.attr-name),
+.editorRoot :global(.token.string),
+.editorRoot :global(.token.char),
+.editorRoot :global(.token.builtin),
+.editorRoot :global(.token.inserted) {
+  color: #98c379;
+}
+
+.editorRoot :global(.token.operator),
+.editorRoot :global(.token.entity),
+.editorRoot :global(.token.url),
+.editorRoot :global(.language-css .token.string),
+.editorRoot :global(.style .token.string) {
+  color: #56b6c2;
+}
+
+.editorRoot :global(.token.atrule),
+.editorRoot :global(.token.attr-value),
+.editorRoot :global(.token.keyword) {
+  color: #c678dd;
+}
+
+.editorRoot :global(.token.function),
+.editorRoot :global(.token.class-name) {
+  color: #61afef;
+}
+
+.editorRoot :global(.token.regex),
+.editorRoot :global(.token.important),
+.editorRoot :global(.token.variable) {
+  color: #e5c07b;
+}
