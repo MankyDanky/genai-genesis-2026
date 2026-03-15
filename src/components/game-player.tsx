@@ -16,6 +16,27 @@ interface GamePlayerProps {
   roomId: string | null;
 }
 
+function injectPointerLockShim(html: string): string {
+  const shim = `<script>(function(){
+  var orig = Element.prototype.requestPointerLock;
+  if (!orig) return;
+  Element.prototype.requestPointerLock = function() {
+    try {
+      var result = orig.apply(this, arguments);
+      if (result && typeof result.catch === "function") {
+        return result.catch(function() {});
+      }
+      return result;
+    } catch(_e) {}
+  };
+})();<\/script>`;
+
+  if (/<head[^>]*>/i.test(html)) {
+    return html.replace(/<head([^>]*)>/i, `<head$1>${shim}`);
+  }
+  return `${shim}${html}`;
+}
+
 function injectRuntimeMultiplayerConfig(
   html: string,
   multiplayer: boolean,
@@ -100,13 +121,15 @@ export function GamePlayer({
   const [forking, setForking] = useState(false);
   const [forkError, setForkError] = useState<string | null>(null);
 
-  const runtimeCode = injectRuntimeMultiplayerConfig(
-    code,
-    multiplayer,
-    multiplayerProvider,
-    multiplayerRoomType,
-    runtimeEnv,
-    roomId,
+  const runtimeCode = injectPointerLockShim(
+    injectRuntimeMultiplayerConfig(
+      code,
+      multiplayer,
+      multiplayerProvider,
+      multiplayerRoomType,
+      runtimeEnv,
+      roomId,
+    ),
   );
 
   const handleShare = useCallback(async () => {
@@ -209,7 +232,8 @@ export function GamePlayer({
       {/* Game iframe */}
       <iframe
         srcDoc={runtimeCode}
-        sandbox="allow-scripts allow-same-origin"
+        sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-forms allow-modals"
+        allow="pointer-lock; fullscreen; autoplay"
         title={title}
         className="flex-1 w-full border-none"
       />

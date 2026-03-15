@@ -251,6 +251,35 @@ function buildInstrumentedSrcDoc(code: string, session: string): string {
   return `${bridge}${code}`;
 }
 
+/**
+ * Patches Element.requestPointerLock so that failures (e.g. sandbox restrictions)
+ * are silently caught instead of throwing and crashing the game.
+ * Injected before any game code runs.
+ */
+function injectPointerLockShim(html: string): string {
+  const shim = `<script>(function(){
+  var orig = Element.prototype.requestPointerLock;
+  if (!orig) return;
+  Element.prototype.requestPointerLock = function() {
+    try {
+      var result = orig.apply(this, arguments);
+      if (result && typeof result.catch === "function") {
+        return result.catch(function() {});
+      }
+      return result;
+    } catch(_e) {}
+  };
+})();<\/script>`;
+
+  if (/<head[^>]*>/i.test(html)) {
+    return html.replace(/<head([^>]*)>/i, `<head$1>${shim}`);
+  }
+  if (/<body[^>]*>/i.test(html)) {
+    return html.replace(/<body([^>]*)>/i, `<body$1>${shim}`);
+  }
+  return `${shim}${html}`;
+}
+
 const SOUND_BRIDGE_SCRIPT = `<script>
 window.__GAMEFORGE_SOUNDS__ = window.__GAMEFORGE_SOUNDS__ || {};
 window.__GAMEFORGE_MUSIC__ = window.__GAMEFORGE_MUSIC__ || {};
@@ -479,7 +508,8 @@ export function Sandbox({ code, isGenerating = false, audioTracks = EMPTY_AUDIO_
   const srcDoc = useMemo(() => {
     if (!code) return null;
     const withCompat = injectCompatibilityLayer(code);
-    const withConsole = buildInstrumentedSrcDoc(withCompat, sessionRef.current);
+    const withPointerLock = injectPointerLockShim(withCompat);
+    const withConsole = buildInstrumentedSrcDoc(withPointerLock, sessionRef.current);
     const withAudio = injectSoundBridge(withConsole, audioTracks);
     const withMeshes = injectMeshBridge(withAudio, generatedMeshes);
     const withInspector = injectInspectorBridge(withMeshes);
@@ -740,20 +770,24 @@ export function Sandbox({ code, isGenerating = false, audioTracks = EMPTY_AUDIO_
       <iframe
         ref={iframe0Ref}
         srcDoc={iframe0SrcDoc ?? undefined}
-        sandbox="allow-scripts allow-same-origin allow-pointer-lock"
+        sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-forms allow-modals"
+        allow="pointer-lock; fullscreen; autoplay"
         title="Game Preview"
         className="border-none"
         style={activeIndex === 0 ? visibleStyle : hiddenStyle}
-        tabIndex={activeIndex === 0 ? undefined : -1}
+        tabIndex={activeIndex === 0 ? 0 : -1}
+        onMouseDown={() => iframe0Ref.current?.contentWindow?.focus()}
       />
       <iframe
         ref={iframe1Ref}
         srcDoc={iframe1SrcDoc ?? undefined}
-        sandbox="allow-scripts allow-same-origin allow-pointer-lock"
+        sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-forms allow-modals"
+        allow="pointer-lock; fullscreen; autoplay"
         title="Game Preview (staging)"
         className="border-none"
         style={activeIndex === 1 ? visibleStyle : hiddenStyle}
-        tabIndex={activeIndex === 1 ? undefined : -1}
+        tabIndex={activeIndex === 1 ? 0 : -1}
+        onMouseDown={() => iframe1Ref.current?.contentWindow?.focus()}
       />
       {hasPendingMeshes && (
         <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 pointer-events-none animate-[fadeIn_0.3s_ease-out]">
