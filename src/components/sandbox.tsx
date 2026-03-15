@@ -280,6 +280,30 @@ function injectPointerLockShim(html: string): string {
   return `${shim}${html}`;
 }
 
+/**
+ * Injects a script that ensures the iframe window grabs focus on any
+ * pointerdown/click. This is critical when embedded inside Dockview,
+ * which steals focus to the panel container on activation.
+ */
+function injectFocusBridge(html: string): string {
+  const script = `<script>(function(){
+  function grab(){window.focus();}
+  document.addEventListener("pointerdown",grab,true);
+  document.addEventListener("click",grab,true);
+  window.addEventListener("load",function(){
+    setTimeout(grab,50);
+  });
+})();<\/script>`;
+
+  if (/<head[^>]*>/i.test(html)) {
+    return html.replace(/<head([^>]*)>/i, `<head$1>${script}`);
+  }
+  if (/<body[^>]*>/i.test(html)) {
+    return html.replace(/<body([^>]*)>/i, `<body$1>${script}`);
+  }
+  return `${script}${html}`;
+}
+
 const SOUND_BRIDGE_SCRIPT = `<script>
 window.__GAMEFORGE_SOUNDS__ = window.__GAMEFORGE_SOUNDS__ || {};
 window.__GAMEFORGE_MUSIC__ = window.__GAMEFORGE_MUSIC__ || {};
@@ -509,7 +533,8 @@ export function Sandbox({ code, isGenerating = false, audioTracks = EMPTY_AUDIO_
     if (!code) return null;
     const withCompat = injectCompatibilityLayer(code);
     const withPointerLock = injectPointerLockShim(withCompat);
-    const withConsole = buildInstrumentedSrcDoc(withPointerLock, sessionRef.current);
+    const withFocus = injectFocusBridge(withPointerLock);
+    const withConsole = buildInstrumentedSrcDoc(withFocus, sessionRef.current);
     const withAudio = injectSoundBridge(withConsole, audioTracks);
     const withMeshes = injectMeshBridge(withAudio, generatedMeshes);
     const withInspector = injectInspectorBridge(withMeshes);
@@ -681,6 +706,15 @@ export function Sandbox({ code, isGenerating = false, audioTracks = EMPTY_AUDIO_
     onReload?.();
   }, [onReload]);
 
+  // Focus the active iframe's contentWindow. Uses setTimeout(0) to run
+  // after Dockview's synchronous focus-steal on panel activation.
+  const focusActiveIframe = useCallback(() => {
+    setTimeout(() => {
+      const ref = activeIndexRef.current === 0 ? iframe0Ref : iframe1Ref;
+      try { ref.current?.contentWindow?.focus(); } catch (_e) { /* cross-origin */ }
+    }, 0);
+  }, []);
+
   const pendingMeshes = generatedMeshes.filter(
     (m) => m.status === "pending" || m.status === "refining"
   );
@@ -765,7 +799,7 @@ export function Sandbox({ code, isGenerating = false, audioTracks = EMPTY_AUDIO_
   };
 
   return (
-    <div ref={containerRef} className="relative h-full w-full bg-black overflow-hidden">
+    <div ref={containerRef} className="relative h-full w-full bg-black overflow-hidden" onMouseDown={focusActiveIframe} onPointerDown={focusActiveIframe}>
       <ShareBar code={code} openHtml={srcDoc ?? code} containerRef={containerRef} onReload={handleReload} />
       <iframe
         ref={iframe0Ref}
@@ -776,7 +810,6 @@ export function Sandbox({ code, isGenerating = false, audioTracks = EMPTY_AUDIO_
         className="border-none"
         style={activeIndex === 0 ? visibleStyle : hiddenStyle}
         tabIndex={activeIndex === 0 ? 0 : -1}
-        onMouseDown={() => iframe0Ref.current?.contentWindow?.focus()}
       />
       <iframe
         ref={iframe1Ref}
@@ -787,7 +820,6 @@ export function Sandbox({ code, isGenerating = false, audioTracks = EMPTY_AUDIO_
         className="border-none"
         style={activeIndex === 1 ? visibleStyle : hiddenStyle}
         tabIndex={activeIndex === 1 ? 0 : -1}
-        onMouseDown={() => iframe1Ref.current?.contentWindow?.focus()}
       />
       {hasPendingMeshes && (
         <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 pointer-events-none animate-[fadeIn_0.3s_ease-out]">

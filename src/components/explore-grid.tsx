@@ -253,14 +253,9 @@ function ExploreCard({ game, index }: { game: ExploreGameItem; index: number }) 
     }
   }, [forking, game.id, router]);
 
-  const joinRoomId = `game-${game.id}`;
   const playHref = game.multiplayer
-    ? `/play/${game.id}?room=${encodeURIComponent(joinRoomId)}`
+    ? `/play/${game.id}?room=${encodeURIComponent(`game-${game.id}`)}`
     : `/play/${game.id}`;
-  const createRoom = () => {
-    const nextRoom = `${game.id}-${Math.random().toString(36).slice(2, 8)}`;
-    router.push(`/play/${game.id}?room=${encodeURIComponent(nextRoom)}`);
-  };
 
   const staggerDelay = `${Math.min(index * 40, 600)}ms`;
 
@@ -314,15 +309,15 @@ function ExploreCard({ game, index }: { game: ExploreGameItem; index: number }) 
           {game.title || "Untitled Game"}
         </h2>
 
+        <p className="mb-1 text-[10px] text-[var(--color-text-muted)]">
+          Published {formatDate(game.createdAt)}
+        </p>
+
         {game.multiplayer ? (
-          <p className="mb-1 text-[9px] uppercase tracking-[0.08em] text-[var(--color-accent)]">
+          <p className="text-[9px] uppercase tracking-[0.08em] text-[var(--color-accent)]">
             Multiplayer - Room type {game.multiplayerRoomType || "game"}
           </p>
         ) : null}
-
-        <p className="text-[10px] text-[var(--color-text-muted)]">
-          Published {formatDate(game.createdAt)}
-        </p>
       </Link>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -341,15 +336,6 @@ function ExploreCard({ game, index }: { game: ExploreGameItem; index: number }) 
         >
           {forking ? "Opening..." : "Remix"}
         </button>
-        {game.multiplayer ? (
-          <button
-            type="button"
-            onClick={createRoom}
-            className="gf-btn-chip border border-[var(--color-border-light)] bg-[var(--color-surface)] px-2.5 py-1 text-[10px] uppercase tracking-[0.1em] text-[var(--color-text-secondary)]"
-          >
-            Create Room
-          </button>
-        ) : null}
       </div>
     </article>
   );
