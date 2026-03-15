@@ -346,7 +346,7 @@ export function Sandbox({ code, audioTracks = [], runtimeEnv = {}, onConsoleMess
         ref={iframeRef}
         key={`${code}:${reloadKey}`}
         srcDoc={srcDoc}
-        sandbox="allow-scripts"
+        sandbox="allow-scripts allow-pointer-lock"
         title="Game Preview"
         className="h-full w-full border-none"
       />
