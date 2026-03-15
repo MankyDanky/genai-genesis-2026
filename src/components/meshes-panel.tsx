@@ -9,7 +9,7 @@ const MeshPreviewModal = dynamic(() => import("@/components/mesh-preview-modal")
 });
 
 interface MeshesPanelProps {
-  meshes: GeneratedMesh[];
+  meshes?: GeneratedMesh[] | null;
   onRemoveMesh: (id: string) => void;
 }
 
@@ -52,10 +52,11 @@ function SpinnerIcon() {
 
 export function MeshesPanel({ meshes, onRemoveMesh }: MeshesPanelProps) {
   const [selectedMesh, setSelectedMesh] = useState<GeneratedMesh | null>(null);
+  const safeMeshes = Array.isArray(meshes) ? meshes : [];
 
   const handleClose = useCallback(() => setSelectedMesh(null), []);
 
-  if (meshes.length === 0) {
+  if (safeMeshes.length === 0) {
     return (
       <div className="relative flex h-full flex-col bg-[var(--color-bg)]">
         <div className="flex-1 flex flex-col items-center justify-center gap-4">
@@ -92,7 +93,7 @@ export function MeshesPanel({ meshes, onRemoveMesh }: MeshesPanelProps) {
     <div className="h-full w-full bg-[var(--color-bg)] flex flex-col overflow-hidden">
       <div className="flex-1 overflow-y-auto px-2 py-2">
         <div className="grid grid-cols-2 gap-2">
-          {meshes.map((mesh) => (
+          {safeMeshes.map((mesh) => (
             <div
               key={mesh.id}
               className="border border-[var(--color-border-light)] overflow-hidden cursor-pointer hover:border-[var(--color-accent)] transition-colors group relative"
