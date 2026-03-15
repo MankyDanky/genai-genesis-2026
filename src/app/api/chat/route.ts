@@ -105,14 +105,14 @@ interface PlanningTodoPayload {
 }
 
 type ComposerMode = "agent" | "plan" | "debug" | "ask";
-type ModelChoice = "claude" | "grok";
+type ModelChoice = "claude-sonnet-4-6" | "grok-code-fast-1";
 
 function isComposerMode(value: unknown): value is ComposerMode {
   return value === "agent" || value === "plan" || value === "debug" || value === "ask";
 }
 
 function isModelChoice(value: unknown): value is ModelChoice {
-  return value === "claude" || value === "grok";
+  return value === "claude-sonnet-4-6" || value === "grok-code-fast-1";
 }
 
 function safeJsonPreview(value: unknown, max = 300): string {
@@ -646,7 +646,7 @@ export async function POST(req: Request) {
         : "agent";
     const modelChoice: ModelChoice = isModelChoice(parsed.modelChoice)
       ? parsed.modelChoice
-      : "claude";
+      : "claude-sonnet-4-6";
     const planningMode = composerMode === "plan";
     const gameEngine: GameEngine = isGameEngine(parsed.gameEngine) ? parsed.gameEngine : "canvas2d";
     const templateSkills = typeof parsed.templateSkills === "string"
@@ -674,9 +674,9 @@ export async function POST(req: Request) {
     const sanitizedMessages = sanitizeMessagesForModel(messages);
     const modelMessages = await convertToModelMessages(sanitizedMessages);
 
-    if (modelChoice === "grok" && !process.env.XAI_API_KEY) {
+    if (modelChoice === "grok-code-fast-1" && !process.env.XAI_API_KEY) {
       return new Response(
-        JSON.stringify({ error: "XAI_API_KEY is required when modelChoice is 'grok'" }),
+        JSON.stringify({ error: "XAI_API_KEY is required when modelChoice is 'grok-code-fast-1'" }),
         {
           status: 400,
           headers: { "Content-Type": "application/json" },
@@ -685,9 +685,9 @@ export async function POST(req: Request) {
     }
 
     const selectedModel =
-      modelChoice === "grok"
-        ? xai(process.env.XAI_MODEL || "grok-2-1212")
-        : anthropic("claude-sonnet-4-6");
+      modelChoice === "grok-code-fast-1"
+        ? xai(modelChoice)
+        : anthropic(modelChoice);
 
     console.log("[API] model message summary", {
       requestId,

@@ -59,7 +59,7 @@ interface ChatPanelProps {
 }
 
 type ComposerMode = "agent" | "plan" | "debug" | "ask";
-type ModelChoice = "claude" | "grok";
+type ModelChoice = "claude-sonnet-4-6" | "grok-code-fast-1";
 
 const EXAMPLE_PROMPTS = [
   "Space Invaders",
@@ -692,7 +692,7 @@ export function ChatPanel({
   const initialChatMessagesRef = useRef(chatMessages);
   const [input, setInput] = useState("");
   const [selectedEngine, setSelectedEngine] = useState<GameEngine>(currentEngine);
-  const [selectedModel, setSelectedModel] = useState<ModelChoice>("claude");
+  const [selectedModel, setSelectedModel] = useState<ModelChoice>("claude-sonnet-4-6");
   const [composerMode, setComposerMode] = useState<ComposerMode>("agent");
   const [isModeMenuOpen, setIsModeMenuOpen] = useState(false);
   const [modeMenuPos, setModeMenuPos] = useState({ x: 0, y: 0 });
@@ -2075,8 +2075,8 @@ export function ChatPanel({
             onChange={(e) => setSelectedModel(e.target.value as ModelChoice)}
             className="h-6 bg-[var(--color-surface)] border border-[var(--color-border)] text-[10px] uppercase tracking-[0.08em] text-[var(--color-text-secondary)] px-1.5"
           >
-            <option value="claude">Claude</option>
-            <option value="grok">Grok AI</option>
+            <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
+            <option value="grok-code-fast-1">Grok Code Fast 1</option>
           </select>
         </div>
 
