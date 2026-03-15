@@ -45,15 +45,13 @@ Built for [GenAI Genesis 2026](https://genai-genesis-2026.devpost.com).
 
 ### Environment Variables
 
-Create a `.env` file:
+Copy the example and fill in your keys:
 
+```bash
+cp .env.example .env
 ```
-ANTHROPIC_API_KEY=
-FAL_KEY=
-ELEVENLABS_API_KEY=
-SERPAPI_API_KEY=
-MONGODB_URI=
-```
+
+See `.env.example` for all required variables. The app is **password protected** -- set `AUTH_USERNAME` and `AUTH_PASSWORD` to control access.
 
 ### Install and Run
 
