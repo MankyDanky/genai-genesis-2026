@@ -1,47 +1,107 @@
-# Game Forge
+# Axiom
 
-AI-powered browser game generator with a live sandbox preview.
+**[Try it live](https://axiom-omega-five.vercel.app)**
 
-## Commands
+> What if anyone could make a game in under 10 minutes -- no code required?
+
+Axiom is an AI-powered game engine where you describe what you want in plain English and watch it come to life. Sprites, music, sound effects, 3D models, multiplayer networking -- the AI handles all of it. Just talk to it like a creative partner.
+
+Built for [GenAI Genesis 2026](https://genai-genesis-2026.devpost.com).
+
+## Demo
+
+**[axiom-omega-five.vercel.app](https://axiom-omega-five.vercel.app)**
+
+## What makes Axiom different
+
+- **Zero barrier to entry** -- no coding, no asset pipeline, no game engine experience needed
+- **20+ AI tools** -- Claude Sonnet orchestrates file management, sprite generation, music composition, sound design, 3D modeling, and game logic through a unified MCP tool server
+- **Everything is real-time** -- watch your game build itself in a live sandbox as you chat
+- **Multiplayer out of the box** -- tell the AI to "add multiplayer" and it scaffolds PartyKit networking automatically
+- **AI-generated assets** -- sprites and textures via fal.ai, sound effects and music via ElevenLabs, 3D meshes via fal.ai + Three.js
+- **Web search built in** -- the AI can look up docs, tutorials, and references mid-conversation via SerpAPI
+- **Explore and remix** -- browse community games, fork them, and publish your own with one click
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|------------|
+| Framework | Next.js 16, React 19, TypeScript |
+| AI | Claude Sonnet (Anthropic), Vercel AI SDK v6, MCP tool server (20+ tools) |
+| Image generation | fal.ai |
+| Audio generation | ElevenLabs |
+| 3D | Three.js, fal.ai mesh generation |
+| Multiplayer | PartyKit |
+| Database | MongoDB |
+| UI | Tailwind CSS v4, Dockview, Prism.js |
+| Search | SerpAPI |
+
+## Getting Started
+
+### Prerequisites
+
+- Node.js 20+
+- pnpm
+
+### Environment Variables
+
+Create a `.env` file:
+
+```
+ANTHROPIC_API_KEY=
+FAL_KEY=
+ELEVENLABS_API_KEY=
+SERPAPI_API_KEY=
+MONGODB_URI=
+```
+
+### Install and Run
 
 ```bash
-npm run dev
-npm run build
-npm run lint
+pnpm install
+pnpm dev
 ```
 
-## Environment
+Open [http://localhost:3000](http://localhost:3000).
 
-Create `.env.local` (or copy from `.env.example`) with:
+## Project Structure
 
-```bash
-ANTHROPIC_API_KEY=your-api-key
-ELEVENLABS_API_KEY=your-api-key
-FAL_KEY=your-api-key
-GEMINI_API_KEY=your-api-key
+```
+src/
+  app/
+    api/
+      chat/            # Main AI endpoint with 20+ tools
+      games/           # Game CRUD, publishing, thumbnails
+      generate-image/  # Image generation
+      images/          # Image storage and editing
+      meshes/          # 3D mesh storage
+      projects/        # Project management and revisions
+      sounds/          # Sound file storage
+      auth/            # Authentication
+    explore/           # Community game browser
+    play/[id]/         # Game player page
+  components/
+    chat-panel.tsx     # AI chat interface
+    sandbox.tsx        # Live game preview iframe
+    dock-layout.tsx    # Dockview panel system
+    toolbar.tsx        # Top menu bar
+    images-panel.tsx   # Image asset manager
+    audio-panel.tsx    # Audio asset manager
+    meshes-panel.tsx   # 3D mesh asset manager
+    panels/            # Dockview panel wrappers
+  lib/
+    system-prompt.ts       # LLM system prompt
+    game-forge-context.tsx # Shared state
+    elevenlabs.ts          # ElevenLabs integration
+    fal.ts                 # fal.ai integration
+    multiplayer/           # PartyKit scaffold
+    db/                    # MongoDB client and schemas
 ```
 
-- `ANTHROPIC_API_KEY` powers chat/tool orchestration.
-- `ELEVENLABS_API_KEY` powers sound effect + music generation.
-- `FAL_KEY` powers image generation via fal.ai.
-- `GEMINI_API_KEY` powers image editing/background workflows.
+## Team
 
-## What It Does
+Built with late nights and too much game testing at GenAI Genesis 2026.
 
-- Chat-driven game generation via `/api/chat`
-- Streams model responses + tool calls
-- Updates sandbox iframe with live multi-file project output
-- Supports engine mode selection in Composer:
-  - `HTML5 Canvas`
-  - `Three.js`
-- Supports generated image and audio assets integrated into sandbox runtime
+## License
 
-## Flow
-
-```text
-Prompt -> ChatPanel -> /api/chat
-  -> model chooses tools (read/edit/update/todo/image/audio)
-  -> ChatPanel reads tool parts from stream
-  -> project files + state update in GameForgeContext
-  -> sandbox iframe re-renders with new srcDoc
-```
+MIT
