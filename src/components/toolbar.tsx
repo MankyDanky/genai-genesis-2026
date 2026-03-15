@@ -127,7 +127,7 @@ function ActionButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="h-6 px-2.5 border border-[var(--color-border-light)] text-[10px] uppercase tracking-[0.1em] font-semibold text-[var(--color-text-secondary)] hover:text-[var(--color-text)] hover:border-[var(--color-accent)] disabled:opacity-40 disabled:cursor-default"
+      className="gf-btn-chip h-6 px-2.5 border border-[var(--color-border-light)] text-[10px] uppercase tracking-[0.1em] font-semibold text-[var(--color-text-secondary)] disabled:opacity-40 disabled:cursor-default"
     >
       {label}
     </button>
@@ -273,9 +273,9 @@ export function Toolbar({
             type="button"
             onClick={handleCopyProjectId}
             title={`Click to copy full ID: ${projectId}`}
-            className={`text-[9px] uppercase tracking-[0.1em] border px-1.5 py-0.5 transition-colors ${
+            className={`text-[9px] uppercase tracking-[0.1em] border px-1.5 py-0.5 transition-all duration-150 ${
               copiedId
-                ? "text-[var(--color-accent)] border-[var(--color-accent)]"
+                ? "text-[var(--color-accent)] border-[var(--color-accent)] shadow-[0_0_6px_var(--color-accent-glow)]"
                 : "text-[var(--color-text-muted)] border-[var(--color-border)] hover:text-[var(--color-text)] hover:border-[var(--color-accent)] cursor-pointer"
             }`}
           >
@@ -312,7 +312,7 @@ export function Toolbar({
       <div className="px-3 flex items-center gap-2">
         <Link
           href="/explore"
-          className="h-6 px-2.5 border border-[var(--color-border-light)] text-[10px] uppercase tracking-[0.1em] font-semibold text-[var(--color-text-secondary)] hover:text-[var(--color-text)] hover:border-[var(--color-accent)] flex items-center"
+          className="gf-btn-chip h-6 px-2.5 border border-[var(--color-border-light)] text-[10px] uppercase tracking-[0.1em] font-semibold text-[var(--color-text-secondary)] flex items-center"
         >
           Explore
         </Link>

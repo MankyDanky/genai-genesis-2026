@@ -27,6 +27,7 @@
     "react-mentions": "^4.4.10",
     "react-simple-code-editor": "^0.14.1",
     "remark-gfm": "^4.0.1",
+    "sharp": "^0.34.5",
     "three": "^0.183.2",
     "zod": "^4.3.6"
   },

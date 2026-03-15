@@ -189,7 +189,7 @@ function CreateInlineRow({
   cancelCreate: () => void;
   inputRef: React.RefObject<HTMLInputElement | null>;
 }) {
-  const paddingLeft = 8 + depth * 12;
+  const paddingLeft = 4 + depth * 12;
 
   return (
     <div style={{ paddingLeft }} className="py-1">
@@ -272,7 +272,7 @@ function TreeView({
       ) : null}
 
       {nodes.map((node) => {
-        const paddingLeft = 8 + depth * 12;
+        const paddingLeft = 4 + depth * 12;
 
         if (node.kind === "folder") {
           const isOpen = expanded.has(node.path);
@@ -435,11 +435,8 @@ function DiffView({
 
         return (
           <div key={i} ref={refProp} className={`flex ${bgClass}`}>
-            <span className="w-10 shrink-0 text-right pr-1 text-[var(--color-text-muted)] opacity-40 select-none">
-              {line.oldLineNum ?? ""}
-            </span>
             <span className="w-10 shrink-0 text-right pr-2 text-[var(--color-text-muted)] opacity-40 select-none">
-              {line.newLineNum ?? ""}
+              {line.lineNum}
             </span>
             <span className={`shrink-0 w-4 text-center select-none ${prefixClass}`}>
               {prefix}

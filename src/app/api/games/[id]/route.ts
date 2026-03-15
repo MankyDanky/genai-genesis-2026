@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getPublishedGame } from "@/lib/db/projects";
+import { getPublishedGame, deletePublishedGame } from "@/lib/db/projects";
 
 export async function GET(
   _request: Request,
@@ -31,6 +31,28 @@ export async function GET(
     console.error("[Games] Failed to retrieve game", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to retrieve game" },
+      { status: 500 },
+    );
+  }
+}
+
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const { id } = await params;
+    const deleted = await deletePublishedGame(id);
+
+    if (!deleted) {
+      return NextResponse.json({ error: "Game not found" }, { status: 404 });
+    }
+
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    console.error("[Games] Failed to delete game", error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Failed to delete game" },
       { status: 500 },
     );
   }

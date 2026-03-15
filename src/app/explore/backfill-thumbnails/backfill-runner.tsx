@@ -55,6 +55,7 @@ export function BackfillRunner({ games }: { games: BackfillGame[] }) {
   const [delayMs, setDelayMs] = useState(DEFAULT_DELAY_MS);
   const [filter, setFilter] = useState("");
   const [pasteTargetId, setPasteTargetId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
   const abortRef = useRef(false);
   const fileInputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
 
@@ -177,6 +178,17 @@ export function BackfillRunner({ games }: { games: BackfillGame[] }) {
       }
     },
     [updateState],
+  );
+
+  const confirmDelete = useCallback(
+    async () => {
+      if (!deleteTarget) return;
+      const res = await fetch(`/api/games/${deleteTarget.id}`, { method: "DELETE" });
+      if (!res.ok) return;
+      setStates((prev) => prev.filter((s) => s.id !== deleteTarget.id));
+      setDeleteTarget(null);
+    },
+    [deleteTarget],
   );
 
   const handlePasteImage = useCallback(
@@ -361,6 +373,13 @@ export function BackfillRunner({ games }: { games: BackfillGame[] }) {
                 >
                   Upload
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setDeleteTarget({ id: game.id, title: game.title })}
+                  className="shrink-0 text-[9px] uppercase tracking-[0.08em] text-red-400 hover:underline"
+                >
+                  Delete
+                </button>
                 <input
                   ref={(el) => {
                     if (el) fileInputRefs.current.set(game.id, el);
@@ -379,6 +398,37 @@ export function BackfillRunner({ games }: { games: BackfillGame[] }) {
           </div>
         ))}
       </div>
+
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="border border-[var(--color-border)] bg-[var(--color-surface)] p-5 w-full max-w-sm space-y-4">
+            <p className="text-[12px] uppercase tracking-[0.1em] text-[var(--color-text)] font-bold">
+              Delete Game
+            </p>
+            <p className="text-[11px] text-[var(--color-text-secondary)]">
+              Are you sure you want to delete{" "}
+              <span className="text-[var(--color-text)] font-semibold">{deleteTarget.title}</span>?
+              This cannot be undone.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDeleteTarget(null)}
+                className="border border-[var(--color-border)] px-4 py-1.5 text-[10px] uppercase tracking-[0.1em] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-light)]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDelete}
+                className="border border-red-500 px-4 py-1.5 text-[10px] uppercase tracking-[0.1em] text-red-400 hover:bg-red-500/10"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -616,6 +616,14 @@ export async function createStandalonePublishedGame(snapshot: {
   }
 }
 
+export async function deletePublishedGame(gameId: string | ObjectId) {
+  await ensureDbSetup();
+  const result = await getDb()
+    .collection<PublishedGameDocument>("published_games")
+    .deleteOne({ _id: toObjectId(gameId) });
+  return result.deletedCount > 0;
+}
+
 export async function listPublishedGames(limit = 60) {
   const cappedLimit = Math.max(1, Math.min(200, Math.floor(limit)));
   try {

@@ -35,6 +35,12 @@ body {
     -moz-osx-font-smoothing: grayscale;
 }
 
+/* Text selection */
+::selection {
+    background: var(--color-accent-glow-strong);
+    color: var(--color-text);
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar {
     width: 6px;
@@ -103,6 +109,7 @@ body {
     border-color: var(--color-accent);
     color: var(--color-accent);
     background-color: var(--color-accent-glow);
+    transform: translateY(-1px);
 }
 
 .gf-btn-chip:active {
@@ -679,6 +686,15 @@ body {
     }
 }
 
+@keyframes spin360 {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
 @keyframes gameReveal {
     0% {
         opacity: 0;
@@ -732,6 +748,120 @@ body {
 
 .gf-template-card:active {
     transform: scale(0.98);
+}
+
+/* ── Reload spin ── */
+.gf-spin360 {
+    animation: spin360 0.4s ease-in-out;
+}
+
+/* ── Collapsible header hover ── */
+.gf-collapsible-header {
+    cursor: pointer;
+    transition: background-color 0.15s;
+}
+
+.gf-collapsible-header:hover {
+    background-color: var(--color-surface-elevated);
+}
+
+/* ── Composer input focus glow ── */
+.gf-input:focus-within {
+    border-color: var(--color-accent);
+    box-shadow:
+        0 0 0 2px var(--color-accent-glow),
+        inset 0 0 0 1px var(--color-accent-glow);
+}
+
+/* ── Audio wave bars ── */
+.audio-play-btn {
+    cursor: pointer;
+}
+
+.audio-wave-bar {
+    transition: opacity 0.3s ease, height 0.3s ease;
+    transform-origin: bottom;
+}
+
+.audio-wave-bar--active {
+    animation: audioWaveBounce 0.6s ease-in-out infinite alternate;
+}
+
+@keyframes audioWaveBounce {
+    0% {
+        transform: scaleY(0.4);
+    }
+    100% {
+        transform: scaleY(1);
+    }
+}
+
+/* ── Remix button ── */
+.gf-remix-btn {
+    position: relative;
+    border: 1px solid var(--color-accent-dim);
+    background: linear-gradient(135deg, rgba(88, 166, 255, 0.12) 0%, rgba(88, 166, 255, 0.04) 100%);
+    color: var(--color-accent);
+    font-weight: 700;
+    transition:
+        border-color 0.15s,
+        background 0.15s,
+        box-shadow 0.15s,
+        transform 0.1s;
+}
+
+.gf-remix-btn:hover:not(:disabled) {
+    border-color: var(--color-accent);
+    background: linear-gradient(135deg, rgba(88, 166, 255, 0.22) 0%, rgba(88, 166, 255, 0.08) 100%);
+    box-shadow:
+        0 0 10px var(--color-accent-glow),
+        0 0 20px var(--color-accent-glow);
+}
+
+.gf-remix-btn:active:not(:disabled) {
+    transform: scale(0.96);
+    box-shadow: 0 0 4px var(--color-accent-glow);
+}
+
+/* ── Explore card ── */
+.gf-explore-card {
+    opacity: 0;
+    animation: cardFadeIn 0.35s ease-out forwards;
+    transition:
+        border-color 0.15s,
+        background-color 0.15s,
+        box-shadow 0.15s,
+        transform 0.1s;
+}
+
+.gf-explore-card:hover {
+    border-color: var(--color-accent);
+    background-color: var(--color-surface-light);
+    box-shadow: 0 0 12px var(--color-accent-glow);
+}
+
+.gf-explore-card:active {
+    transform: scale(0.99);
+}
+
+/* ── Explore shimmer placeholder ── */
+.explore-shimmer {
+    position: relative;
+    overflow: hidden;
+    background: var(--color-surface);
+}
+
+.explore-shimmer::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+        90deg,
+        transparent 0%,
+        var(--color-accent-glow) 50%,
+        transparent 100%
+    );
+    animation: shimmer 1.8s ease-in-out infinite;
 }
 
 .gf-hide-scrollbar {

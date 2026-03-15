@@ -9,7 +9,18 @@ import {
   useState,
 } from "react";
 import { useRouter } from "next/navigation";
-import type { GameEngine } from "@/lib/game-engine";
+import { type GameEngine, getEngineLabel } from "@/lib/game-engine";
+
+/* ---------- constants ---------- */
+
+const ENGINE_OPTIONS: { value: GameEngine | "all"; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "canvas2d", label: "Canvas" },
+  { value: "threejs", label: "Three.js" },
+  { value: "phaser", label: "Phaser" },
+];
+
+type SortOrder = "newest" | "oldest";
 
 export interface ExploreGameItem {
   id: string;
@@ -163,8 +174,9 @@ function formatDate(value: string) {
 
 /* ---------- ExploreCard ---------- */
 
-function ExploreCard({ game }: { game: ExploreGameItem }) {
+function ExploreCard({ game, index }: { game: ExploreGameItem; index: number }) {
   const router = useRouter();
+  const [forking, setForking] = useState(false);
   const hasThumbnail = typeof game.thumbnail === "string" && game.thumbnail.length > 0;
 
   // Live preview state (only used when no thumbnail)
@@ -228,6 +240,19 @@ function ExploreCard({ game }: { game: ExploreGameItem }) {
     );
   }, [code, game.title, isVisible, hasThumbnail]);
 
+  const handleRemix = useCallback(async () => {
+    if (forking) return;
+    setForking(true);
+    try {
+      const res = await fetch(`/api/games/${game.id}/fork`, { method: "POST" });
+      if (!res.ok) throw new Error("Fork failed");
+      const data = await res.json();
+      router.push(`/?project=${data.projectId}`);
+    } catch {
+      setForking(false);
+    }
+  }, [forking, game.id, router]);
+
   const joinRoomId = `game-${game.id}`;
   const playHref = game.multiplayer
     ? `/play/${game.id}?room=${encodeURIComponent(joinRoomId)}`
@@ -237,68 +262,70 @@ function ExploreCard({ game }: { game: ExploreGameItem }) {
     router.push(`/play/${game.id}?room=${encodeURIComponent(nextRoom)}`);
   };
 
+  const staggerDelay = `${Math.min(index * 40, 600)}ms`;
+
   return (
     <article
       key={game.id}
-      className="border border-[var(--color-border-light)] bg-[var(--color-surface)] p-3"
+      className="gf-explore-card flex flex-col border border-[var(--color-border-light)] bg-[var(--color-surface)] p-3"
+      style={{ animationDelay: staggerDelay }}
     >
-      <div
-        ref={hostRef}
-        className="mb-2 h-[140px] w-full overflow-hidden border border-[var(--color-border)] bg-[var(--color-bg)]"
-      >
-        {hasThumbnail ? (
-          /* eslint-disable-next-line @next/next/no-img-element */
-          <img
-            src={game.thumbnail!}
-            alt={`${game.title} preview`}
-            className="h-full w-full object-contain"
-            loading="lazy"
-          />
-        ) : livePreview ? (
-          livePreview
-        ) : (
-          <div className="flex h-full w-full items-center justify-center">
-            {isVisible && !failed ? (
-              <p className="text-[10px] uppercase tracking-[0.1em] text-[var(--color-text-muted)]">
-                Loading preview...
-              </p>
-            ) : failed ? (
-              <button
-                type="button"
-                onClick={loadPreview}
-                className="text-[10px] uppercase tracking-[0.1em] text-[var(--color-text-muted)] hover:text-[var(--color-accent)] transition-colors"
-              >
-                Preview failed - click to retry
-              </button>
-            ) : (
-              <p className="text-[10px] uppercase tracking-[0.1em] text-[var(--color-text-muted)]">
-                Preview
-              </p>
-            )}
-          </div>
-        )}
-      </div>
+      {/* Clickable area — navigates to play */}
+      <Link href={playHref} prefetch={true} className="block flex-1">
+        {/* Preview — 16:9 aspect ratio with engine badge overlay */}
+        <div
+          ref={hostRef}
+          className="relative mb-2 aspect-video w-full overflow-hidden border border-[var(--color-border)] bg-[var(--color-bg)]"
+        >
+          {hasThumbnail ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              src={game.thumbnail!}
+              alt={`${game.title} preview`}
+              className="h-full w-full object-contain"
+              loading="lazy"
+            />
+          ) : livePreview ? (
+            livePreview
+          ) : (
+            <div className="flex h-full w-full items-center justify-center">
+              {isVisible && !failed ? (
+                <div className="explore-shimmer h-full w-full" />
+              ) : failed ? (
+                <span
+                  onClick={(e) => { e.preventDefault(); loadPreview(); }}
+                  className="text-[10px] uppercase tracking-[0.1em] text-[var(--color-text-muted)] hover:text-[var(--color-accent)] transition-colors cursor-pointer"
+                >
+                  Preview failed - click to retry
+                </span>
+              ) : (
+                <p className="text-[10px] uppercase tracking-[0.1em] text-[var(--color-text-muted)]">
+                  Preview
+                </p>
+              )}
+            </div>
+          )}
+          <span className="absolute bottom-1.5 right-1.5 border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-0.5 text-[8px] uppercase tracking-[0.1em] text-[var(--color-text-muted)] opacity-80">
+            {getEngineLabel(game.engine)}
+          </span>
+        </div>
 
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <h2 className="truncate text-[12px] font-semibold uppercase tracking-[0.08em] text-[var(--color-text-secondary)]">
+        <h2 className="mb-1 truncate text-[12px] font-semibold uppercase tracking-[0.08em] text-[var(--color-text-secondary)]">
           {game.title || "Untitled Game"}
         </h2>
-        <span className="border border-[var(--color-border)] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.1em] text-[var(--color-text-muted)]">
-          {game.engine === "threejs" ? "Three.js" : game.engine === "phaser" ? "Phaser" : "Canvas"}
-        </span>
-      </div>
 
-      {game.multiplayer ? (
-        <p className="mb-2 text-[9px] uppercase tracking-[0.08em] text-[var(--color-accent)]">
-          Multiplayer - Room type {game.multiplayerRoomType || "game"}
+        {game.multiplayer ? (
+          <p className="mb-1 text-[9px] uppercase tracking-[0.08em] text-[var(--color-accent)]">
+            Multiplayer - Room type {game.multiplayerRoomType || "game"}
+          </p>
+        ) : null}
+
+        <p className="text-[10px] text-[var(--color-text-muted)]">
+          Published {formatDate(game.createdAt)}
         </p>
-      ) : null}
+      </Link>
 
-      <p className="mb-3 text-[10px] text-[var(--color-text-muted)]">
-        Published {formatDate(game.createdAt)}
-      </p>
-
-      <div className="flex items-center gap-2">
+      <div className="mt-3 flex flex-wrap items-center gap-2">
         <Link
           href={playHref}
           prefetch={true}
@@ -306,18 +333,23 @@ function ExploreCard({ game }: { game: ExploreGameItem }) {
         >
           {game.multiplayer ? "Join Public" : "Play"}
         </Link>
+        <button
+          type="button"
+          onClick={handleRemix}
+          disabled={forking}
+          className="gf-remix-btn px-2.5 py-1 text-[10px] uppercase tracking-[0.1em] disabled:opacity-50"
+        >
+          {forking ? "Opening..." : "Remix"}
+        </button>
         {game.multiplayer ? (
           <button
             type="button"
             onClick={createRoom}
-            className="gf-btn-chip border border-[var(--color-border-light)] bg-[var(--color-surface)] px-2.5 py-1 text-[10px] uppercase tracking-[0.1em] text-[var(--color-text-secondary)] hover:text-[var(--color-accent)]"
+            className="gf-btn-chip border border-[var(--color-border-light)] bg-[var(--color-surface)] px-2.5 py-1 text-[10px] uppercase tracking-[0.1em] text-[var(--color-text-secondary)]"
           >
             Create Room
           </button>
         ) : null}
-        <span className="text-[9px] text-[var(--color-text-muted)]">
-          ID: {game.id.slice(0, 8)}...
-        </span>
       </div>
     </article>
   );
@@ -326,11 +358,89 @@ function ExploreCard({ game }: { game: ExploreGameItem }) {
 /* ---------- ExploreGrid ---------- */
 
 export function ExploreGrid({ games }: { games: ExploreGameItem[] }) {
+  const [search, setSearch] = useState("");
+  const [engineFilter, setEngineFilter] = useState<GameEngine | "all">("all");
+  const [sortOrder, setSortOrder] = useState<SortOrder>("newest");
+
+  const filtered = useMemo(() => {
+    const query = search.toLowerCase().trim();
+    let result = games;
+
+    if (query) {
+      result = result.filter((g) =>
+        (g.title || "").toLowerCase().includes(query),
+      );
+    }
+
+    if (engineFilter !== "all") {
+      result = result.filter((g) => g.engine === engineFilter);
+    }
+
+    if (sortOrder === "oldest") {
+      result = [...result].reverse();
+    }
+
+    return result;
+  }, [games, search, engineFilter, sortOrder]);
+
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-      {games.map((game) => (
-        <ExploreCard key={game.id} game={game} />
-      ))}
+    <div>
+      {/* Toolbar: search + filters + count */}
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        {/* Search */}
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search games..."
+          className="gf-input w-full border border-[var(--color-border-light)] bg-[var(--color-surface)] px-3 py-1.5 text-[11px] text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] sm:max-w-[240px]"
+        />
+
+        <div className="flex items-center gap-3">
+          {/* Engine filter chips */}
+          <div className="flex items-center gap-1">
+            {ENGINE_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setEngineFilter(opt.value)}
+                className={`px-2 py-1 text-[9px] uppercase tracking-[0.1em] border transition-colors ${
+                  engineFilter === opt.value
+                    ? "border-[var(--color-accent)] bg-[var(--color-accent-glow)] text-[var(--color-accent)]"
+                    : "border-[var(--color-border-light)] bg-[var(--color-surface)] text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] hover:border-[var(--color-border-light)]"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Sort toggle */}
+          <button
+            type="button"
+            onClick={() => setSortOrder((o) => (o === "newest" ? "oldest" : "newest"))}
+            className="gf-btn-chip border border-[var(--color-border-light)] bg-[var(--color-surface)] px-2 py-1 text-[9px] uppercase tracking-[0.1em] text-[var(--color-text-muted)]"
+          >
+            {sortOrder === "newest" ? "Newest" : "Oldest"}
+          </button>
+
+        </div>
+      </div>
+
+      {/* Grid */}
+      {filtered.length === 0 ? (
+        <div className="border border-[var(--color-border-light)] bg-[var(--color-surface)] px-4 py-6 text-center">
+          <p className="text-[11px] uppercase tracking-[0.1em] text-[var(--color-text-muted)]">
+            No games match your filters
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {filtered.map((game, i) => (
+            <ExploreCard key={game.id} game={game} index={i} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

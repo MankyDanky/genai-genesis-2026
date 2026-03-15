@@ -40,9 +40,9 @@ export function TemplateGallery({ onSelect }: TemplateGalleryProps) {
             }`}
           >
             {cat.label}
-            {activeTab === cat.id && (
-              <span className="absolute bottom-0 left-2 right-2 h-[2px] bg-[var(--color-accent)]" />
-            )}
+            <span className={`absolute bottom-0 left-2 right-2 h-[2px] bg-[var(--color-accent)] transition-all duration-150 origin-center ${
+              activeTab === cat.id ? "opacity-100 scale-x-100" : "opacity-0 scale-x-0"
+            }`} />
           </button>
         ))}
       </div>

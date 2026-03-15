@@ -26,7 +26,7 @@ export function ConsolePanel() {
         <button
           type="button"
           onClick={clearConsoleLogs}
-          className="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+          className="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
         >
           Clear
         </button>

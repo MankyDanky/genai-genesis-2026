@@ -198,7 +198,7 @@ export function GamePlayer({
             <span className="text-[10px] text-red-400">{forkError}</span>
           ) : null}
           <Link
-            href="/"
+            href="/?new=1"
             className="text-[10px] text-[var(--color-accent)] uppercase tracking-[0.1em] font-semibold hover:underline"
           >
             Make your own

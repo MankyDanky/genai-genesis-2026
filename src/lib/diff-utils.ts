@@ -3,8 +3,7 @@ import { diffLines } from "diff";
 export interface DiffLine {
   type: "added" | "removed" | "context";
   html: string;
-  oldLineNum: number | null;
-  newLineNum: number | null;
+  lineNum: number;
 }
 
 export function computeHighlightedDiff(
@@ -19,8 +18,7 @@ export function computeHighlightedDiff(
   const result: DiffLine[] = [];
   let oldIdx = 0;
   let newIdx = 0;
-  let oldLineNum = 1;
-  let newLineNum = 1;
+  let lineNum = 1;
 
   for (const change of changes) {
     const count = change.count ?? 0;
@@ -30,8 +28,7 @@ export function computeHighlightedDiff(
         result.push({
           type: "added",
           html: newHighlighted[newIdx++] ?? "",
-          oldLineNum: null,
-          newLineNum: newLineNum++,
+          lineNum: lineNum++,
         });
       }
     } else if (change.removed) {
@@ -39,8 +36,7 @@ export function computeHighlightedDiff(
         result.push({
           type: "removed",
           html: oldHighlighted[oldIdx++] ?? "",
-          oldLineNum: oldLineNum++,
-          newLineNum: null,
+          lineNum: lineNum++,
         });
       }
     } else {
@@ -48,8 +44,7 @@ export function computeHighlightedDiff(
         result.push({
           type: "context",
           html: oldHighlighted[oldIdx++] ?? "",
-          oldLineNum: oldLineNum++,
-          newLineNum: newLineNum++,
+          lineNum: lineNum++,
         });
         newIdx++;
       }
