@@ -1,7 +1,7 @@
 const ELEVENLABS_SOUND_ENDPOINT =
-  "https://api.elevenlabs.io/v1/sound-generation?output_format=mp3_44100_128";
+  "https://api.elevenlabs.io/v1/sound-generation?output_format=pcm_44100";
 const ELEVENLABS_MUSIC_ENDPOINT =
-  "https://api.elevenlabs.io/v1/music?output_format=mp3_44100_128";
+  "https://api.elevenlabs.io/v1/music?output_format=pcm_44100";
 const ELEVENLABS_SOUND_MODEL = "eleven_text_to_sound_v2";
 const ELEVENLABS_MUSIC_MODEL = "music_v1";
 const ELEVENLABS_SOUND_TIMEOUT_MS = 45_000;
@@ -39,6 +39,32 @@ function buildErrorMessage(
 function clampDuration(value: number, min: number, max: number, fallback: number): number {
   const numericValue = Number.isFinite(value) ? value : fallback;
   return Math.min(max, Math.max(min, numericValue));
+}
+
+/** Wrap raw PCM 16-bit LE mono samples in a WAV container. */
+function wrapPcmInWav(pcm: Buffer, sampleRate: number): Buffer {
+  const numChannels = 1;
+  const bitsPerSample = 16;
+  const byteRate = sampleRate * numChannels * (bitsPerSample / 8);
+  const blockAlign = numChannels * (bitsPerSample / 8);
+  const dataSize = pcm.byteLength;
+  const header = Buffer.alloc(44);
+
+  header.write("RIFF", 0);
+  header.writeUInt32LE(36 + dataSize, 4);
+  header.write("WAVE", 8);
+  header.write("fmt ", 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(numChannels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(byteRate, 28);
+  header.writeUInt16LE(blockAlign, 32);
+  header.writeUInt16LE(bitsPerSample, 34);
+  header.write("data", 36);
+  header.writeUInt32LE(dataSize, 40);
+
+  return Buffer.concat([header, pcm]);
 }
 
 async function generateAudioDataUrl({
@@ -89,9 +115,9 @@ async function generateAudioDataUrl({
       throw new Error("ElevenLabs returned empty audio data");
     }
 
-    const base64 = Buffer.from(arrayBuffer).toString("base64");
-    const contentType = response.headers.get("content-type") || "audio/mpeg";
-    return `data:${contentType};base64,${base64}`;
+    const wavBuffer = wrapPcmInWav(Buffer.from(arrayBuffer), 44100);
+    const base64 = wavBuffer.toString("base64");
+    return `data:audio/wav;base64,${base64}`;
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
       throw new Error(`ElevenLabs ${label} generation timed out`);

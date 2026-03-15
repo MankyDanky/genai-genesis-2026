@@ -13,6 +13,8 @@ import type { PlanningTodo, ConsoleLogEntry, GeneratedImage, PendingFileWrite, G
 import { getGeneratedAudioId } from "@/lib/generated-audio";
 import type { PersistedChatMessage } from "@/lib/db/schema";
 import type { RuntimeEnvMap } from "@/lib/runtime-env";
+import { TemplateGallery } from "@/components/template-gallery";
+import type { GameTemplate } from "@/lib/game-templates";
 
 interface ChatPanelProps {
   currentCode: string | null;
@@ -67,12 +69,15 @@ type ModelChoice =
   | "grok-4.20-multi-agent-beta-0309"
   | "grok-4.20-beta-latest-non-reasoning";
 
-const EXAMPLE_PROMPTS = [
-  "Space Invaders",
-  "Asteroids",
-  "Snake Game",
-  "Breakout",
+const MODEL_OPTIONS: { value: ModelChoice; label: string }[] = [
+  { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
+  { value: "claude-opus-4-6", label: "Claude Opus 4.6" },
+  { value: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
+  { value: "grok-code-fast-1", label: "Grok Code Fast 1" },
+  { value: "grok-4.20-multi-agent-beta-0309", label: "Grok 4.20 Multi-Agent" },
+  { value: "grok-4.20-beta-latest-non-reasoning", label: "Grok 4.20 Non-Reasoning" },
 ];
+
 
 function toMentionSlug(value: string): string {
   return value
@@ -399,37 +404,83 @@ function GeneratedAudioPlayer({
     next.play().then(() => setIsPlaying(true)).catch(() => {});
   }, [dataUrl, status]);
 
+  const formatDuration = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = Math.round(seconds % 60);
+    return m > 0 ? `${m}:${String(s).padStart(2, "0")}` : `0:${String(s).padStart(2, "0")}`;
+  };
+
+  const barCount = 20;
+  const barHeights = useMemo(
+    () => Array.from({ length: barCount }, () => 0.2 + Math.random() * 0.8),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [audioName]
+  );
+
   return (
-    <div className="px-3 py-2 border-t border-[var(--color-border)] bg-[var(--color-bg)]">
-      <div className="flex items-center justify-between gap-2">
+    <div className="px-3 py-2.5 border-t border-[var(--color-border)] bg-[var(--color-bg)]">
+      <div className="flex items-center gap-2 mb-1.5">
         <span className="text-[10px] text-[var(--color-text-muted)] uppercase tracking-[0.1em]">
           {audioKind === "music" ? "Music" : "SFX"}: {audioName}
         </span>
-        {status === "pending" ? (
-          <span className="text-[10px] text-[var(--color-accent)] flex items-center gap-1">
-            <svg width="9" height="9" viewBox="0 0 10 10" className="animate-spin">
-              <circle cx="5" cy="5" r="4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeDasharray="18" strokeLinecap="round" />
-            </svg>
-            Generating
-          </span>
-        ) : status === "ready" ? (
+      </div>
+
+      {status === "pending" ? (
+        <div className="flex items-center gap-2">
+          <svg width="9" height="9" viewBox="0 0 10 10" className="animate-spin text-[var(--color-accent)]">
+            <circle cx="5" cy="5" r="4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeDasharray="18" strokeLinecap="round" />
+          </svg>
+          <span className="text-[10px] text-[var(--color-accent)]">Generating...</span>
+        </div>
+      ) : status === "ready" ? (
+        <div className="flex items-center gap-2.5">
           <button
             type="button"
             onClick={togglePlayback}
-            className="gf-btn-chip text-[10px] px-2 py-1 border border-[var(--color-border-light)] bg-[var(--color-surface-light)] text-[var(--color-accent)]"
+            className="audio-play-btn flex-shrink-0 w-7 h-7 rounded-full border border-[var(--color-accent)] bg-transparent flex items-center justify-center hover:bg-[var(--color-accent)] transition-colors group/play"
+            aria-label={isPlaying ? "Pause" : "Play"}
           >
-            {isPlaying ? "Pause preview" : "Preview"}
+            {isPlaying ? (
+              <svg width="10" height="10" viewBox="0 0 10 10" className="text-[var(--color-accent)] group-hover/play:text-[var(--color-bg)]">
+                <rect x="2" y="1.5" width="2" height="7" rx="0.5" fill="currentColor" />
+                <rect x="6" y="1.5" width="2" height="7" rx="0.5" fill="currentColor" />
+              </svg>
+            ) : (
+              <svg width="10" height="10" viewBox="0 0 10 10" className="text-[var(--color-accent)] group-hover/play:text-[var(--color-bg)]">
+                <polygon points="3,1.5 8.5,5 3,8.5" fill="currentColor" />
+              </svg>
+            )}
           </button>
-        ) : (
+
+          <div className="flex items-end gap-[2px] h-5 flex-1 min-w-0">
+            {barHeights.map((h, i) => (
+              <div
+                key={i}
+                className={`audio-wave-bar flex-1 rounded-[1px] ${isPlaying ? "audio-wave-bar--active" : ""}`}
+                style={{
+                  height: `${h * 100}%`,
+                  backgroundColor: "var(--color-accent)",
+                  opacity: isPlaying ? 1 : 0.35,
+                  animationDelay: isPlaying ? `${i * 0.05}s` : undefined,
+                }}
+              />
+            ))}
+          </div>
+
+          {duration != null && (
+            <span className="flex-shrink-0 text-[10px] text-[var(--color-text-muted)] font-mono tabular-nums">
+              {formatDuration(duration)}
+            </span>
+          )}
+        </div>
+      ) : (
+        <div>
           <span className="text-[10px] text-[var(--color-danger)]">Error</span>
-        )}
-      </div>
-      {status === "error" && errorText ? (
-        <p className="mt-1 text-[10px] text-[var(--color-danger)]">{errorText}</p>
-      ) : null}
-      {status === "ready" && duration ? (
-        <p className="mt-1 text-[10px] text-[var(--color-text-muted)]">Duration: {Math.round(duration * 10) / 10}s</p>
-      ) : null}
+          {errorText ? (
+            <p className="mt-1 text-[10px] text-[var(--color-danger)]">{errorText}</p>
+          ) : null}
+        </div>
+      )}
     </div>
   );
 }
@@ -562,7 +613,7 @@ function ToolCallCard({ part, audioTrack }: {
       <button
         type="button"
         onClick={() => setIsExpanded((prev) => !prev)}
-        className="w-full px-3 py-1.5 border-b border-[var(--color-border)] bg-[var(--color-surface-light)] flex items-center gap-2 text-left"
+        className="gf-collapsible-header w-full px-3 py-1.5 border-b border-[var(--color-border)] bg-[var(--color-surface-light)] flex items-center gap-2 text-left"
         aria-label={isToolExpanded ? "Collapse tool details" : "Expand tool details"}
       >
         <span className="tool-chevron text-[10px] text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
@@ -575,14 +626,20 @@ function ToolCallCard({ part, audioTrack }: {
           {toolName}
         </span>
       </button>
-      <div className="px-3 py-2 flex items-center gap-2">
-        <span style={{ color: statusColor }}>
-          {state === "input-streaming" ? (
+      <div className="px-3 py-2 flex items-center gap-2 min-h-[34px]">
+        <span className="w-[10px] h-[10px] flex items-center justify-center shrink-0" style={{ color: statusColor }}>
+          {state === "input-streaming" || !["input-available", "output-available", "output-error"].includes(state) ? (
             <svg width="10" height="10" viewBox="0 0 10 10" className="animate-spin">
               <circle cx="5" cy="5" r="4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeDasharray="18" strokeLinecap="round" />
             </svg>
+          ) : state === "output-error" ? (
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M2.5 2.5l5 5M7.5 2.5l-5 5" />
+            </svg>
           ) : (
-            <span className="text-[10px]">&#9654;</span>
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M2 5.5l2.5 2.5L8 3" />
+            </svg>
           )}
         </span>
         <span className="text-[11px]" style={{ color: statusColor }}>
@@ -620,7 +677,7 @@ function ReasoningBlock({ text, isStreaming }: { text: string; isStreaming: bool
       <button
         type="button"
         onClick={() => setIsOpen((prev) => !prev)}
-        className="w-full px-3 py-1.5 cursor-pointer select-none flex items-center gap-2 bg-[var(--color-surface-light)] text-left"
+        className="gf-collapsible-header w-full px-3 py-1.5 cursor-pointer select-none flex items-center gap-2 bg-[var(--color-surface-light)] text-left"
       >
         <span className={`reasoning-chevron text-[10px] text-[var(--color-text-muted)] ${isOpen ? "is-open" : ""}`}>▸</span>
         <span className="text-[9px] text-[var(--color-text-muted)] uppercase tracking-[0.15em] font-bold">
@@ -685,10 +742,13 @@ export function ChatPanel({
 }: ChatPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef(true);
+  const scrollRafRef = useRef<number>(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const modeMenuRef = useRef<HTMLDivElement>(null);
   const modeMenuPopupRef = useRef<HTMLDivElement>(null);
   const modeMenuButtonRef = useRef<HTMLButtonElement>(null);
+  const modelMenuBtnRef = useRef<HTMLButtonElement>(null);
+  const modelMenuPopupRef = useRef<HTMLDivElement>(null);
   const planListRef = useRef<HTMLDivElement>(null);
   const lastPlanAutoScrollRef = useRef(0);
   const processedToolPayloadRef = useRef<Map<string, string>>(new Map());
@@ -702,6 +762,8 @@ export function ChatPanel({
   const [composerMode, setComposerMode] = useState<ComposerMode>("agent");
   const [isModeMenuOpen, setIsModeMenuOpen] = useState(false);
   const [modeMenuPos, setModeMenuPos] = useState({ x: 0, y: 0 });
+  const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
+  const [modelMenuPos, setModelMenuPos] = useState({ x: 0, y: 0 });
   const [isPlanCollapsed, setIsPlanCollapsed] = useState(false);
   const [dragTodoId, setDragTodoId] = useState<string | null>(null);
   const [planDropTarget, setPlanDropTarget] = useState<{ id: string; position: "before" | "after" } | null>(null);
@@ -1017,6 +1079,55 @@ export function ChatPanel({
       window.removeEventListener("scroll", updatePosition, true);
     };
   }, [isModeMenuOpen]);
+
+  useEffect(() => {
+    if (!isModelMenuOpen) return;
+    const onClick = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (modelMenuBtnRef.current?.contains(target)) return;
+      if (modelMenuPopupRef.current?.contains(target)) return;
+      setIsModelMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [isModelMenuOpen]);
+
+  useEffect(() => {
+    if (!isModelMenuOpen) return;
+    const btnEl = modelMenuBtnRef.current;
+    const menuEl = modelMenuPopupRef.current;
+    if (!btnEl || !menuEl) return;
+
+    const updatePosition = () => {
+      const btnRect = btnEl.getBoundingClientRect();
+      const menuRect = menuEl.getBoundingClientRect();
+      const pad = 8;
+      const gap = 4;
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+
+      let x = btnRect.left;
+      let y = btnRect.top - menuRect.height - gap;
+
+      if (x + menuRect.width > vw - pad) x = vw - menuRect.width - pad;
+      if (x < pad) x = pad;
+      if (y < pad) {
+        y = btnRect.bottom + gap;
+        if (y + menuRect.height > vh - pad) y = vh - menuRect.height - pad;
+      }
+      if (y < pad) y = pad;
+
+      setModelMenuPos({ x, y });
+    };
+
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [isModelMenuOpen]);
 
   const toggleModeMenu = useCallback(() => {
     if (isModeMenuOpen) {
@@ -1424,7 +1535,7 @@ export function ChatPanel({
     const el = scrollRef.current;
     if (!el) return;
     const handleScroll = () => {
-      const threshold = 80;
+      const threshold = 200;
       isNearBottomRef.current =
         el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
     };
@@ -1433,10 +1544,19 @@ export function ChatPanel({
   }, []);
 
   useEffect(() => {
-    if (isNearBottomRef.current && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
+    if (!isNearBottomRef.current) return;
+    cancelAnimationFrame(scrollRafRef.current);
+    scrollRafRef.current = requestAnimationFrame(() => {
+      scrollRef.current?.scrollTo({
+        top: scrollRef.current.scrollHeight,
+        behavior: "smooth",
+      });
+    });
   }, [messages, status]);
+
+  useEffect(() => {
+    return () => cancelAnimationFrame(scrollRafRef.current);
+  }, []);
 
   const isLoading = status === "streaming" || status === "submitted";
 
@@ -1597,10 +1717,56 @@ export function ChatPanel({
     };
   }, [clampMentionsPopup]);
 
-  const handleExampleClick = (prompt: string) => {
-    setInput(prompt.toLowerCase());
-    textareaRef.current?.focus();
-  };
+  const handleTemplateSelect = useCallback(
+    (template: GameTemplate) => {
+      if (isLoading) return;
+      setSelectedEngine(template.engine);
+      onEngineUpdate(template.engine);
+      clearPendingFileWrites();
+      sendMessage(
+        { text: template.starterPrompt },
+        {
+          body: {
+            currentCode,
+            currentProjectFiles: projectFiles,
+            planningTodos,
+            mentionedFiles: [],
+            audioTracks: audioTracks.map((track) => ({
+              id: track.id,
+              name: track.name,
+              type: track.type,
+              description: track.description,
+              status: track.status,
+              duration: track.duration,
+              error: track.error ?? null,
+            })),
+            consoleLogs: [],
+            generatedImages,
+            runtimeEnv,
+            composerMode,
+            planningMode,
+            gameEngine: template.engine,
+            templateSkills: template.skills,
+          },
+        }
+      );
+    },
+    [
+      isLoading,
+      sendMessage,
+      currentCode,
+      projectFiles,
+      planningTodos,
+      audioTracks,
+      generatedImages,
+      runtimeEnv,
+      composerMode,
+      planningMode,
+      setSelectedEngine,
+      onEngineUpdate,
+      clearPendingFileWrites,
+    ]
+  );
 
   const handleUpdateTodo = (todoId: string, updates: Partial<PlanningTodo>) => {
     const next = planningTodos.map((todo) =>
@@ -1673,31 +1839,10 @@ export function ChatPanel({
     <div className="flex h-full flex-col bg-[var(--color-bg)]">
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
         {isEmpty ? (
-          <div className="flex flex-col items-center justify-center h-full gap-4 px-2">
-            <div className="text-center space-y-2">
-              <p className="text-[13px] text-[var(--color-text-secondary)] font-semibold">
-                What do you want to build?
-              </p>
-              <p className="text-[11px] text-[var(--color-text-muted)]">
-                Describe a game or try an example
-              </p>
-            </div>
-            <div className="flex flex-wrap justify-center gap-1.5">
-              {EXAMPLE_PROMPTS.map((prompt) => (
-                <button
-                  key={prompt}
-                  type="button"
-                  onClick={() => handleExampleClick(prompt)}
-                  className="gf-btn-chip text-[10px] text-[var(--color-text-muted)] px-2.5 py-1 border border-[var(--color-border)] uppercase tracking-wider font-semibold"
-                >
-                  {prompt}
-                </button>
-              ))}
-            </div>
-          </div>
+          <TemplateGallery onSelect={handleTemplateSelect} />
         ) : (
           <>
-            {messages.map((message) => {
+            {messages.map((message, messageIndex) => {
               const textParts = message.parts.filter(
                 (p): p is Extract<typeof p, { type: "text" }> => p.type === "text"
               );
@@ -1741,13 +1886,14 @@ export function ChatPanel({
                             isStreaming={isLoading && (part as { state?: string }).state === "streaming"}
                           />
                         ))}
-                        {textContent && (
-                          <div className="chat-markdown text-[12px] text-[var(--color-text)] leading-relaxed">
-                            <Markdown remarkPlugins={[remarkGfm]}>{textContent}</Markdown>
-                          </div>
-                        )}
-                        {toolParts.map((part, i) => (
-                          (() => {
+                        {(() => {
+                          const isStreamingMessage = isLoading && messageIndex === messages.length - 1;
+                          const textBlock = textContent ? (
+                            <div key="text-block" className="chat-markdown text-[12px] text-[var(--color-text)] leading-relaxed">
+                              <Markdown remarkPlugins={[remarkGfm]}>{textContent}</Markdown>
+                            </div>
+                          ) : null;
+                          const toolBlocks = toolParts.map((part, i) => {
                             const typedPart = part as {
                               type: string;
                               state?: string;
@@ -1769,8 +1915,13 @@ export function ChatPanel({
                                 audioTrack={audioId ? audioTrackById.get(audioId) : undefined}
                               />
                             );
-                          })()
-                        ))}
+                          });
+                          return isStreamingMessage ? (
+                            <>{toolBlocks}{textBlock}</>
+                          ) : (
+                            <>{textBlock}{toolBlocks}</>
+                          );
+                        })()}
                       </div>
                     </div>
                   )}
@@ -2086,18 +2237,53 @@ export function ChatPanel({
 
         <div className="flex items-center gap-2 px-1 pt-1">
           <label className="text-[9px] uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Model</label>
-          <select
-            value={selectedModel}
-            onChange={(e) => setSelectedModel(e.target.value as ModelChoice)}
-            className="h-6 bg-[var(--color-surface)] border border-[var(--color-border)] text-[10px] uppercase tracking-[0.08em] text-[var(--color-text-secondary)] px-1.5"
+          <button
+            ref={modelMenuBtnRef}
+            type="button"
+            onClick={() => {
+              if (isModelMenuOpen) {
+                setIsModelMenuOpen(false);
+                return;
+              }
+              const el = modelMenuBtnRef.current;
+              if (el) {
+                const rect = el.getBoundingClientRect();
+                setModelMenuPos({ x: rect.left, y: rect.top - 4 });
+              }
+              setIsModelMenuOpen(true);
+            }}
+            className="flex items-center gap-1.5 h-6 px-1.5 border border-[var(--color-border)] bg-[var(--color-surface)] text-[10px] uppercase tracking-[0.08em] text-[var(--color-text-secondary)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] transition-colors"
           >
-            <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
-            <option value="claude-opus-4-6">Claude Opus 4.6</option>
-            <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5</option>
-            <option value="grok-code-fast-1">Grok Code Fast 1</option>
-            <option value="grok-4.20-multi-agent-beta-0309">Grok 4.20 Multi-Agent Beta</option>
-            <option value="grok-4.20-beta-latest-non-reasoning">Grok 4.20 Non-Reasoning</option>
-          </select>
+            <span>{MODEL_OPTIONS.find((m) => m.value === selectedModel)?.label ?? selectedModel}</span>
+            <span className="text-[9px]">{isModelMenuOpen ? "\u25b4" : "\u25be"}</span>
+          </button>
+          {canPortal && isModelMenuOpen
+            ? createPortal(
+                <div
+                  ref={modelMenuPopupRef}
+                  className="fixed min-w-[180px] bg-[var(--color-surface)] border border-[var(--color-border-light)] z-50 shadow-[0_12px_24px_rgba(0,0,0,0.45)]"
+                  style={{ left: modelMenuPos.x, top: modelMenuPos.y }}
+                >
+                  {MODEL_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => {
+                        setSelectedModel(opt.value);
+                        setIsModelMenuOpen(false);
+                      }}
+                      className={`w-full text-left px-2 py-1.5 text-[10px] uppercase tracking-wider flex items-center justify-between hover:bg-[var(--color-surface-light)] ${
+                        selectedModel === opt.value ? "text-[var(--color-accent)]" : "text-[var(--color-text-secondary)]"
+                      }`}
+                    >
+                      <span>{opt.label}</span>
+                      <span className="text-[10px]">{selectedModel === opt.value ? "\u2713" : ""}</span>
+                    </button>
+                  ))}
+                </div>,
+                document.body,
+              )
+            : null}
         </div>
 
         <div className="flex items-center justify-between px-1 pt-1">

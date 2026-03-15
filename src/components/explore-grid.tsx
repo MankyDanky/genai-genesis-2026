@@ -1,22 +1,43 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useRouter } from "next/navigation";
+import { type GameEngine, getEngineLabel } from "@/lib/game-engine";
+
+/* ---------- constants ---------- */
+
+const ENGINE_OPTIONS: { value: GameEngine | "all"; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "canvas2d", label: "Canvas" },
+  { value: "threejs", label: "Three.js" },
+  { value: "phaser", label: "Phaser" },
+];
+
+type SortOrder = "newest" | "oldest";
 
 export interface ExploreGameItem {
   id: string;
   title: string;
-  engine: "canvas2d" | "threejs";
+  engine: GameEngine;
   multiplayer: boolean;
   multiplayerRoomType: string | null;
+  thumbnail: string | null;
   createdAt: string;
 }
 
-const PREVIEW_TIMEOUT_MS = 7_000;
-const PREVIEW_CONCURRENCY = 3;
+/* ---------- live preview fetcher (fallback when no thumbnail) ---------- */
 
-const previewCodeCache = new Map<string, string | null>();
+const PREVIEW_TIMEOUT_MS = 12_000;
+const PREVIEW_CONCURRENCY = 6;
+
+const previewCodeCache = new Map<string, string>();
 const previewInflight = new Map<string, Promise<string | null>>();
 const previewQueue: Array<() => void> = [];
 let activePreviewFetches = 0;
@@ -45,9 +66,8 @@ function queuePreviewTask<T>(task: () => Promise<T>) {
 }
 
 function fetchPreviewCode(gameId: string): Promise<string | null> {
-  if (previewCodeCache.has(gameId)) {
-    return Promise.resolve(previewCodeCache.get(gameId) ?? null);
-  }
+  const cached = previewCodeCache.get(gameId);
+  if (cached) return Promise.resolve(cached);
 
   const existing = previewInflight.get(gameId);
   if (existing) return existing;
@@ -59,18 +79,15 @@ function fetchPreviewCode(gameId: string): Promise<string | null> {
       const res = await fetch(`/api/games/${gameId}/preview`, {
         signal: controller.signal,
       });
-      if (!res.ok) {
-        previewCodeCache.set(gameId, null);
-        return null;
-      }
+      if (!res.ok) return null;
       const payload = (await res.json()) as { code?: string };
-      const code = typeof payload.code === "string" && payload.code.length > 0
-        ? payload.code
-        : null;
-      previewCodeCache.set(gameId, code);
+      const code =
+        typeof payload.code === "string" && payload.code.length > 0
+          ? payload.code
+          : null;
+      if (code) previewCodeCache.set(gameId, code);
       return code;
     } catch {
-      previewCodeCache.set(gameId, null);
       return null;
     } finally {
       clearTimeout(timer);
@@ -81,6 +98,8 @@ function fetchPreviewCode(gameId: string): Promise<string | null> {
   previewInflight.set(gameId, request);
   return request;
 }
+
+/* ---------- preview srcDoc builder ---------- */
 
 function buildFittedPreviewSrcDoc(code: string): string {
   const fitScript = `<script>(function(){
@@ -141,6 +160,8 @@ function buildFittedPreviewSrcDoc(code: string): string {
   return `${fitScript}${code}`;
 }
 
+/* ---------- helpers ---------- */
+
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("en-US", {
     year: "numeric",
@@ -151,15 +172,24 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
-function ExploreCard({ game }: { game: ExploreGameItem }) {
+/* ---------- ExploreCard ---------- */
+
+function ExploreCard({ game, index }: { game: ExploreGameItem; index: number }) {
   const router = useRouter();
-  const [code, setCode] = useState<string | null>(null);
+  const [forking, setForking] = useState(false);
+  const hasThumbnail = typeof game.thumbnail === "string" && game.thumbnail.length > 0;
+
+  // Live preview state (only used when no thumbnail)
+  const [code, setCode] = useState<string | null>(
+    hasThumbnail ? null : (previewCodeCache.get(game.id) ?? null),
+  );
   const [isVisible, setIsVisible] = useState(false);
   const [failed, setFailed] = useState(false);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const fetchStartedRef = useRef(false);
 
   useEffect(() => {
+    if (hasThumbnail) return; // No need to observe for lazy loading
     const el = hostRef.current;
     if (!el) return;
     const obs = new IntersectionObserver(
@@ -167,119 +197,250 @@ function ExploreCard({ game }: { game: ExploreGameItem }) {
         const nextVisible = entries.some((entry) => entry.isIntersecting);
         setIsVisible(nextVisible);
       },
-      { rootMargin: "220px 0px" }
+      { rootMargin: "400px 0px" },
     );
     obs.observe(el);
     return () => obs.disconnect();
-  }, []);
+  }, [hasThumbnail]);
 
-  useEffect(() => {
-    if (!isVisible || code || failed || fetchStartedRef.current) return;
-    let cancelled = false;
+  const loadPreview = useCallback(() => {
+    if (hasThumbnail || code || fetchStartedRef.current) return;
     fetchStartedRef.current = true;
+    setFailed(false);
     fetchPreviewCode(game.id)
       .then((nextCode) => {
-        if (cancelled) return;
-        if (!nextCode) {
+        if (nextCode) {
+          setCode(nextCode);
+        } else {
           setFailed(true);
-          return;
+          fetchStartedRef.current = false;
         }
-        setCode(nextCode);
       })
       .catch(() => {
-        if (!cancelled) setFailed(true);
+        setFailed(true);
+        fetchStartedRef.current = false;
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [code, failed, game.id, isVisible]);
+  }, [code, game.id, hasThumbnail]);
 
-  const preview = useMemo(() => {
-    if (!isVisible || !code) return null;
+  useEffect(() => {
+    if (hasThumbnail || !isVisible || code || failed) return;
+    loadPreview();
+  }, [hasThumbnail, isVisible, code, failed, loadPreview]);
+
+  const livePreview = useMemo(() => {
+    if (hasThumbnail || !isVisible || !code) return null;
     return (
       <iframe
         title={`${game.title} preview`}
         srcDoc={buildFittedPreviewSrcDoc(code)}
         sandbox="allow-scripts"
+        loading="lazy"
         className="h-full w-full border-none pointer-events-none"
       />
     );
-  }, [code, game.title, isVisible]);
+  }, [code, game.title, isVisible, hasThumbnail]);
+
+  const handleRemix = useCallback(async () => {
+    if (forking) return;
+    setForking(true);
+    try {
+      const res = await fetch(`/api/games/${game.id}/fork`, { method: "POST" });
+      if (!res.ok) throw new Error("Fork failed");
+      const data = await res.json();
+      router.push(`/?project=${data.projectId}`);
+    } catch {
+      setForking(false);
+    }
+  }, [forking, game.id, router]);
 
   const joinRoomId = `game-${game.id}`;
-  const playHref = game.multiplayer ? `/play/${game.id}?room=${encodeURIComponent(joinRoomId)}` : `/play/${game.id}`;
+  const playHref = game.multiplayer
+    ? `/play/${game.id}?room=${encodeURIComponent(joinRoomId)}`
+    : `/play/${game.id}`;
   const createRoom = () => {
     const nextRoom = `${game.id}-${Math.random().toString(36).slice(2, 8)}`;
     router.push(`/play/${game.id}?room=${encodeURIComponent(nextRoom)}`);
   };
 
+  const staggerDelay = `${Math.min(index * 40, 600)}ms`;
+
   return (
     <article
       key={game.id}
-      className="border border-[var(--color-border-light)] bg-[var(--color-surface)] p-3"
+      className="gf-explore-card flex flex-col border border-[var(--color-border-light)] bg-[var(--color-surface)] p-3"
+      style={{ animationDelay: staggerDelay }}
     >
-      <div
-        ref={hostRef}
-        className="mb-2 h-[140px] w-full overflow-hidden border border-[var(--color-border)] bg-[var(--color-bg)]"
-      >
-        {preview ? (
-          preview
-        ) : (
-          <div className="flex h-full w-full items-center justify-center">
-            <p className="text-[10px] uppercase tracking-[0.1em] text-[var(--color-text-muted)]">
-              {isVisible && !failed ? "Loading preview..." : failed ? "Preview unavailable" : "Preview"}
-            </p>
-          </div>
-        )}
-      </div>
+      {/* Clickable area — navigates to play */}
+      <Link href={playHref} prefetch={true} className="block flex-1">
+        {/* Preview — 16:9 aspect ratio with engine badge overlay */}
+        <div
+          ref={hostRef}
+          className="relative mb-2 aspect-video w-full overflow-hidden border border-[var(--color-border)] bg-[var(--color-bg)]"
+        >
+          {hasThumbnail ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              src={game.thumbnail!}
+              alt={`${game.title} preview`}
+              className="h-full w-full object-contain"
+              loading="lazy"
+            />
+          ) : livePreview ? (
+            livePreview
+          ) : (
+            <div className="flex h-full w-full items-center justify-center">
+              {isVisible && !failed ? (
+                <div className="explore-shimmer h-full w-full" />
+              ) : failed ? (
+                <span
+                  onClick={(e) => { e.preventDefault(); loadPreview(); }}
+                  className="text-[10px] uppercase tracking-[0.1em] text-[var(--color-text-muted)] hover:text-[var(--color-accent)] transition-colors cursor-pointer"
+                >
+                  Preview failed - click to retry
+                </span>
+              ) : (
+                <p className="text-[10px] uppercase tracking-[0.1em] text-[var(--color-text-muted)]">
+                  Preview
+                </p>
+              )}
+            </div>
+          )}
+          <span className="absolute bottom-1.5 right-1.5 border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-0.5 text-[8px] uppercase tracking-[0.1em] text-[var(--color-text-muted)] opacity-80">
+            {getEngineLabel(game.engine)}
+          </span>
+        </div>
 
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <h2 className="truncate text-[12px] font-semibold uppercase tracking-[0.08em] text-[var(--color-text-secondary)]">
+        <h2 className="mb-1 truncate text-[12px] font-semibold uppercase tracking-[0.08em] text-[var(--color-text-secondary)]">
           {game.title || "Untitled Game"}
         </h2>
-        <span className="border border-[var(--color-border)] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.1em] text-[var(--color-text-muted)]">
-          {game.engine === "threejs" ? "Three.js" : "Canvas"}
-        </span>
-      </div>
 
-      {game.multiplayer ? (
-        <p className="mb-2 text-[9px] uppercase tracking-[0.08em] text-[var(--color-accent)]">
-          Multiplayer • Room type {game.multiplayerRoomType || "game"}
+        {game.multiplayer ? (
+          <p className="mb-1 text-[9px] uppercase tracking-[0.08em] text-[var(--color-accent)]">
+            Multiplayer - Room type {game.multiplayerRoomType || "game"}
+          </p>
+        ) : null}
+
+        <p className="text-[10px] text-[var(--color-text-muted)]">
+          Published {formatDate(game.createdAt)}
         </p>
-      ) : null}
+      </Link>
 
-      <p className="mb-3 text-[10px] text-[var(--color-text-muted)]">
-        Published {formatDate(game.createdAt)}
-      </p>
-
-      <div className="flex items-center gap-2">
+      <div className="mt-3 flex flex-wrap items-center gap-2">
         <Link
           href={playHref}
+          prefetch={true}
           className="gf-btn-chip border border-[var(--color-border-light)] bg-[var(--color-surface-light)] px-2.5 py-1 text-[10px] uppercase tracking-[0.1em] text-[var(--color-accent)]"
         >
           {game.multiplayer ? "Join Public" : "Play"}
         </Link>
+        <button
+          type="button"
+          onClick={handleRemix}
+          disabled={forking}
+          className="gf-remix-btn px-2.5 py-1 text-[10px] uppercase tracking-[0.1em] disabled:opacity-50"
+        >
+          {forking ? "Opening..." : "Remix"}
+        </button>
         {game.multiplayer ? (
           <button
             type="button"
             onClick={createRoom}
-            className="gf-btn-chip border border-[var(--color-border-light)] bg-[var(--color-surface)] px-2.5 py-1 text-[10px] uppercase tracking-[0.1em] text-[var(--color-text-secondary)] hover:text-[var(--color-accent)]"
+            className="gf-btn-chip border border-[var(--color-border-light)] bg-[var(--color-surface)] px-2.5 py-1 text-[10px] uppercase tracking-[0.1em] text-[var(--color-text-secondary)]"
           >
             Create Room
           </button>
         ) : null}
-        <span className="text-[9px] text-[var(--color-text-muted)]">ID: {game.id.slice(0, 8)}…</span>
       </div>
     </article>
   );
 }
 
+/* ---------- ExploreGrid ---------- */
+
 export function ExploreGrid({ games }: { games: ExploreGameItem[] }) {
+  const [search, setSearch] = useState("");
+  const [engineFilter, setEngineFilter] = useState<GameEngine | "all">("all");
+  const [sortOrder, setSortOrder] = useState<SortOrder>("newest");
+
+  const filtered = useMemo(() => {
+    const query = search.toLowerCase().trim();
+    let result = games;
+
+    if (query) {
+      result = result.filter((g) =>
+        (g.title || "").toLowerCase().includes(query),
+      );
+    }
+
+    if (engineFilter !== "all") {
+      result = result.filter((g) => g.engine === engineFilter);
+    }
+
+    if (sortOrder === "oldest") {
+      result = [...result].reverse();
+    }
+
+    return result;
+  }, [games, search, engineFilter, sortOrder]);
+
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-      {games.map((game) => (
-        <ExploreCard key={game.id} game={game} />
-      ))}
+    <div>
+      {/* Toolbar: search + filters + count */}
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        {/* Search */}
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search games..."
+          className="gf-input w-full border border-[var(--color-border-light)] bg-[var(--color-surface)] px-3 py-1.5 text-[11px] text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] sm:max-w-[240px]"
+        />
+
+        <div className="flex items-center gap-3">
+          {/* Engine filter chips */}
+          <div className="flex items-center gap-1">
+            {ENGINE_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setEngineFilter(opt.value)}
+                className={`px-2 py-1 text-[9px] uppercase tracking-[0.1em] border transition-colors ${
+                  engineFilter === opt.value
+                    ? "border-[var(--color-accent)] bg-[var(--color-accent-glow)] text-[var(--color-accent)]"
+                    : "border-[var(--color-border-light)] bg-[var(--color-surface)] text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] hover:border-[var(--color-border-light)]"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Sort toggle */}
+          <button
+            type="button"
+            onClick={() => setSortOrder((o) => (o === "newest" ? "oldest" : "newest"))}
+            className="gf-btn-chip border border-[var(--color-border-light)] bg-[var(--color-surface)] px-2 py-1 text-[9px] uppercase tracking-[0.1em] text-[var(--color-text-muted)]"
+          >
+            {sortOrder === "newest" ? "Newest" : "Oldest"}
+          </button>
+
+        </div>
+      </div>
+
+      {/* Grid */}
+      {filtered.length === 0 ? (
+        <div className="border border-[var(--color-border-light)] bg-[var(--color-surface)] px-4 py-6 text-center">
+          <p className="text-[11px] uppercase tracking-[0.1em] text-[var(--color-text-muted)]">
+            No games match your filters
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {filtered.map((game, i) => (
+            <ExploreCard key={game.id} game={game} index={i} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

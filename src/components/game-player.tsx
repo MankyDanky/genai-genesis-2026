@@ -151,7 +151,10 @@ export function GamePlayer({
   }, [gameId, router]);
 
   return (
-    <div className="flex flex-col h-screen w-screen bg-[var(--color-bg)]">
+    <div
+      className="flex flex-col h-screen w-screen bg-[var(--color-bg)]"
+      style={{ animation: "gameReveal 0.6s ease-out both" }}
+    >
       {/* Top bar */}
       <div className="flex items-center justify-between h-8 px-3 bg-[var(--color-surface)] border-b border-[var(--color-border)] shrink-0">
         <span className="text-[11px] text-[var(--color-text-secondary)] uppercase tracking-[0.1em] font-bold truncate">
@@ -195,7 +198,7 @@ export function GamePlayer({
             <span className="text-[10px] text-red-400">{forkError}</span>
           ) : null}
           <Link
-            href="/"
+            href="/?new=1"
             className="text-[10px] text-[var(--color-accent)] uppercase tracking-[0.1em] font-semibold hover:underline"
           >
             Make your own

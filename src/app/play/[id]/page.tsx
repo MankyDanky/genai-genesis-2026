@@ -1,7 +1,11 @@
+import { cache } from "react";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { GamePlayer } from "@/components/game-player";
 import { getPublishedGame } from "@/lib/db/projects";
+
+/** Deduplicate across generateMetadata + page render within the same request */
+const getCachedGame = cache((id: string) => getPublishedGame(id));
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -13,7 +17,7 @@ export async function generateMetadata({
 }: PageProps): Promise<Metadata> {
   const { id } = await params;
 
-  const game = await getPublishedGame(id);
+  const game = await getCachedGame(id);
   if (!game) {
     return { title: "Game Not Found | AXIOM" };
   }
@@ -28,7 +32,7 @@ export default async function PlayPage({ params, searchParams }: PageProps) {
   const { id } = await params;
   const query = await searchParams;
 
-  const game = await getPublishedGame(id);
+  const game = await getCachedGame(id);
 
   if (!game) {
     notFound();

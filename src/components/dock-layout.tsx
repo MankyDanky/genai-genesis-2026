@@ -258,9 +258,18 @@ export function DockLayout() {
     }
   }, [currentCode]);
 
-  // Load project from ?project= URL param (e.g. after forking)
+  // Handle URL params: ?project= loads existing, ?new=1 starts fresh
   useEffect(() => {
     const url = new URL(window.location.href);
+
+    const newParam = url.searchParams.get("new");
+    if (newParam) {
+      window.history.replaceState({}, "", "/");
+      localStorage.removeItem("gameforge-autosave");
+      window.location.replace("/");
+      return;
+    }
+
     const projectParam = url.searchParams.get("project");
     if (!projectParam) return;
 

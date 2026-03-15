@@ -63,7 +63,7 @@ export function ShareModal({ url, onClose }: ShareModalProps) {
           <button
             type="button"
             onClick={onClose}
-            className="text-[var(--color-text-muted)] hover:text-[var(--color-text)] text-sm leading-none px-1"
+            className="text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-light)] text-sm leading-none px-1 transition-colors"
           >
             ×
           </button>
@@ -83,7 +83,7 @@ export function ShareModal({ url, onClose }: ShareModalProps) {
               value={url}
               readOnly
               onClick={() => inputRef.current?.select()}
-              className="flex-1 h-8 px-2.5 bg-[var(--color-bg)] border border-[var(--color-border)] text-[11px] text-[var(--color-text)] font-mono tracking-wide outline-none focus:border-[var(--color-accent)]"
+              className="gf-input flex-1 h-8 px-2.5 bg-[var(--color-bg)] border border-[var(--color-border)] text-[11px] text-[var(--color-text)] font-mono tracking-wide outline-none"
             />
             <button
               type="button"
@@ -104,7 +104,7 @@ export function ShareModal({ url, onClose }: ShareModalProps) {
               href={url}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex-1 h-8 flex items-center justify-center border border-[var(--color-border-light)] text-[10px] uppercase tracking-[0.1em] font-semibold text-[var(--color-text-secondary)] hover:text-[var(--color-text)] hover:border-[var(--color-accent)]"
+              className="gf-btn-chip flex-1 h-8 flex items-center justify-center border border-[var(--color-border-light)] text-[10px] uppercase tracking-[0.1em] font-semibold text-[var(--color-text-secondary)]"
             >
               Open in New Tab
             </a>

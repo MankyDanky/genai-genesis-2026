@@ -99,6 +99,7 @@ export interface PublishedGameDocument {
   multiplayerRoomType: string | null;
   runtimeEnv: Record<string, string>;
   compiledHtml: ArtifactRef;
+  thumbnail: string | null;
   createdAt: Date;
 }
 
@@ -176,6 +177,7 @@ export type SaveProjectSnapshotRequest = z.infer<
 
 export const PublishProjectRequestSchema = z.object({
   revisionNumber: z.number().int().positive().optional(),
+  thumbnail: z.string().max(200_000).nullable().optional(),
 });
 
 export type PublishProjectRequest = z.infer<typeof PublishProjectRequestSchema>;

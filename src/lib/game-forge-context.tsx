@@ -6,6 +6,7 @@ import type { ProjectFile, ProjectFileKind } from "@/lib/project-files";
 import { compileProjectToHtml, normalizeProjectFiles } from "@/lib/project-files";
 import type { PersistedChatMessage } from "@/lib/db/schema";
 import { getDefaultRuntimeEnv, normalizeRuntimeEnv, type RuntimeEnvMap } from "@/lib/runtime-env";
+import { captureThumbnail } from "@/lib/capture-thumbnail";
 
 export interface PlanningTodo {
   id: string;
@@ -44,6 +45,17 @@ export interface AudioTrack {
   createdAt: number;
 }
 
+export interface GeneratedMesh {
+  id: string;
+  name: string;
+  prompt: string;
+  status: "pending" | "refining" | "ready" | "error";
+  glbUrl: string | null;
+  thumbnailUrl: string | null;
+  error?: string | null;
+  createdAt: number;
+}
+
 export interface GeneratedImage {
   url: string;
   prompt: string;
@@ -52,6 +64,20 @@ export interface GeneratedImage {
 export interface GameControl {
   action: string;
   keys: string;
+}
+
+export interface InspectorMetrics {
+  fps: number;
+  frameTime: number;
+  fpsMin: number;
+  fpsMax: number;
+}
+
+export interface CanvasInfo {
+  width: number;
+  height: number;
+  contextType: string;
+  pixelRatio: number;
 }
 
 type FocusPanel = "code" | "console" | "images" | "audio";
@@ -95,6 +121,16 @@ interface GameForgeContextValue {
   runtimeEnv: RuntimeEnvMap;
   chatMessages: PersistedChatMessage[];
   chatSessionId: string;
+  inspectorMetrics: InspectorMetrics;
+  canvasInfo: CanvasInfo;
+  activeInputs: string[];
+  gamePaused: boolean;
+  restartCounter: number;
+  setInspectorMetrics: (metrics: InspectorMetrics) => void;
+  setCanvasInfo: (info: CanvasInfo) => void;
+  setActiveInputs: (inputs: string[]) => void;
+  setGamePaused: (paused: boolean) => void;
+  requestGameRestart: () => void;
   onCodeUpdate: (code: string, engine?: GameEngine) => void;
   onProjectFilesUpdate: (files: ProjectFile[], engine?: GameEngine, deletePaths?: string[]) => void;
   patchProjectFiles: (files: ProjectFile[], engine?: GameEngine) => void;
@@ -125,6 +161,9 @@ interface GameForgeContextValue {
   audioTracks: AudioTrack[];
   addAudioTrack: (track: AudioTrack) => void;
   removeAudioTrack: (id: string) => void;
+  generatedMeshes: GeneratedMesh[];
+  addMesh: (mesh: GeneratedMesh) => void;
+  removeMesh: (id: string) => void;
   addImage: (image: GeneratedImage) => void;
   setControls: (controls: GameControl[]) => void;
   setActiveCodePath: (path: string | null) => void;
@@ -297,6 +336,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [audioTracks, setAudioTracks] = useState<AudioTrack[]>([]);
   const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>([]);
+  const [generatedMeshes, setGeneratedMeshes] = useState<GeneratedMesh[]>([]);
   const [controls, setControlsState] = useState<GameControl[]>(DEFAULT_CONTROLS);
   const [focusedCodePath, setFocusedCodePath] = useState<string | null>(null);
   const [activeCodePath, setActiveCodePath] = useState<string | null>(null);
@@ -311,11 +351,20 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
   const [runtimeEnv, setRuntimeEnv] = useState<RuntimeEnvMap>(() => getDefaultRuntimeEnv());
   const [chatMessages, setChatMessagesState] = useState<PersistedChatMessage[]>([]);
   const [chatSessionId, setChatSessionId] = useState<string>(() => createChatSessionId());
+  const [inspectorMetrics, setInspectorMetricsState] = useState<InspectorMetrics>({ fps: 0, frameTime: 0, fpsMin: 0, fpsMax: 0 });
+  const [canvasInfo, setCanvasInfoState] = useState<CanvasInfo>({ width: 0, height: 0, contextType: "none", pixelRatio: 1 });
+  const [activeInputs, setActiveInputsState] = useState<string[]>([]);
+  const [gamePaused, setGamePausedState] = useState(false);
+  const [restartCounter, setRestartCounter] = useState(0);
 
   const onCodeUpdate = useCallback((code: string, engine?: GameEngine) => {
     setCurrentCode(code);
     setProjectFiles([{ path: "index.html", content: code, kind: "html" }]);
     setConsoleLogs([]);
+    setInspectorMetricsState({ fps: 0, frameTime: 0, fpsMin: 0, fpsMax: 0 });
+    setCanvasInfoState({ width: 0, height: 0, contextType: "none", pixelRatio: 1 });
+    setActiveInputsState([]);
+    setGamePausedState(false);
     if (engine) setCurrentEngine(engine);
   }, []);
 
@@ -541,6 +590,18 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const addMesh = useCallback((mesh: GeneratedMesh) => {
+    setGeneratedMeshes((prev) => {
+      const existing = prev.find((m) => m.id === mesh.id);
+      if (!existing) return [...prev, mesh];
+      return prev.map((m) => (m.id === mesh.id ? { ...existing, ...mesh, createdAt: existing.createdAt } : m));
+    });
+  }, []);
+
+  const removeMesh = useCallback((id: string) => {
+    setGeneratedMeshes((prev) => prev.filter((m) => m.id !== id));
+  }, []);
+
   const setControls = useCallback((next: GameControl[]) => {
     const normalized = next
       .filter((item) => item.action && item.keys)
@@ -641,6 +702,27 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     setChatMessagesState((prev) => (areChatMessagesEqual(prev, normalized) ? prev : normalized));
   }, []);
 
+  const setInspectorMetrics = useCallback((metrics: InspectorMetrics) => {
+    setInspectorMetricsState(metrics);
+  }, []);
+
+  const setCanvasInfo = useCallback((info: CanvasInfo) => {
+    setCanvasInfoState(info);
+  }, []);
+
+  const setActiveInputs = useCallback((inputs: string[]) => {
+    setActiveInputsState(inputs);
+  }, []);
+
+  const setGamePaused = useCallback((paused: boolean) => {
+    setGamePausedState(paused);
+  }, []);
+
+  const requestGameRestart = useCallback(() => {
+    setRestartCounter((prev) => prev + 1);
+    setGamePausedState(false);
+  }, []);
+
   const resetWorkspace = useCallback(() => {
     setCurrentCode(null);
     setCurrentEngine("canvas2d");
@@ -651,6 +733,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     setAssets([]);
     setAudioTracks([]);
     setGeneratedImages([]);
+    setGeneratedMeshes([]);
     setControlsState(DEFAULT_CONTROLS);
     setFocusedCodePath(null);
     setActiveCodePath(null);
@@ -665,6 +748,11 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     setRuntimeEnv(getDefaultRuntimeEnv());
     setChatMessagesState([]);
     setChatSessionId(createChatSessionId());
+    setInspectorMetricsState({ fps: 0, frameTime: 0, fpsMin: 0, fpsMax: 0 });
+    setCanvasInfoState({ width: 0, height: 0, contextType: "none", pixelRatio: 1 });
+    setActiveInputsState([]);
+    setGamePausedState(false);
+    setRestartCounter(0);
   }, []);
 
   const clearProjectFeedback = useCallback(() => {
@@ -681,6 +769,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     controls: GameControl[];
     planningTodos: PlanningTodo[];
     generatedImages: GeneratedImage[];
+    generatedMeshes?: GeneratedMesh[];
     audioTracks: AudioTrack[];
     runtimeEnv?: RuntimeEnvMap;
     currentCode: string;
@@ -696,6 +785,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     setAssets([]);
     setAudioTracks(snapshot.audioTracks);
     setGeneratedImages(snapshot.generatedImages);
+    setGeneratedMeshes(snapshot.generatedMeshes ?? []);
     setRuntimeEnv({
       ...getDefaultRuntimeEnv(),
       ...normalizeRuntimeEnv(snapshot.runtimeEnv),
@@ -720,6 +810,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     controls,
     planningTodos,
     generatedImages,
+    generatedMeshes,
     audioTracks,
     runtimeEnv,
     chatMessages,
@@ -731,6 +822,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     currentCode,
     currentEngine,
     generatedImages,
+    generatedMeshes,
     planningTodos,
     projectFiles,
   ]);
@@ -788,14 +880,22 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     setProjectError(null);
 
     try {
+      // Capture thumbnail from current game code (best-effort, non-blocking)
+      const gameCode = currentCode ?? compileProjectToHtml(projectFiles);
+      const thumbnailPromise = gameCode
+        ? captureThumbnail(gameCode).catch(() => null)
+        : Promise.resolve(null);
+
       const saved = await persistSnapshot();
       setProjectId(saved.projectId);
       setCurrentRevisionNumber(saved.revisionNumber);
 
+      const thumbnail = await thumbnailPromise;
+
       const publishResponse = await fetch(`/api/projects/${saved.projectId}/publish`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ revisionNumber: saved.revisionNumber }),
+        body: JSON.stringify({ revisionNumber: saved.revisionNumber, thumbnail }),
       });
       const published = await parseJsonResponse<{
         publishId: string;
@@ -817,7 +917,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     } finally {
       setProjectBusyAction(null);
     }
-  }, [persistSnapshot]);
+  }, [currentCode, persistSnapshot, projectFiles]);
 
   const loadProject = useCallback(async (nextProjectId: string) => {
     setProjectBusyAction("load");
@@ -911,6 +1011,9 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       audioTracks,
       addAudioTrack,
       removeAudioTrack,
+      generatedMeshes,
+      addMesh,
+      removeMesh,
       addImage,
       setControls,
       setActiveCodePath,
@@ -929,6 +1032,16 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       loadProject,
       resetWorkspace,
       clearProjectFeedback,
+      inspectorMetrics,
+      canvasInfo,
+      activeInputs,
+      gamePaused,
+      restartCounter,
+      setInspectorMetrics,
+      setCanvasInfo,
+      setActiveInputs,
+      setGamePaused,
+      requestGameRestart,
     }),
     [
       currentCode,
@@ -969,6 +1082,9 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       audioTracks,
       addAudioTrack,
       removeAudioTrack,
+      generatedMeshes,
+      addMesh,
+      removeMesh,
       addImage,
       setControls,
       setActiveCodePath,
@@ -987,6 +1103,16 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       loadProject,
       resetWorkspace,
       clearProjectFeedback,
+      inspectorMetrics,
+      canvasInfo,
+      activeInputs,
+      gamePaused,
+      restartCounter,
+      setInspectorMetrics,
+      setCanvasInfo,
+      setActiveInputs,
+      setGamePaused,
+      requestGameRestart,
     ]
   );
 

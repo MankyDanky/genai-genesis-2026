@@ -57,7 +57,7 @@ export function ConfirmModal({
           <button
             type="button"
             onClick={onCancel}
-            className="text-[var(--color-text-muted)] hover:text-[var(--color-text)] text-sm leading-none px-1"
+            className="text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-light)] text-sm leading-none px-1 transition-colors"
           >
             ×
           </button>
@@ -74,7 +74,7 @@ export function ConfirmModal({
             <button
               type="button"
               onClick={onCancel}
-              className="h-8 px-3 text-[10px] uppercase tracking-[0.1em] font-semibold border border-[var(--color-border-light)] text-[var(--color-text-secondary)] hover:text-[var(--color-text)] hover:border-[var(--color-accent)]"
+              className="gf-btn-chip h-8 px-3 text-[10px] uppercase tracking-[0.1em] font-semibold border border-[var(--color-border-light)] text-[var(--color-text-secondary)]"
             >
               {cancelLabel}
             </button>
