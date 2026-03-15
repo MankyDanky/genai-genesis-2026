@@ -66,6 +66,20 @@ export interface GameControl {
   keys: string;
 }
 
+export interface InspectorMetrics {
+  fps: number;
+  frameTime: number;
+  fpsMin: number;
+  fpsMax: number;
+}
+
+export interface CanvasInfo {
+  width: number;
+  height: number;
+  contextType: string;
+  pixelRatio: number;
+}
+
 type FocusPanel = "code" | "console" | "images" | "audio";
 
 export interface PanelFocusRequest {
@@ -107,6 +121,16 @@ interface GameForgeContextValue {
   runtimeEnv: RuntimeEnvMap;
   chatMessages: PersistedChatMessage[];
   chatSessionId: string;
+  inspectorMetrics: InspectorMetrics;
+  canvasInfo: CanvasInfo;
+  activeInputs: string[];
+  gamePaused: boolean;
+  restartCounter: number;
+  setInspectorMetrics: (metrics: InspectorMetrics) => void;
+  setCanvasInfo: (info: CanvasInfo) => void;
+  setActiveInputs: (inputs: string[]) => void;
+  setGamePaused: (paused: boolean) => void;
+  requestGameRestart: () => void;
   onCodeUpdate: (code: string, engine?: GameEngine) => void;
   onProjectFilesUpdate: (files: ProjectFile[], engine?: GameEngine, deletePaths?: string[]) => void;
   patchProjectFiles: (files: ProjectFile[], engine?: GameEngine) => void;
@@ -327,11 +351,20 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
   const [runtimeEnv, setRuntimeEnv] = useState<RuntimeEnvMap>(() => getDefaultRuntimeEnv());
   const [chatMessages, setChatMessagesState] = useState<PersistedChatMessage[]>([]);
   const [chatSessionId, setChatSessionId] = useState<string>(() => createChatSessionId());
+  const [inspectorMetrics, setInspectorMetricsState] = useState<InspectorMetrics>({ fps: 0, frameTime: 0, fpsMin: 0, fpsMax: 0 });
+  const [canvasInfo, setCanvasInfoState] = useState<CanvasInfo>({ width: 0, height: 0, contextType: "none", pixelRatio: 1 });
+  const [activeInputs, setActiveInputsState] = useState<string[]>([]);
+  const [gamePaused, setGamePausedState] = useState(false);
+  const [restartCounter, setRestartCounter] = useState(0);
 
   const onCodeUpdate = useCallback((code: string, engine?: GameEngine) => {
     setCurrentCode(code);
     setProjectFiles([{ path: "index.html", content: code, kind: "html" }]);
     setConsoleLogs([]);
+    setInspectorMetricsState({ fps: 0, frameTime: 0, fpsMin: 0, fpsMax: 0 });
+    setCanvasInfoState({ width: 0, height: 0, contextType: "none", pixelRatio: 1 });
+    setActiveInputsState([]);
+    setGamePausedState(false);
     if (engine) setCurrentEngine(engine);
   }, []);
 
@@ -669,6 +702,27 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     setChatMessagesState((prev) => (areChatMessagesEqual(prev, normalized) ? prev : normalized));
   }, []);
 
+  const setInspectorMetrics = useCallback((metrics: InspectorMetrics) => {
+    setInspectorMetricsState(metrics);
+  }, []);
+
+  const setCanvasInfo = useCallback((info: CanvasInfo) => {
+    setCanvasInfoState(info);
+  }, []);
+
+  const setActiveInputs = useCallback((inputs: string[]) => {
+    setActiveInputsState(inputs);
+  }, []);
+
+  const setGamePaused = useCallback((paused: boolean) => {
+    setGamePausedState(paused);
+  }, []);
+
+  const requestGameRestart = useCallback(() => {
+    setRestartCounter((prev) => prev + 1);
+    setGamePausedState(false);
+  }, []);
+
   const resetWorkspace = useCallback(() => {
     setCurrentCode(null);
     setCurrentEngine("canvas2d");
@@ -694,6 +748,11 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     setRuntimeEnv(getDefaultRuntimeEnv());
     setChatMessagesState([]);
     setChatSessionId(createChatSessionId());
+    setInspectorMetricsState({ fps: 0, frameTime: 0, fpsMin: 0, fpsMax: 0 });
+    setCanvasInfoState({ width: 0, height: 0, contextType: "none", pixelRatio: 1 });
+    setActiveInputsState([]);
+    setGamePausedState(false);
+    setRestartCounter(0);
   }, []);
 
   const clearProjectFeedback = useCallback(() => {
@@ -973,6 +1032,16 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       loadProject,
       resetWorkspace,
       clearProjectFeedback,
+      inspectorMetrics,
+      canvasInfo,
+      activeInputs,
+      gamePaused,
+      restartCounter,
+      setInspectorMetrics,
+      setCanvasInfo,
+      setActiveInputs,
+      setGamePaused,
+      requestGameRestart,
     }),
     [
       currentCode,
@@ -1034,6 +1103,16 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       loadProject,
       resetWorkspace,
       clearProjectFeedback,
+      inspectorMetrics,
+      canvasInfo,
+      activeInputs,
+      gamePaused,
+      restartCounter,
+      setInspectorMetrics,
+      setCanvasInfo,
+      setActiveInputs,
+      setGamePaused,
+      requestGameRestart,
     ]
   );
 

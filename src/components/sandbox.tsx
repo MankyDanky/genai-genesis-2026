@@ -8,11 +8,14 @@ interface SandboxProps {
   code: string | null;
   audioTracks?: AudioTrack[];
   runtimeEnv?: RuntimeEnvMap;
+  gamePaused?: boolean;
+  restartCounter?: number;
   onConsoleMessage?: (event: {
     level: "log" | "info" | "warn" | "error";
     args: string[];
     source: "console" | "error" | "unhandledrejection";
   }) => void;
+  onInspectorMessage?: (data: Record<string, unknown>) => void;
   onReload?: () => void;
 }
 
@@ -29,6 +32,8 @@ function ShareBar({
 }) {
   const [toast, setToast] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [spinning, setSpinning] = useState(false);
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
@@ -37,8 +42,9 @@ function ShareBar({
 
   const handleCopy = useCallback(async () => {
     await navigator.clipboard.writeText(code);
-    showToast("Copied to clipboard");
-  }, [code, showToast]);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }, [code]);
 
   const handleDownload = useCallback(() => {
     const titleMatch = code.match(/<title>(.*?)<\/title>/i);
@@ -60,6 +66,7 @@ function ShareBar({
   }, [openHtml]);
 
   const handleReload = useCallback(() => {
+    setSpinning(true);
     onReload?.();
   }, [onReload]);
 
@@ -92,7 +99,16 @@ function ShareBar({
         title="Reload game"
         className="gf-btn-chip p-1.5 border border-[var(--color-border-light)] bg-[var(--color-surface)] text-[var(--color-text-muted)]"
       >
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          className={spinning ? "gf-spin360" : ""}
+          onAnimationEnd={() => setSpinning(false)}
+        >
           <path d="M13.5 8a5.5 5.5 0 1 1-1.12-3.34" />
           <path d="M10.5 2.5h3v3" />
         </svg>
@@ -123,12 +139,18 @@ function ShareBar({
       <button
         onClick={handleCopy}
         title="Copy HTML"
-        className="gf-btn-chip p-1.5 border border-[var(--color-border-light)] bg-[var(--color-surface)] text-[var(--color-text-muted)]"
+        className={`gf-btn-chip p-1.5 border border-[var(--color-border-light)] bg-[var(--color-surface)] ${copied ? "text-[var(--color-success)]" : "text-[var(--color-text-muted)]"}`}
       >
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-          <rect x="5" y="5" width="9" height="9" rx="1" />
-          <path d="M11 5V3a1 1 0 0 0-1-1H3a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h2" />
-        </svg>
+        {copied ? (
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M3 8.5l3.5 3.5L13 4" />
+          </svg>
+        ) : (
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <rect x="5" y="5" width="9" height="9" rx="1" />
+            <path d="M11 5V3a1 1 0 0 0-1-1H3a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h2" />
+          </svg>
+        )}
       </button>
 
       <button
@@ -157,8 +179,8 @@ function ShareBar({
   );
 }
 
-function buildInstrumentedSrcDoc(code: string): string {
-  const bridge = `<script>(function(){\n  var SESSION = "${Date.now()}-${Math.random().toString(36).slice(2)}";\n  function safe(v){\n    if (typeof v === "string") return v;\n    try { return JSON.stringify(v); } catch (_e) { return String(v); }\n  }\n  function send(level,args,source){\n    try{\n      parent.postMessage({\n        __gameForgeConsole: true,\n        session: SESSION,\n        level: level,\n        source: source || "console",\n        args: Array.isArray(args) ? args.map(safe) : [safe(args)]\n      }, "*");\n    }catch(_err){}\n  }\n  ["log","info","warn","error"].forEach(function(level){\n    var orig = console[level];\n    console[level] = function(){\n      var args = Array.prototype.slice.call(arguments);\n      send(level,args,"console");\n      return orig.apply(console,args);\n    };\n  });\n  window.addEventListener("error", function(e){\n    send("error", [e.message || "Unknown error", e.filename || "", String(e.lineno || 0) + ":" + String(e.colno || 0)], "error");\n  });\n  window.addEventListener("unhandledrejection", function(e){\n    var reason = e.reason && e.reason.message ? e.reason.message : e.reason;\n    send("error", ["Unhandled promise rejection", safe(reason)], "unhandledrejection");\n  });\n})();<\/script>`;
+function buildInstrumentedSrcDoc(code: string, session: string): string {
+  const bridge = `<script>(function(){\n  var SESSION = "${session}";\n  var hasError = false;\n  function safe(v){\n    if (typeof v === "string") return v;\n    try { return JSON.stringify(v); } catch (_e) { return String(v); }\n  }\n  function send(level,args,source){\n    try{\n      parent.postMessage({\n        __gameForgeConsole: true,\n        session: SESSION,\n        level: level,\n        source: source || "console",\n        args: Array.isArray(args) ? args.map(safe) : [safe(args)]\n      }, "*");\n    }catch(_err){}\n  }\n  function sendLifecycle(type){\n    try{\n      parent.postMessage({ __gameForgeLifecycle: true, session: SESSION, type: type }, "*");\n    }catch(_err){}\n  }\n  ["log","info","warn","error"].forEach(function(level){\n    var orig = console[level];\n    console[level] = function(){\n      var args = Array.prototype.slice.call(arguments);\n      send(level,args,"console");\n      return orig.apply(console,args);\n    };\n  });\n  window.addEventListener("error", function(e){\n    hasError = true;\n    send("error", [e.message || "Unknown error", e.filename || "", String(e.lineno || 0) + ":" + String(e.colno || 0)], "error");\n    sendLifecycle("frame-error");\n  });\n  window.addEventListener("unhandledrejection", function(e){\n    hasError = true;\n    var reason = e.reason && e.reason.message ? e.reason.message : e.reason;\n    send("error", ["Unhandled promise rejection", safe(reason)], "unhandledrejection");\n    sendLifecycle("frame-error");\n  });\n  document.addEventListener("DOMContentLoaded", function(){\n    setTimeout(function(){ if (!hasError) sendLifecycle("frame-ready"); }, 150);\n  });\n})();<\/script>`;
 
   if (/<head[^>]*>/i.test(code)) {
     return code.replace(/<head([^>]*)>/i, `<head$1>${bridge}`);
@@ -260,28 +282,97 @@ window.__PARTYKIT_PROTOCOL__ = window.__PARTYKIT_PROTOCOL__ || ${JSON.stringify(
   return `${script}${html}`;
 }
 
-export function Sandbox({ code, audioTracks = [], runtimeEnv = {}, onConsoleMessage, onReload }: SandboxProps) {
+function generateSession(): string {
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function buildInspectorBridge(): string {
+  return `<script>(function(){
+  var frames=0,lastTime=performance.now(),fpsMin=Infinity,fpsMax=0;
+  var _raf=window.requestAnimationFrame;
+  var paused=false,rafQueue=[];
+  window.requestAnimationFrame=function(cb){
+    if(paused){rafQueue.push(cb);return -1;}
+    frames++;return _raf.call(window,cb);
+  };
+  setInterval(function(){
+    var now=performance.now(),dt=now-lastTime;
+    if(dt<100)return;
+    var fps=Math.round(frames*1000/dt);
+    var ft=frames>0?Math.round(dt/frames*10)/10:0;
+    if(frames>0){if(fps<fpsMin)fpsMin=fps;if(fps>fpsMax)fpsMax=fps;}
+    parent.postMessage({__gameForgeInspector:true,type:"metrics",fps:fps,frameTime:ft,fpsMin:fpsMin===Infinity?0:fpsMin,fpsMax:fpsMax},"*");
+    frames=0;lastTime=now;
+  },500);
+  var ctxType="none",_getCtx=HTMLCanvasElement.prototype.getContext;
+  HTMLCanvasElement.prototype.getContext=function(type){
+    var ctx=_getCtx.apply(this,arguments);
+    if(ctx&&ctxType==="none"){
+      ctxType=type==="webgl2"?"WebGL2":type==="webgl"||type==="experimental-webgl"?"WebGL":type==="2d"?"2D":type;
+      reportCanvas();
+    }
+    return ctx;
+  };
+  function reportCanvas(){
+    var c=document.querySelector("canvas");
+    parent.postMessage({__gameForgeInspector:true,type:"canvasInfo",width:c?c.width:0,height:c?c.height:0,contextType:ctxType,pixelRatio:window.devicePixelRatio||1},"*");
+  }
+  window.addEventListener("load",function(){setTimeout(reportCanvas,200);});
+  window.addEventListener("resize",function(){setTimeout(reportCanvas,200);});
+  var keys={};
+  function reportInputs(){parent.postMessage({__gameForgeInspector:true,type:"inputs",keys:Object.keys(keys)},"*");}
+  window.addEventListener("keydown",function(e){if(!keys[e.key]){keys[e.key]=1;reportInputs();}});
+  window.addEventListener("keyup",function(e){delete keys[e.key];reportInputs();});
+  window.addEventListener("mousedown",function(e){keys["Mouse"+e.button]=1;reportInputs();});
+  window.addEventListener("mouseup",function(e){delete keys["Mouse"+e.button];reportInputs();});
+  window.addEventListener("blur",function(){keys={};reportInputs();});
+  window.addEventListener("message",function(e){
+    if(!e.data)return;
+    if(e.data.type==="gameforge-pause"&&!paused){paused=true;}
+    else if(e.data.type==="gameforge-resume"&&paused){
+      paused=false;var q=rafQueue.slice();rafQueue=[];
+      for(var i=0;i<q.length;i++){frames++;_raf.call(window,q[i]);}
+    }
+  });
+})();<\/script>`;
+}
+
+function injectInspectorBridge(html: string): string {
+  const bridge = buildInspectorBridge();
+  if (/<head[^>]*>/i.test(html)) {
+    return html.replace(/<head([^>]*)>/i, `<head$1>${bridge}`);
+  }
+  if (/<body[^>]*>/i.test(html)) {
+    return html.replace(/<body([^>]*)>/i, `<body$1>${bridge}`);
+  }
+  return `${bridge}${html}`;
+}
+
+export function Sandbox({ code, audioTracks = [], runtimeEnv = {}, gamePaused = false, restartCounter = 0, onConsoleMessage, onInspectorMessage, onReload }: SandboxProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [reloadKey, setReloadKey] = useState(0);
+
+  const sessionRef = useRef<string>(generateSession());
   const srcDoc = useMemo(() => {
     if (!code) return null;
-    const withConsole = buildInstrumentedSrcDoc(code);
+    const session = generateSession();
+    sessionRef.current = session;
+    const withConsole = buildInstrumentedSrcDoc(code, session);
     const withAudio = injectSoundBridge(withConsole, audioTracks);
-    return injectMultiplayerRuntime(withAudio, runtimeEnv);
-  }, [audioTracks, code, runtimeEnv]);
+    const withInspector = injectInspectorBridge(withAudio);
+    return injectMultiplayerRuntime(withInspector, runtimeEnv);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [audioTracks, code, runtimeEnv, reloadKey]);
 
-  const handleReload = useCallback(() => {
-    setReloadKey((prev) => prev + 1);
-    onReload?.();
-  }, [onReload]);
-
+  // Console message forwarding
   useEffect(() => {
     if (!onConsoleMessage) return;
 
     const handler = (event: MessageEvent) => {
       const data = event.data as {
         __gameForgeConsole?: boolean;
+        session?: string;
         level?: "log" | "info" | "warn" | "error";
         args?: string[];
         source?: "console" | "error" | "unhandledrejection";
@@ -298,6 +389,7 @@ export function Sandbox({ code, audioTracks = [], runtimeEnv = {}, onConsoleMess
     return () => window.removeEventListener("message", handler);
   }, [onConsoleMessage]);
 
+  // Send audio tracks to iframe
   useEffect(() => {
     const iframe = iframeRef.current;
     if (!iframe?.contentWindow) return;
@@ -317,6 +409,46 @@ export function Sandbox({ code, audioTracks = [], runtimeEnv = {}, onConsoleMess
 
     iframe.contentWindow.postMessage({ type: "gameforge-sounds-update", sounds, music }, "*");
   }, [audioTracks]);
+
+  // Inspector message forwarding
+  useEffect(() => {
+    if (!onInspectorMessage) return;
+
+    const handler = (event: MessageEvent) => {
+      const data = event.data;
+      if (!data || data.__gameForgeInspector !== true || !data.type) return;
+      onInspectorMessage(data as Record<string, unknown>);
+    };
+
+    window.addEventListener("message", handler);
+    return () => window.removeEventListener("message", handler);
+  }, [onInspectorMessage]);
+
+  // Send pause/resume to iframe
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe?.contentWindow) return;
+
+    iframe.contentWindow.postMessage(
+      { type: gamePaused ? "gameforge-pause" : "gameforge-resume" },
+      "*"
+    );
+  }, [gamePaused]);
+
+  // Restart when restartCounter changes
+  const prevRestartRef = useRef(restartCounter);
+  useEffect(() => {
+    if (restartCounter !== prevRestartRef.current) {
+      prevRestartRef.current = restartCounter;
+      setReloadKey((prev) => prev + 1);
+      onReload?.();
+    }
+  }, [restartCounter, onReload]);
+
+  const handleReload = useCallback(() => {
+    setReloadKey((prev) => prev + 1);
+    onReload?.();
+  }, [onReload]);
 
   if (!code || !srcDoc) {
     return (
