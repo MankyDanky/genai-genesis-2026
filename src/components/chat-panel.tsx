@@ -1975,15 +1975,6 @@ export function ChatPanel({
                   ? "Q&A mode"
                   : "Full edit mode"}
           </span>
-          <label className="ml-2 text-[9px] uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Model</label>
-          <select
-            value={selectedModel}
-            onChange={(e) => setSelectedModel(e.target.value as ModelChoice)}
-            className="h-6 bg-[var(--color-surface)] border border-[var(--color-border)] text-[10px] uppercase tracking-[0.08em] text-[var(--color-text-secondary)] px-1.5"
-          >
-            <option value="claude">Claude</option>
-            <option value="grok">Grok AI</option>
-          </select>
           <span className="ml-auto text-[9px] text-[var(--color-text-muted)]">
             ~{estimatedTokens.toLocaleString()} tokens
           </span>
@@ -2076,6 +2067,18 @@ export function ChatPanel({
             </svg>
           </button>
         </form>
+
+        <div className="flex items-center gap-2 px-1 pt-1">
+          <label className="text-[9px] uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Model</label>
+          <select
+            value={selectedModel}
+            onChange={(e) => setSelectedModel(e.target.value as ModelChoice)}
+            className="h-6 bg-[var(--color-surface)] border border-[var(--color-border)] text-[10px] uppercase tracking-[0.08em] text-[var(--color-text-secondary)] px-1.5"
+          >
+            <option value="claude">Claude</option>
+            <option value="grok">Grok AI</option>
+          </select>
+        </div>
 
         <div className="flex items-center justify-between px-1 pt-1">
           <span className="text-[9px] text-[var(--color-text-muted)]">
