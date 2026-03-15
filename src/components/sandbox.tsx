@@ -1,12 +1,13 @@
 "use client";
 
 import { useState, useCallback, useRef, useMemo, useEffect } from "react";
-import type { AudioTrack } from "@/lib/game-forge-context";
+import type { AudioTrack, GeneratedMesh } from "@/lib/game-forge-context";
 import type { RuntimeEnvMap } from "@/lib/runtime-env";
 
 interface SandboxProps {
   code: string | null;
   audioTracks?: AudioTrack[];
+  generatedMeshes?: GeneratedMesh[];
   runtimeEnv?: RuntimeEnvMap;
   gamePaused?: boolean;
   restartCounter?: number;
@@ -179,6 +180,41 @@ function ShareBar({
   );
 }
 
+/**
+ * Injects cross-browser/cross-device compatibility CSS and meta tags
+ * to ensure the iframe game works on all browsers and devices.
+ */
+function injectCompatibilityLayer(html: string): string {
+  const compatCSS = `<style data-gameforge-compat>
+*, *::before, *::after { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0; overflow: hidden; width: 100%; height: 100%;
+  touch-action: none;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+canvas { display: block; touch-action: none; }
+</style>`;
+
+  const compatMeta = `<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">`;
+
+  const hasViewport = /name\s*=\s*["']viewport["']/i.test(html);
+
+  if (/<head[^>]*>/i.test(html)) {
+    let result = html;
+    if (!hasViewport) {
+      result = result.replace(/<head([^>]*)>/i, `<head$1>${compatMeta}`);
+    }
+    // Insert compat CSS right after <head> (after potential meta injection)
+    result = result.replace(/<head([^>]*)>/i, `<head$1>${compatCSS}`);
+    return result;
+  }
+
+  return `${!hasViewport ? compatMeta : ""}${compatCSS}${html}`;
+}
+
 function buildInstrumentedSrcDoc(code: string, session: string): string {
   const bridge = `<script>(function(){\n  var SESSION = "${session}";\n  var hasError = false;\n  function safe(v){\n    if (typeof v === "string") return v;\n    try { return JSON.stringify(v); } catch (_e) { return String(v); }\n  }\n  function send(level,args,source){\n    try{\n      parent.postMessage({\n        __gameForgeConsole: true,\n        session: SESSION,\n        level: level,\n        source: source || "console",\n        args: Array.isArray(args) ? args.map(safe) : [safe(args)]\n      }, "*");\n    }catch(_err){}\n  }\n  function sendLifecycle(type){\n    try{\n      parent.postMessage({ __gameForgeLifecycle: true, session: SESSION, type: type }, "*");\n    }catch(_err){}\n  }\n  ["log","info","warn","error"].forEach(function(level){\n    var orig = console[level];\n    console[level] = function(){\n      var args = Array.prototype.slice.call(arguments);\n      send(level,args,"console");\n      return orig.apply(console,args);\n    };\n  });\n  window.addEventListener("error", function(e){\n    hasError = true;\n    send("error", [e.message || "Unknown error", e.filename || "", String(e.lineno || 0) + ":" + String(e.colno || 0)], "error");\n    sendLifecycle("frame-error");\n  });\n  window.addEventListener("unhandledrejection", function(e){\n    hasError = true;\n    var reason = e.reason && e.reason.message ? e.reason.message : e.reason;\n    send("error", ["Unhandled promise rejection", safe(reason)], "unhandledrejection");\n    sendLifecycle("frame-error");\n  });\n  document.addEventListener("DOMContentLoaded", function(){\n    setTimeout(function(){ if (!hasError) sendLifecycle("frame-ready"); }, 150);\n  });\n})();<\/script>`;
 
@@ -228,6 +264,40 @@ window.__GAMEFORGE_MUSIC__ = ${JSON.stringify(musicMap)};
 </script>`;
 
   const combined = `${SOUND_BRIDGE_SCRIPT}${initialScript}`;
+  if (/<head[^>]*>/i.test(html)) {
+    return html.replace(/<head([^>]*)>/i, `<head$1>${combined}`);
+  }
+  return `${combined}${html}`;
+}
+
+const MESH_BRIDGE_SCRIPT = `<script>
+window.__GAMEFORGE_MESHES__ = window.__GAMEFORGE_MESHES__ || {};
+window.addEventListener('message', function(e) {
+  if (!e.data || e.data.type !== 'gameforge-meshes-update') return;
+  var meshes = e.data.meshes || {};
+  for (var meshName in meshes) {
+    window.__GAMEFORGE_MESHES__[meshName] = meshes[meshName];
+  }
+  if (typeof window.__onMeshesUpdated === 'function') window.__onMeshesUpdated();
+});
+</script>`;
+
+function injectMeshBridge(html: string, meshes: GeneratedMesh[]): string {
+  const readyMeshes = meshes.filter((m) => m.status === "ready" && !!m.glbUrl);
+  const meshMap: Record<string, { glbUrl: string; name: string }> = {};
+
+  for (const mesh of readyMeshes) {
+    meshMap[mesh.name] = {
+      glbUrl: `/api/meshes/${encodeURIComponent(mesh.id)}/file`,
+      name: mesh.name,
+    };
+  }
+
+  const initialScript = `<script>
+window.__GAMEFORGE_MESHES__ = ${JSON.stringify(meshMap)};
+</script>`;
+
+  const combined = `${MESH_BRIDGE_SCRIPT}${initialScript}`;
   if (/<head[^>]*>/i.test(html)) {
     return html.replace(/<head([^>]*)>/i, `<head$1>${combined}`);
   }
@@ -348,22 +418,107 @@ function injectInspectorBridge(html: string): string {
   return `${bridge}${html}`;
 }
 
-export function Sandbox({ code, audioTracks = [], runtimeEnv = {}, gamePaused = false, restartCounter = 0, onConsoleMessage, onInspectorMessage, onReload }: SandboxProps) {
+const EMPTY_AUDIO_TRACKS: AudioTrack[] = [];
+const EMPTY_MESHES: GeneratedMesh[] = [];
+const EMPTY_RUNTIME_ENV: RuntimeEnvMap = {};
+
+export function Sandbox({ code, audioTracks = EMPTY_AUDIO_TRACKS, generatedMeshes = EMPTY_MESHES, runtimeEnv = EMPTY_RUNTIME_ENV, gamePaused = false, restartCounter = 0, onConsoleMessage, onInspectorMessage, onReload }: SandboxProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const iframe0Ref = useRef<HTMLIFrameElement>(null);
+  const iframe1Ref = useRef<HTMLIFrameElement>(null);
+
+  // Which iframe is currently visible (0 or 1)
+  const [activeIndex, setActiveIndex] = useState<0 | 1>(0);
+  const activeIndexRef = useRef<0 | 1>(0);
+
+  // Each iframe independently tracks its own srcDoc
+  const [iframe0SrcDoc, setIframe0SrcDoc] = useState<string | null>(null);
+  const [iframe1SrcDoc, setIframe1SrcDoc] = useState<string | null>(null);
+
+  // Last srcDoc that loaded without errors (for rollback)
+  const lastGoodSrcDocRef = useRef<string | null>(null);
+  const currentSessionRef = useRef<string | null>(null);
+  const isFirstLoadRef = useRef(true);
   const [reloadKey, setReloadKey] = useState(0);
 
+  // Generate a new session only when code or reloadKey changes (not on every useMemo recomputation)
   const sessionRef = useRef<string>(generateSession());
+  const prevCodeRef = useRef<string | null>(code);
+  const prevReloadKeyRef = useRef(reloadKey);
+  if (code !== prevCodeRef.current || reloadKey !== prevReloadKeyRef.current) {
+    sessionRef.current = generateSession();
+    prevCodeRef.current = code;
+    prevReloadKeyRef.current = reloadKey;
+  }
+
+  // Build instrumented srcDoc
   const srcDoc = useMemo(() => {
     if (!code) return null;
-    const session = generateSession();
-    sessionRef.current = session;
-    const withConsole = buildInstrumentedSrcDoc(code, session);
+    const withCompat = injectCompatibilityLayer(code);
+    const withConsole = buildInstrumentedSrcDoc(withCompat, sessionRef.current);
     const withAudio = injectSoundBridge(withConsole, audioTracks);
-    const withInspector = injectInspectorBridge(withAudio);
+    const withMeshes = injectMeshBridge(withAudio, generatedMeshes);
+    const withInspector = injectInspectorBridge(withMeshes);
     return injectMultiplayerRuntime(withInspector, runtimeEnv);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [audioTracks, code, runtimeEnv, reloadKey]);
+  }, [audioTracks, code, generatedMeshes, runtimeEnv, reloadKey]);
+
+  // When srcDoc changes, load it immediately into the active iframe
+  useEffect(() => {
+    if (!srcDoc) return;
+    currentSessionRef.current = sessionRef.current;
+
+    // Update React state for reconciliation
+    if (activeIndexRef.current === 0) {
+      setIframe0SrcDoc(srcDoc);
+    } else {
+      setIframe1SrcDoc(srcDoc);
+    }
+
+    // Directly set srcdoc on the DOM element to force an immediate reload.
+    // React's prop reconciliation alone doesn't reliably trigger iframe
+    // re-navigation when srcDoc changes on an existing element.
+    const activeRef = activeIndexRef.current === 0 ? iframe0Ref : iframe1Ref;
+    if (activeRef.current) {
+      activeRef.current.srcdoc = srcDoc;
+    }
+  }, [srcDoc]);
+
+  // Listen for lifecycle signals
+  useEffect(() => {
+    const handler = (event: MessageEvent) => {
+      const data = event.data as {
+        __gameForgeLifecycle?: boolean;
+        session?: string;
+        type?: string;
+      };
+      if (!data || data.__gameForgeLifecycle !== true) return;
+      if (!data.session || data.session !== currentSessionRef.current) return;
+
+      if (data.type === "frame-ready") {
+        // This code loaded successfully — save as fallback and sync the inactive iframe
+        lastGoodSrcDocRef.current = srcDoc;
+        isFirstLoadRef.current = false;
+
+        // Update the inactive iframe so it's ready as a fallback
+        if (activeIndexRef.current === 0) {
+          setIframe1SrcDoc(srcDoc);
+        } else {
+          setIframe0SrcDoc(srcDoc);
+        }
+      } else if (data.type === "frame-error") {
+        // Swap to fallback iframe (which already has last good code loaded)
+        if (lastGoodSrcDocRef.current) {
+          const next: 0 | 1 = activeIndexRef.current === 0 ? 1 : 0;
+          activeIndexRef.current = next;
+          setActiveIndex(next);
+        }
+      }
+    };
+
+    window.addEventListener("message", handler);
+    return () => window.removeEventListener("message", handler);
+  }, [srcDoc]);
 
   // Console message forwarding
   useEffect(() => {
@@ -389,9 +544,10 @@ export function Sandbox({ code, audioTracks = [], runtimeEnv = {}, gamePaused = 
     return () => window.removeEventListener("message", handler);
   }, [onConsoleMessage]);
 
-  // Send audio tracks to iframe
+  // Send audio tracks to the active iframe
   useEffect(() => {
-    const iframe = iframeRef.current;
+    const activeRef = activeIndex === 0 ? iframe0Ref : iframe1Ref;
+    const iframe = activeRef.current;
     if (!iframe?.contentWindow) return;
 
     const readyTracks = audioTracks.filter((track) => track.status === "ready" && !!track.dataUrl);
@@ -408,7 +564,27 @@ export function Sandbox({ code, audioTracks = [], runtimeEnv = {}, gamePaused = 
     }
 
     iframe.contentWindow.postMessage({ type: "gameforge-sounds-update", sounds, music }, "*");
-  }, [audioTracks]);
+  }, [audioTracks, activeIndex]);
+
+  // Send mesh data to the active iframe
+  useEffect(() => {
+    const activeRef = activeIndex === 0 ? iframe0Ref : iframe1Ref;
+    const iframe = activeRef.current;
+    if (!iframe?.contentWindow) return;
+
+    const readyMeshes = generatedMeshes.filter((m) => m.status === "ready" && !!m.glbUrl);
+    if (readyMeshes.length === 0) return;
+
+    const meshes: Record<string, { glbUrl: string; name: string }> = {};
+    for (const mesh of readyMeshes) {
+      meshes[mesh.name] = {
+        glbUrl: `/api/meshes/${encodeURIComponent(mesh.id)}/file`,
+        name: mesh.name,
+      };
+    }
+
+    iframe.contentWindow.postMessage({ type: "gameforge-meshes-update", meshes }, "*");
+  }, [generatedMeshes, activeIndex]);
 
   // Inspector message forwarding
   useEffect(() => {
@@ -424,16 +600,17 @@ export function Sandbox({ code, audioTracks = [], runtimeEnv = {}, gamePaused = 
     return () => window.removeEventListener("message", handler);
   }, [onInspectorMessage]);
 
-  // Send pause/resume to iframe
+  // Send pause/resume to active iframe
   useEffect(() => {
-    const iframe = iframeRef.current;
+    const activeRef = activeIndex === 0 ? iframe0Ref : iframe1Ref;
+    const iframe = activeRef.current;
     if (!iframe?.contentWindow) return;
 
     iframe.contentWindow.postMessage(
       { type: gamePaused ? "gameforge-pause" : "gameforge-resume" },
       "*"
     );
-  }, [gamePaused]);
+  }, [gamePaused, activeIndex]);
 
   // Restart when restartCounter changes
   const prevRestartRef = useRef(restartCounter);
@@ -450,7 +627,12 @@ export function Sandbox({ code, audioTracks = [], runtimeEnv = {}, gamePaused = 
     onReload?.();
   }, [onReload]);
 
-  if (!code || !srcDoc) {
+  const pendingMeshes = generatedMeshes.filter(
+    (m) => m.status === "pending" || m.status === "refining"
+  );
+  const hasPendingMeshes = pendingMeshes.length > 0;
+
+  if (!code) {
     return (
       <div className="relative flex h-full w-full items-center justify-center bg-[var(--color-bg)] overflow-hidden">
         <div className="relative text-center animate-[fadeIn_0.4s_ease-out] space-y-3">
@@ -471,17 +653,63 @@ export function Sandbox({ code, audioTracks = [], runtimeEnv = {}, gamePaused = 
     );
   }
 
+  const isFirstLoad = isFirstLoadRef.current;
+
+  const visibleStyle: React.CSSProperties = {
+    position: "absolute",
+    inset: 0,
+    width: "100%",
+    height: "100%",
+    opacity: 1,
+    zIndex: 1,
+    pointerEvents: "auto",
+    transition: isFirstLoad ? undefined : "opacity 0.15s ease-out",
+    animation: isFirstLoad ? "gameReveal 0.5s ease-out" : undefined,
+  };
+
+  const hiddenStyle: React.CSSProperties = {
+    position: "absolute",
+    inset: 0,
+    width: "100%",
+    height: "100%",
+    opacity: 0,
+    zIndex: 0,
+    pointerEvents: "none",
+  };
+
   return (
-    <div ref={containerRef} className="relative h-full w-full bg-black">
-      <ShareBar code={code} openHtml={srcDoc} containerRef={containerRef} onReload={handleReload} />
+    <div ref={containerRef} className="relative h-full w-full bg-black overflow-hidden">
+      <ShareBar code={code} openHtml={srcDoc ?? code} containerRef={containerRef} onReload={handleReload} />
       <iframe
-        ref={iframeRef}
-        key={`${code}:${reloadKey}`}
-        srcDoc={srcDoc}
+        ref={iframe0Ref}
+        srcDoc={iframe0SrcDoc ?? undefined}
         sandbox="allow-scripts allow-pointer-lock"
         title="Game Preview"
-        className="h-full w-full border-none"
+        className="border-none"
+        style={activeIndex === 0 ? visibleStyle : hiddenStyle}
+        tabIndex={activeIndex === 0 ? undefined : -1}
       />
+      <iframe
+        ref={iframe1Ref}
+        srcDoc={iframe1SrcDoc ?? undefined}
+        sandbox="allow-scripts allow-pointer-lock"
+        title="Game Preview (staging)"
+        className="border-none"
+        style={activeIndex === 1 ? visibleStyle : hiddenStyle}
+        tabIndex={activeIndex === 1 ? undefined : -1}
+      />
+      {hasPendingMeshes && (
+        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 pointer-events-none animate-[fadeIn_0.3s_ease-out]">
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--color-surface)]/90 border border-[var(--color-border-light)] rounded-sm" style={{ backdropFilter: "blur(6px)" }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent)" strokeWidth="1.5" className="animate-spin" style={{ animationDuration: "1.5s" }}>
+              <path d="M12 2v4m0 12v4m10-10h-4M6 12H2m15.07-7.07l-2.83 2.83M9.76 14.24l-2.83 2.83m11.14 0l-2.83-2.83M9.76 9.76L6.93 6.93" />
+            </svg>
+            <span className="text-[10px] text-[var(--color-text-muted)] uppercase tracking-[0.1em] font-semibold">
+              Generating {pendingMeshes.length} mesh{pendingMeshes.length !== 1 ? "es" : ""}
+            </span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

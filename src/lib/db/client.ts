@@ -9,6 +9,8 @@ const options = {
   minPoolSize: 0,
   maxIdleTimeMS: 30_000,
   serverSelectionTimeoutMS: 5_000,
+  retryWrites: true,
+  retryReads: true,
 };
 
 declare global {
@@ -65,6 +67,57 @@ function getClient(uri: string): MongoClient {
 
 export function getDb() {
   return getClient(getPrimaryUri()).db(DATABASE_NAME);
+}
+
+/**
+ * Reset the cached MongoClient (dev mode). Call this when a topology/election
+ * error makes the existing connection unusable. The next `getDb()` call will
+ * create a fresh client.
+ */
+export function resetClient() {
+  if (globalThis._mongoClient) {
+    void globalThis._mongoClient.close().catch(() => {});
+  }
+  globalThis._mongoClient = undefined;
+  globalThis._mongoActiveUri = undefined;
+  globalThis._mongoSetupPromise = undefined;
+  globalThis._mongoSetupError = undefined;
+  globalThis._mongoSetupFailedAt = undefined;
+}
+
+const STALE_TOPOLOGY_PATTERNS = [
+  "setVersion mismatch",
+  "electionId mismatch",
+  "primary marked stale",
+  "not primary",
+  "node is recovering",
+];
+
+/**
+ * Returns true if the error is a stale MongoDB topology / election error
+ * that can be resolved by resetting the client.
+ */
+export function isStaleTopologyError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  const lower = msg.toLowerCase();
+  return STALE_TOPOLOGY_PATTERNS.some((p) => lower.includes(p));
+}
+
+/**
+ * Run an async database operation with one automatic retry on stale topology
+ * errors. Resets the client before the retry so a fresh connection is used.
+ */
+export async function withTopologyRetry<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (error) {
+    if (isStaleTopologyError(error)) {
+      console.warn("[MongoDB] Stale topology detected, resetting client and retrying...");
+      resetClient();
+      return fn();
+    }
+    throw error;
+  }
 }
 
 export function getArtifactBucket() {

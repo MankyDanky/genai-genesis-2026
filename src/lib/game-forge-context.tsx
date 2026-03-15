@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState, useCallback, type ReactNode, useMemo } from "react";
+import { createContext, useContext, useState, useCallback, useRef, useEffect, type ReactNode, useMemo } from "react";
 import type { GameEngine } from "@/lib/game-engine";
 import type { ProjectFile, ProjectFileKind } from "@/lib/project-files";
 import { compileProjectToHtml, normalizeProjectFiles } from "@/lib/project-files";
@@ -248,6 +248,59 @@ function createChatSessionId() {
   return `chat-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+// --- Autosave / localStorage caching ---
+
+const AUTOSAVE_KEY = "gameforge-autosave";
+const AUTOSAVE_DEBOUNCE_MS = 2000;
+
+interface AutosaveSnapshot {
+  currentCode: string | null;
+  currentEngine: GameEngine;
+  projectFiles: ProjectFile[];
+  controls: GameControl[];
+  runtimeEnv: RuntimeEnvMap;
+  planningTodos: PlanningTodo[];
+  generatedImages: GeneratedImage[];
+  audioTracks: AudioTrack[];
+  assets: Asset[];
+  generatedMeshes: GeneratedMesh[];
+  chatMessages: PersistedChatMessage[];
+  projectId: string | null;
+  currentRevisionNumber: number | null;
+  chatSessionId: string;
+  activeCodePath: string | null;
+  savedAt: number;
+}
+
+function loadAutosave(): AutosaveSnapshot | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(AUTOSAVE_KEY);
+    if (!raw) return null;
+    const snapshot = JSON.parse(raw) as AutosaveSnapshot;
+    if (!snapshot || typeof snapshot !== "object" || typeof snapshot.savedAt !== "number") return null;
+    return snapshot;
+  } catch {
+    return null;
+  }
+}
+
+function saveAutosave(snapshot: AutosaveSnapshot): void {
+  try {
+    localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(snapshot));
+  } catch {
+    // localStorage full or unavailable — silently ignore
+  }
+}
+
+function clearAutosave(): void {
+  try {
+    localStorage.removeItem(AUTOSAVE_KEY);
+  } catch {
+    // ignore
+  }
+}
+
 function extractProjectTitle(currentCode: string | null, projectFiles: ProjectFile[]) {
   const html =
     currentCode ??
@@ -327,35 +380,90 @@ async function parseJsonResponse<T>(response: Response): Promise<T> {
 }
 
 export function GameForgeProvider({ children }: { children: ReactNode }) {
-  const [currentCode, setCurrentCode] = useState<string | null>(null);
-  const [currentEngine, setCurrentEngine] = useState<GameEngine>("canvas2d");
-  const [projectFiles, setProjectFiles] = useState<ProjectFile[]>([]);
+  // Load cached autosave once on mount
+  const autosaveRef = useRef<AutosaveSnapshot | null | undefined>(undefined);
+  if (autosaveRef.current === undefined) {
+    autosaveRef.current = loadAutosave();
+  }
+  const cached = autosaveRef.current;
+
+  const [currentCode, setCurrentCode] = useState<string | null>(cached?.currentCode ?? null);
+  const [currentEngine, setCurrentEngine] = useState<GameEngine>(cached?.currentEngine ?? "canvas2d");
+  const [projectFiles, setProjectFiles] = useState<ProjectFile[]>(cached?.projectFiles ?? []);
   const [pendingFileWrites, setPendingFileWritesState] = useState<PendingFileWrite[]>([]);
   const [consoleLogs, setConsoleLogs] = useState<ConsoleLogEntry[]>([]);
-  const [planningTodos, setPlanningTodos] = useState<PlanningTodo[]>([]);
-  const [assets, setAssets] = useState<Asset[]>([]);
-  const [audioTracks, setAudioTracks] = useState<AudioTrack[]>([]);
-  const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>([]);
-  const [generatedMeshes, setGeneratedMeshes] = useState<GeneratedMesh[]>([]);
-  const [controls, setControlsState] = useState<GameControl[]>(DEFAULT_CONTROLS);
+  const [planningTodos, setPlanningTodos] = useState<PlanningTodo[]>(cached?.planningTodos ?? []);
+  const [assets, setAssets] = useState<Asset[]>(cached?.assets ?? []);
+  const [audioTracks, setAudioTracks] = useState<AudioTrack[]>(cached?.audioTracks ?? []);
+  const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>(cached?.generatedImages ?? []);
+  const [generatedMeshes, setGeneratedMeshes] = useState<GeneratedMesh[]>(cached?.generatedMeshes ?? []);
+  const [controls, setControlsState] = useState<GameControl[]>(cached?.controls ?? DEFAULT_CONTROLS);
   const [focusedCodePath, setFocusedCodePath] = useState<string | null>(null);
-  const [activeCodePath, setActiveCodePath] = useState<string | null>(null);
+  const [activeCodePath, setActiveCodePath] = useState<string | null>(cached?.activeCodePath ?? null);
   const [panelFocusRequest, setPanelFocusRequest] = useState<PanelFocusRequest | null>(null);
-  const [projectId, setProjectId] = useState<string | null>(null);
-  const [currentRevisionNumber, setCurrentRevisionNumber] = useState<number | null>(null);
+  const [projectId, setProjectId] = useState<string | null>(cached?.projectId ?? null);
+  const [currentRevisionNumber, setCurrentRevisionNumber] = useState<number | null>(cached?.currentRevisionNumber ?? null);
   const [lastPublishedGameId, setLastPublishedGameId] = useState<string | null>(null);
   const [lastPublishedPlayPath, setLastPublishedPlayPath] = useState<string | null>(null);
   const [projectStatusMessage, setProjectStatusMessage] = useState<string | null>(null);
   const [projectError, setProjectError] = useState<string | null>(null);
   const [projectBusyAction, setProjectBusyAction] = useState<"save" | "load" | "publish" | null>(null);
-  const [runtimeEnv, setRuntimeEnv] = useState<RuntimeEnvMap>(() => getDefaultRuntimeEnv());
-  const [chatMessages, setChatMessagesState] = useState<PersistedChatMessage[]>([]);
-  const [chatSessionId, setChatSessionId] = useState<string>(() => createChatSessionId());
+  const [runtimeEnv, setRuntimeEnv] = useState<RuntimeEnvMap>(() => ({
+    ...getDefaultRuntimeEnv(),
+    ...(cached?.runtimeEnv ?? {}),
+  }));
+  const [chatMessages, setChatMessagesState] = useState<PersistedChatMessage[]>(cached?.chatMessages ?? []);
+  const [chatSessionId, setChatSessionId] = useState<string>(() => cached?.chatSessionId ?? createChatSessionId());
   const [inspectorMetrics, setInspectorMetricsState] = useState<InspectorMetrics>({ fps: 0, frameTime: 0, fpsMin: 0, fpsMax: 0 });
   const [canvasInfo, setCanvasInfoState] = useState<CanvasInfo>({ width: 0, height: 0, contextType: "none", pixelRatio: 1 });
   const [activeInputs, setActiveInputsState] = useState<string[]>([]);
   const [gamePaused, setGamePausedState] = useState(false);
   const [restartCounter, setRestartCounter] = useState(0);
+
+  // Debounced autosave to localStorage
+  useEffect(() => {
+    // Skip saving if workspace is empty
+    if (!currentCode && projectFiles.length === 0) return;
+
+    const timer = setTimeout(() => {
+      saveAutosave({
+        currentCode,
+        currentEngine,
+        projectFiles,
+        controls,
+        runtimeEnv,
+        planningTodos,
+        generatedImages,
+        audioTracks,
+        assets,
+        generatedMeshes,
+        chatMessages,
+        projectId,
+        currentRevisionNumber,
+        chatSessionId,
+        activeCodePath,
+        savedAt: Date.now(),
+      });
+    }, AUTOSAVE_DEBOUNCE_MS);
+
+    return () => clearTimeout(timer);
+  }, [
+    currentCode,
+    currentEngine,
+    projectFiles,
+    controls,
+    runtimeEnv,
+    planningTodos,
+    generatedImages,
+    audioTracks,
+    assets,
+    generatedMeshes,
+    chatMessages,
+    projectId,
+    currentRevisionNumber,
+    chatSessionId,
+    activeCodePath,
+  ]);
 
   const onCodeUpdate = useCallback((code: string, engine?: GameEngine) => {
     setCurrentCode(code);
@@ -753,6 +861,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     setActiveInputsState([]);
     setGamePausedState(false);
     setRestartCounter(0);
+    clearAutosave();
   }, []);
 
   const clearProjectFeedback = useCallback(() => {
@@ -922,6 +1031,11 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
   const loadProject = useCallback(async (nextProjectId: string) => {
     setProjectBusyAction("load");
     setProjectError(null);
+    // Clear stale state immediately so the UI shows a fresh workspace while loading
+    setCurrentCode(null);
+    setProjectFiles([]);
+    setChatMessagesState([]);
+    setChatSessionId(createChatSessionId());
 
     try {
       const project = await parseJsonResponse<{

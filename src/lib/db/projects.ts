@@ -514,18 +514,38 @@ export async function forkPublishedGame(gameId: string | ObjectId) {
       .findOne({ _id: publishedDoc.revisionId });
 
     if (revision) {
-      const compiledHtml = await resolveTextArtifact(revision.compiledHtml);
+      // Use the PUBLISHED compiled HTML as currentCode — it already has all
+      // images inlined as data URLs and audio injected, so it's guaranteed to
+      // render correctly. The revision's raw HTML has API URLs that may no
+      // longer resolve (artifacts cleaned up, server origin changed, etc.).
+      const publishedHtml = await resolveTextArtifact(publishedDoc.compiledHtml);
+
+      // Inline images in project files too (images may be referenced in JS/CSS)
+      const inlinedFiles = await Promise.all(
+        revision.projectFiles.map(async (file) => ({
+          ...file,
+          content: await inlineImageUrls(file.content),
+        })),
+      );
+
+      // Resolve audio track data URLs to inline data URLs
+      const resolvedTracks = await Promise.all(
+        (revision.audioTracks ?? []).map(async (track) => ({
+          ...track,
+          dataUrl: await resolveAudioTrackDataUrl(track),
+        })),
+      );
 
       const snapshot: SaveProjectSnapshotRequest = {
         title,
         engine: revision.engine,
-        currentCode: compiledHtml,
-        projectFiles: revision.projectFiles,
+        currentCode: publishedHtml,
+        projectFiles: inlinedFiles,
         controls: revision.controls,
         planningTodos: [],
         generatedImages: revision.generatedImages,
         generatedMeshes: revision.generatedMeshes ?? [],
-        audioTracks: revision.audioTracks,
+        audioTracks: resolvedTracks,
         runtimeEnv: revision.runtimeEnv ?? {},
         chatMessages: [],
       };
@@ -536,12 +556,13 @@ export async function forkPublishedGame(gameId: string | ObjectId) {
 
   // Fallback: no revision — use compiled HTML as a single-file project
   const code = await resolveTextArtifact(publishedDoc.compiledHtml);
+  const inlinedCode = await inlineImageUrls(code);
 
   const snapshot: SaveProjectSnapshotRequest = {
     title,
     engine: publishedDoc.engine,
-    currentCode: code,
-    projectFiles: [{ path: "index.html", content: code, kind: "html" }],
+    currentCode: inlinedCode,
+    projectFiles: [{ path: "index.html", content: inlinedCode, kind: "html" }],
     controls: [],
     planningTodos: [],
     generatedImages: [],

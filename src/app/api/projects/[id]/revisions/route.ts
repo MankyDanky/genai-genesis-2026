@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
 import { createRevisionFromSnapshot } from "@/lib/db/projects";
 import { SaveProjectSnapshotRequestSchema } from "@/lib/db/schema";
+import { withTopologyRetry } from "@/lib/db/client";
 
 export async function POST(
   request: Request,
@@ -24,7 +25,7 @@ export async function POST(
       );
     }
 
-    const result = await createRevisionFromSnapshot(id, parsed.data);
+    const result = await withTopologyRetry(() => createRevisionFromSnapshot(id, parsed.data));
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
     console.error("[Projects] Failed to create revision", error);

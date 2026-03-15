@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { SaveProjectSnapshotRequestSchema } from "@/lib/db/schema";
 import { createProjectFromSnapshot } from "@/lib/db/projects";
+import { withTopologyRetry } from "@/lib/db/client";
 
 export async function POST(request: Request) {
   try {
@@ -14,7 +15,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const result = await createProjectFromSnapshot(parsed.data);
+    const result = await withTopologyRetry(() => createProjectFromSnapshot(parsed.data));
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
     console.error("[Projects] Failed to create project", error);

@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useState } from "react";
 
 const MESSAGES = [
@@ -30,8 +31,16 @@ export default function PlayLoading() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-[var(--color-bg)]">
       <div className="flex flex-col items-center gap-5">
-        {/* Spinner */}
-        <div className="h-6 w-6 animate-spin border-2 border-[var(--color-border-light)] border-t-[var(--color-accent)]" />
+        {/* Spinning Axiom logo */}
+        <Image
+          src="/axiom.png"
+          alt="Loading"
+          width={48}
+          height={48}
+          className="animate-spin"
+          style={{ animationDuration: "1.8s" }}
+          priority
+        />
 
         {/* Rotating message with animated text swap */}
         <p

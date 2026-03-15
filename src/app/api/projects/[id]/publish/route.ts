@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
 import { publishProjectRevision } from "@/lib/db/projects";
 import { PublishProjectRequestSchema } from "@/lib/db/schema";
+import { withTopologyRetry } from "@/lib/db/client";
 
 export async function POST(
   request: Request,
@@ -24,7 +25,9 @@ export async function POST(
       );
     }
 
-    const result = await publishProjectRevision(id, parsed.data.revisionNumber, parsed.data.thumbnail);
+    const result = await withTopologyRetry(() =>
+      publishProjectRevision(id, parsed.data.revisionNumber, parsed.data.thumbnail)
+    );
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
     console.error("[Projects] Failed to publish revision", error);

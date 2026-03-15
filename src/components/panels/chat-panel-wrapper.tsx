@@ -13,6 +13,9 @@ export function ChatPanelWrapper() {
     consoleLogs,
     generatedImages,
     audioTracks,
+    generatedMeshes,
+    addMesh,
+    removeMesh,
     runtimeEnv,
     onCodeUpdate,
     onProjectFilesUpdate,
@@ -46,6 +49,9 @@ export function ChatPanelWrapper() {
       consoleLogs={consoleLogs}
       generatedImages={generatedImages}
       audioTracks={audioTracks}
+      generatedMeshes={generatedMeshes}
+      addMesh={addMesh}
+      removeMesh={removeMesh}
       runtimeEnv={runtimeEnv}
       onCodeUpdate={onCodeUpdate}
       onProjectFilesUpdate={onProjectFilesUpdate}

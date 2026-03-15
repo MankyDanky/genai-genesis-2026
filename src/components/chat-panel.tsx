@@ -9,7 +9,7 @@ import remarkGfm from "remark-gfm";
 import { Mention, MentionsInput } from "react-mentions";
 import type { GameEngine } from "@/lib/game-engine";
 import type { ProjectFile } from "@/lib/project-files";
-import type { PlanningTodo, ConsoleLogEntry, GeneratedImage, PendingFileWrite, GameControl, AudioTrack } from "@/lib/game-forge-context";
+import type { PlanningTodo, ConsoleLogEntry, GeneratedImage, PendingFileWrite, GameControl, AudioTrack, GeneratedMesh } from "@/lib/game-forge-context";
 import { getGeneratedAudioId } from "@/lib/generated-audio";
 import type { PersistedChatMessage } from "@/lib/db/schema";
 import type { RuntimeEnvMap } from "@/lib/runtime-env";
@@ -25,6 +25,9 @@ interface ChatPanelProps {
   consoleLogs: ConsoleLogEntry[];
   generatedImages: GeneratedImage[];
   audioTracks: AudioTrack[];
+  generatedMeshes: GeneratedMesh[];
+  addMesh: (mesh: GeneratedMesh) => void;
+  removeMesh: (id: string) => void;
   runtimeEnv: RuntimeEnvMap;
   onCodeUpdate: (code: string, engine?: GameEngine) => void;
   onProjectFilesUpdate: (files: ProjectFile[], engine?: GameEngine, deletePaths?: string[]) => void;
@@ -717,6 +720,9 @@ export function ChatPanel({
   consoleLogs,
   generatedImages,
   audioTracks,
+  generatedMeshes,
+  addMesh,
+  removeMesh,
   runtimeEnv,
   onCodeUpdate,
   onProjectFilesUpdate,
@@ -754,6 +760,8 @@ export function ChatPanel({
   const processedToolPayloadRef = useRef<Map<string, string>>(new Map());
   const audioPollInFlightRef = useRef(false);
   const audioPollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const meshPollInFlightRef = useRef(false);
+  const meshPollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hydratedMessageIdsRef = useRef<Set<string>>(new Set());
   const initialChatMessagesRef = useRef(chatMessages);
   const [input, setInput] = useState("");
@@ -801,9 +809,14 @@ export function ChatPanel({
           display: `audio:${toMentionSlug(track.name) || `track-${index + 1}`}`,
           meta: track.name || "audio",
         })),
+        ...generatedMeshes.map((mesh, index) => ({
+          id: `mesh:${toMentionSlug(mesh.name) || `mesh-${index + 1}`}`,
+          display: `mesh:${toMentionSlug(mesh.name) || `mesh-${index + 1}`}`,
+          meta: mesh.name || "mesh",
+        })),
       ];
     },
-    [audioTracks, generatedImages, pendingFileWrites, projectFiles]
+    [audioTracks, generatedImages, generatedMeshes, pendingFileWrites, projectFiles]
   );
 
   const estimatedTokens = useMemo(() => {
@@ -1026,6 +1039,123 @@ export function ChatPanel({
     };
   }, [addAudioTrack, audioTrackById, pendingAudioIdsKey]);
 
+  const meshById = useMemo(
+    () => new Map(generatedMeshes.map((m) => [m.id, m])),
+    [generatedMeshes]
+  );
+
+  const pendingMeshIdsKey = useMemo(
+    () =>
+      generatedMeshes
+        .filter((m) => m.status === "pending" || m.status === "refining")
+        .map((m) => m.id)
+        .sort()
+        .join("|"),
+    [generatedMeshes]
+  );
+
+  useEffect(() => {
+    if (!pendingMeshIdsKey) {
+      if (meshPollTimerRef.current) {
+        clearTimeout(meshPollTimerRef.current);
+        meshPollTimerRef.current = null;
+      }
+      return;
+    }
+
+    let cancelled = false;
+    const maxRounds = 60;
+    let round = 0;
+
+    const pollRound = async () => {
+      if (cancelled || meshPollInFlightRef.current) return;
+
+      const currentPending = Array.from(meshById.values()).filter(
+        (m) => m.status === "pending" || m.status === "refining"
+      );
+      if (currentPending.length === 0) return;
+
+      round += 1;
+      meshPollInFlightRef.current = true;
+      try {
+        const results = await Promise.all(
+          currentPending.map(async (mesh) => {
+            const res = await fetch(`/api/meshes/${encodeURIComponent(mesh.id)}`);
+            if (!res.ok) {
+              return {
+                id: mesh.id,
+                status: "error" as const,
+                error: `Mesh status request failed (${res.status})`,
+              };
+            }
+            const payload = (await res.json()) as {
+              status?: string;
+              glbUrl?: string | null;
+              thumbnailUrl?: string | null;
+              error?: string | null;
+              name?: string;
+            };
+            return {
+              id: mesh.id,
+              status: payload.status ?? "pending",
+              glbUrl: typeof payload.glbUrl === "string" ? payload.glbUrl : null,
+              thumbnailUrl: typeof payload.thumbnailUrl === "string" ? payload.thumbnailUrl : null,
+              error: typeof payload.error === "string" ? payload.error : null,
+              name: typeof payload.name === "string" ? payload.name : mesh.name,
+            };
+          })
+        );
+
+        for (const result of results) {
+          if (result.status === "pending" || result.status === "refining") continue;
+          const existing = meshById.get(result.id);
+          addMesh({
+            id: result.id,
+            name: result.name ?? existing?.name ?? result.id,
+            prompt: existing?.prompt ?? "",
+            status: result.status as GeneratedMesh["status"],
+            glbUrl: result.glbUrl ?? null,
+            thumbnailUrl: result.thumbnailUrl ?? null,
+            error: result.error ?? null,
+            createdAt: existing?.createdAt ?? Date.now(),
+          });
+        }
+
+        const hasPending = results.some(
+          (r) => r.status === "pending" || r.status === "refining"
+        );
+        if (!cancelled && hasPending && round < maxRounds) {
+          meshPollTimerRef.current = setTimeout(() => {
+            void pollRound();
+          }, 5000);
+        } else if (!cancelled && hasPending && round >= maxRounds) {
+          for (const mesh of currentPending) {
+            if (mesh.status !== "pending" && mesh.status !== "refining") continue;
+            addMesh({
+              ...mesh,
+              status: "error",
+              error: "Mesh generation timed out",
+            });
+          }
+        }
+      } finally {
+        meshPollInFlightRef.current = false;
+      }
+    };
+
+    if (!meshPollTimerRef.current) {
+      void pollRound();
+    }
+
+    return () => {
+      cancelled = true;
+      if (meshPollTimerRef.current) {
+        clearTimeout(meshPollTimerRef.current);
+        meshPollTimerRef.current = null;
+      }
+    };
+  }, [addMesh, meshById, pendingMeshIdsKey]);
+
   useEffect(() => {
     setSelectedEngine(currentEngine);
   }, [currentEngine]);
@@ -1158,7 +1288,7 @@ export function ChatPanel({
 
   const { messages, sendMessage, status, error } = useChat({
     id: chatSessionId,
-    messages: chatMessages as UIMessage[],
+    initialMessages: chatMessages as UIMessage[],
     experimental_throttle: 50,
     transport,
     onError,
@@ -1507,6 +1637,31 @@ export function ChatPanel({
             createdAt: Date.now(),
           });
         }
+
+        if (partType === "tool-generate_mesh") {
+          const toolPart = part as {
+            state: string;
+            input?: { name?: string; prompt?: string };
+            output?: { meshId?: string; name?: string; status?: string; error?: string };
+          };
+          if (toolPart.state !== "output-available") continue;
+          const meshName = toolPart.output?.name ?? toolPart.input?.name;
+          if (!meshName) continue;
+          const meshId = toolPart.output?.meshId ?? `mesh:${meshName}`;
+          const key = `${message.id}:${partType}:${meshId}`;
+          if (processedToolPayloadRef.current.get(key) === "1") continue;
+          processedToolPayloadRef.current.set(key, "1");
+          addMesh({
+            id: meshId,
+            name: meshName,
+            prompt: toolPart.input?.prompt ?? "",
+            status: (toolPart.output?.status as GeneratedMesh["status"]) ?? "pending",
+            glbUrl: null,
+            thumbnailUrl: null,
+            error: toolPart.output?.error ?? null,
+            createdAt: Date.now(),
+          });
+        }
       }
     }
   }, [
@@ -1523,6 +1678,7 @@ export function ChatPanel({
     composerMode,
     addImage,
     addAudioTrack,
+    addMesh,
     setControls,
     setPendingFileWrites,
     clearPendingFileWrites,
@@ -1638,6 +1794,13 @@ export function ChatPanel({
         })),
         consoleLogs: consoleContext,
         generatedImages,
+        generatedMeshes: generatedMeshes.map((mesh) => ({
+          id: mesh.id,
+          name: mesh.name,
+          prompt: mesh.prompt,
+          status: mesh.status,
+          glbUrl: mesh.glbUrl,
+        })),
         runtimeEnv,
         modelChoice: selectedModel,
         composerMode,
@@ -1742,6 +1905,13 @@ export function ChatPanel({
             })),
             consoleLogs: [],
             generatedImages,
+            generatedMeshes: generatedMeshes.map((mesh) => ({
+              id: mesh.id,
+              name: mesh.name,
+              prompt: mesh.prompt,
+              status: mesh.status,
+              glbUrl: mesh.glbUrl,
+            })),
             runtimeEnv,
             composerMode,
             planningMode,
@@ -1759,6 +1929,7 @@ export function ChatPanel({
       planningTodos,
       audioTracks,
       generatedImages,
+      generatedMeshes,
       runtimeEnv,
       composerMode,
       planningMode,

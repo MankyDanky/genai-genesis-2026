@@ -42,6 +42,25 @@ function isLocalRef(ref: string): boolean {
   return !/^(https?:|data:|blob:|\/\/|#)/i.test(ref);
 }
 
+function guessMimeType(path: string): string {
+  const ext = path.split(".").pop()?.toLowerCase();
+  const mimeMap: Record<string, string> = {
+    svg: "image/svg+xml",
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    gif: "image/gif",
+    webp: "image/webp",
+    ico: "image/x-icon",
+    mp3: "audio/mpeg",
+    wav: "audio/wav",
+    ogg: "audio/ogg",
+    glb: "model/gltf-binary",
+    gltf: "model/gltf+json",
+  };
+  return mimeMap[ext ?? ""] ?? "application/octet-stream";
+}
+
 function fileMap(files: ProjectFile[]): Map<string, ProjectFile> {
   return new Map(files.map((f) => [normalizePath(f.path), f]));
 }
@@ -84,14 +103,56 @@ export function compileProjectToHtml(files: ProjectFile[]): string | null {
     }
   );
 
+  // Inline local asset files referenced in <img src="..."> tags
+  html = html.replace(/<img([^>]*)\ssrc=["']([^"']+)["']([^>]*)>/gi, (full, before, src, after) => {
+    if (!isLocalRef(src)) return full;
+    const asset = resolveFileRef(src, map);
+    if (!asset) return full;
+    const mime = guessMimeType(asset.path);
+    const dataUrl = `data:${mime};base64,${btoa(asset.content)}`;
+    return `<img${before} src="${dataUrl}"${after}>`;
+  });
+
+  // Inline local asset files referenced in CSS url("...") values
+  html = html.replace(/url\(["']?([^"')]+)["']?\)/gi, (full, ref) => {
+    if (!isLocalRef(ref)) return full;
+    const asset = resolveFileRef(ref, map);
+    if (!asset) return full;
+    const mime = guessMimeType(asset.path);
+    const dataUrl = `data:${mime};base64,${btoa(asset.content)}`;
+    return `url("${dataUrl}")`;
+  });
+
   return html;
+}
+
+/**
+ * Replace inline data URLs with compact placeholders to avoid blowing up
+ * the system prompt token count. A single base64 image can be 100K+ tokens.
+ */
+export function stripDataUrls(text: string): string {
+  return text.replace(
+    /data:([^;,]+?)(?:;base64)?,([A-Za-z0-9+/=\s]{200,})/g,
+    (_match, mime: string, data: string) => {
+      const sizeKB = Math.round((data.replace(/\s/g, "").length * 3) / 4 / 1024);
+      return `[inline data-url: ${mime}, ~${sizeKB}KB]`;
+    },
+  );
 }
 
 export function projectFilesToPrompt(files: ProjectFile[]): string {
   if (files.length === 0) return "(none)";
 
-  return files
-    .map((f) => `### ${f.path}\n\n\`\`\`${f.kind === "script" ? "js" : f.kind === "style" ? "css" : f.kind === "html" ? "html" : "txt"}\n${f.content}\n\`\`\``)
+  // Skip pure binary asset files — they can't be meaningfully shown in a prompt
+  const codeFiles = files.filter((f) => f.kind !== "asset");
+  if (codeFiles.length === 0) return "(none)";
+
+  return codeFiles
+    .map((f) => {
+      const lang = f.kind === "script" ? "js" : f.kind === "style" ? "css" : f.kind === "html" ? "html" : "txt";
+      const content = stripDataUrls(f.content);
+      return `### ${f.path}\n\n\`\`\`${lang}\n${content}\n\`\`\``;
+    })
     .join("\n\n");
 }
 

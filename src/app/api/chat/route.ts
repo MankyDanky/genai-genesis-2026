@@ -989,6 +989,7 @@ export async function POST(req: Request) {
             modelType: z.enum(["standard", "lowpoly"]).optional(),
           }),
           execute: async ({ prompt, name, modelType }) => {
+            console.log("[Mesh] generate_mesh called:", { name, prompt: prompt.slice(0, 80), modelType });
             try {
               const key = process.env.MESHY_API_KEY;
               if (!key) throw new Error("MESHY_API_KEY is not set");
@@ -1009,11 +1010,13 @@ export async function POST(req: Request) {
 
               if (!res.ok) {
                 const text = await res.text();
+                console.error("[Mesh] Meshy API error:", { status: res.status, body: text.slice(0, 300) });
                 throw new Error(`Meshy API error (${res.status}): ${text}`);
               }
 
               const data = (await res.json()) as { result: string };
               const meshId = `mesh:${name}`;
+              console.log("[Mesh] generate_mesh success:", { meshId, meshyTaskId: data.result });
               await putMesh(meshId, {
                 name,
                 prompt,
@@ -1030,6 +1033,8 @@ export async function POST(req: Request) {
               return { meshId, name, status: "pending", meshyTaskId: data.result };
             } catch (error) {
               const meshId = `mesh:${name}`;
+              const errorMsg = error instanceof Error ? error.message : "Mesh generation failed";
+              console.error("[Mesh] generate_mesh failed:", { meshId, error: errorMsg });
               await putMesh(meshId, {
                 name,
                 prompt,
@@ -1040,10 +1045,10 @@ export async function POST(req: Request) {
                 thumbnailUrl: null,
                 artifactId: null,
                 thumbnailArtifactId: null,
-                error: error instanceof Error ? error.message : "Mesh generation failed",
+                error: errorMsg,
                 createdAt: Date.now(),
               });
-              return { meshId, name, status: "error", error: error instanceof Error ? error.message : "Mesh generation failed" };
+              return { meshId, name, status: "error", error: errorMsg };
             }
           },
         }),
@@ -1211,6 +1216,14 @@ export async function POST(req: Request) {
           inputPreview: safeJsonPreview(call.input, 220),
         }));
 
+        const toolResults = (step.toolResults ?? []).map((result) => {
+          const r = result as { toolName?: string; result?: unknown };
+          return {
+            toolName: r.toolName,
+            resultPreview: safeJsonPreview(r.result, 300),
+          };
+        });
+
         console.log("[API] step finish", {
           requestId,
           finishReason: step.finishReason,
@@ -1218,6 +1231,7 @@ export async function POST(req: Request) {
           textPreview: safeJsonPreview(step.text?.slice(0, 180), 220),
           toolCallCount: toolCalls.length,
           toolCalls,
+          toolResults,
         });
       },
       onError: ({ error }) => {
