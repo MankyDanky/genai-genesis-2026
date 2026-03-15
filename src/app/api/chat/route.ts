@@ -241,6 +241,17 @@ function normalizeDir(dir: string): string {
   return normalized.endsWith("/") ? normalized : `${normalized}/`;
 }
 
+function parseJsonIfString(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  if (!trimmed) return value;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return value;
+  }
+}
+
 function toFileMap(files: ProjectFile[]): Map<string, ProjectFile> {
   return new Map(files.map((file) => [normalizePath(file.path), file]));
 }
@@ -764,14 +775,17 @@ export async function POST(req: Request) {
           description:
             "Create or update virtual project files. This is merge-based: unspecified files are preserved. Use deletePaths to remove files explicitly.",
           inputSchema: z.object({
-            files: z.array(
-              z.object({
-                path: z.string().min(1),
-                content: z.string(),
-                kind: z.enum(["html", "style", "script", "asset", "config", "other"]).optional(),
-              })
+            files: z.preprocess(
+              parseJsonIfString,
+              z.array(
+                z.object({
+                  path: z.string().min(1),
+                  content: z.string(),
+                  kind: z.enum(["html", "style", "script", "asset", "config", "other"]).optional(),
+                })
+              )
             ).default([]),
-            deletePaths: z.array(z.string().min(1)).optional(),
+            deletePaths: z.preprocess(parseJsonIfString, z.array(z.string().min(1))).optional(),
           }),
           execute: async ({ files, deletePaths }) => {
             const normalized = normalizeProjectFiles(files);
