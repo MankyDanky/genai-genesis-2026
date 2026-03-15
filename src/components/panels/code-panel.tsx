@@ -458,7 +458,6 @@ function DiffView({
 export function CodePanel() {
   const {
     projectFiles,
-    previousProjectFiles,
     pendingFileWrites,
     activeCodePath,
     setActiveCodePath,
@@ -468,6 +467,12 @@ export function CodePanel() {
     currentCode,
   } = useGameForge();
   const codeFiles = useMemo(() => projectFiles.filter((file) => file.kind !== "asset"), [projectFiles]);
+  const previousCodeFilesRef = useRef(codeFiles);
+  const [previousCodeFiles, setPreviousCodeFiles] = useState(codeFiles);
+  useEffect(() => {
+    setPreviousCodeFiles(previousCodeFilesRef.current);
+    previousCodeFilesRef.current = codeFiles;
+  }, [codeFiles]);
   const pendingByPath = useMemo(
     () => new Map(pendingFileWrites.map((entry) => [entry.path, entry.status])),
     [pendingFileWrites]
@@ -568,7 +573,7 @@ export function CodePanel() {
       }
       // Case 3: finalized diff (previous vs current)
       else {
-        const prevFile = previousProjectFiles.find((f) => f.path === activeFile);
+        const prevFile = previousCodeFiles.find((f) => f.path === activeFile);
         const curFile = previewCodeFiles.find((f) => f.path === activeFile);
         oldContent = prevFile?.content ?? "";
         newContent = curFile?.content ?? "";
@@ -595,7 +600,7 @@ export function CodePanel() {
       isDiffStreaming: streaming,
       diffStats: added > 0 || removed > 0 ? { added, removed } : null,
     };
-  }, [activeFile, streamingCode, currentCode, pendingFileWrites, projectFiles, previousProjectFiles, previewCodeFiles]);
+  }, [activeFile, streamingCode, currentCode, pendingFileWrites, projectFiles, previousCodeFiles, previewCodeFiles]);
 
   // Auto-switch to diff mode when streaming starts (derived state, no effect needed)
   const isCurrentlyStreaming = !!streamingCode || pendingFileWrites.some((e) => typeof e.content === "string");

@@ -1,4 +1,5 @@
 import { anthropic } from "@ai-sdk/anthropic";
+import { xai } from "@ai-sdk/xai";
 import { streamText, tool, stepCountIs, convertToModelMessages } from "ai";
 import { z } from "zod";
 import { getSystemPrompt } from "@/lib/system-prompt";
@@ -104,9 +105,21 @@ interface PlanningTodoPayload {
 }
 
 type ComposerMode = "agent" | "plan" | "debug" | "ask";
+type ModelChoice =
+  | "claude-sonnet-4-6"
+  | "grok-code-fast-1"
+  | "grok-4.20-multi-agent-beta-0309";
 
 function isComposerMode(value: unknown): value is ComposerMode {
   return value === "agent" || value === "plan" || value === "debug" || value === "ask";
+}
+
+function isModelChoice(value: unknown): value is ModelChoice {
+  return (
+    value === "claude-sonnet-4-6" ||
+    value === "grok-code-fast-1" ||
+    value === "grok-4.20-multi-agent-beta-0309"
+  );
 }
 
 function safeJsonPreview(value: unknown, max = 300): string {
@@ -233,6 +246,17 @@ function normalizeDir(dir: string): string {
   const normalized = normalizePath(dir);
   if (!normalized) return "";
   return normalized.endsWith("/") ? normalized : `${normalized}/`;
+}
+
+function parseJsonIfString(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  if (!trimmed) return value;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return value;
+  }
 }
 
 function toFileMap(files: ProjectFile[]): Map<string, ProjectFile> {
@@ -547,6 +571,7 @@ export async function POST(req: Request) {
       generatedImages?: unknown;
       audioTracks?: unknown;
       generatedMeshes?: unknown;
+      modelChoice?: unknown;
       composerMode?: unknown;
       planningMode?: unknown;
       gameEngine?: unknown;
@@ -637,6 +662,9 @@ export async function POST(req: Request) {
       : parsed.planningMode === true
         ? "plan"
         : "agent";
+    const modelChoice: ModelChoice = isModelChoice(parsed.modelChoice)
+      ? parsed.modelChoice
+      : "claude-sonnet-4-6";
     const planningMode = composerMode === "plan";
     const gameEngine: GameEngine = isGameEngine(parsed.gameEngine) ? parsed.gameEngine : "canvas2d";
     const templateSkills = typeof parsed.templateSkills === "string"
@@ -653,6 +681,7 @@ export async function POST(req: Request) {
       requestId,
       messageCount: messages.length,
       composerMode,
+      modelChoice,
       gameEngine,
       projectFileCount: currentProjectFiles.length,
       generatedImageCount: generatedImages.length,
@@ -663,6 +692,20 @@ export async function POST(req: Request) {
     const sanitizedMessages = sanitizeMessagesForModel(messages);
     const modelMessages = await convertToModelMessages(sanitizedMessages);
 
+    const isXaiModel = modelChoice.startsWith("grok-");
+
+    if (isXaiModel && !process.env.XAI_API_KEY) {
+      return new Response(
+        JSON.stringify({ error: `XAI_API_KEY is required when modelChoice is '${modelChoice}'` }),
+        {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    }
+
+    const selectedModel = isXaiModel ? xai(modelChoice) : anthropic(modelChoice);
+
     console.log("[API] model message summary", {
       requestId,
       sanitizedCount: sanitizedMessages.length,
@@ -671,7 +714,7 @@ export async function POST(req: Request) {
     });
 
     const result = streamText({
-      model: anthropic("claude-sonnet-4-6"),
+      model: selectedModel,
       system: getSystemPrompt({
         currentCode,
         currentProjectFiles,
@@ -738,14 +781,17 @@ export async function POST(req: Request) {
           description:
             "Create or update virtual project files. This is merge-based: unspecified files are preserved. Use deletePaths to remove files explicitly.",
           inputSchema: z.object({
-            files: z.array(
-              z.object({
-                path: z.string().min(1),
-                content: z.string(),
-                kind: z.enum(["html", "style", "script", "asset", "config", "other"]).optional(),
-              })
+            files: z.preprocess(
+              parseJsonIfString,
+              z.array(
+                z.object({
+                  path: z.string().min(1),
+                  content: z.string(),
+                  kind: z.enum(["html", "style", "script", "asset", "config", "other"]).optional(),
+                })
+              )
             ).default([]),
-            deletePaths: z.array(z.string().min(1)).optional(),
+            deletePaths: z.preprocess(parseJsonIfString, z.array(z.string().min(1))).optional(),
           }),
           execute: async ({ files, deletePaths }) => {
             const normalized = normalizeProjectFiles(files);

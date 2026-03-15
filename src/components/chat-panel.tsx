@@ -61,6 +61,10 @@ interface ChatPanelProps {
 }
 
 type ComposerMode = "agent" | "plan" | "debug" | "ask";
+type ModelChoice =
+  | "claude-sonnet-4-6"
+  | "grok-code-fast-1"
+  | "grok-4.20-multi-agent-beta-0309";
 
 
 function toMentionSlug(value: string): string {
@@ -687,6 +691,7 @@ export function ChatPanel({
   const initialChatMessagesRef = useRef(chatMessages);
   const [input, setInput] = useState("");
   const [selectedEngine, setSelectedEngine] = useState<GameEngine>(currentEngine);
+  const [selectedModel, setSelectedModel] = useState<ModelChoice>("claude-sonnet-4-6");
   const [composerMode, setComposerMode] = useState<ComposerMode>("agent");
   const [isModeMenuOpen, setIsModeMenuOpen] = useState(false);
   const [modeMenuPos, setModeMenuPos] = useState({ x: 0, y: 0 });
@@ -748,6 +753,7 @@ export function ChatPanel({
       })),
       runtimeEnv,
       composerMode,
+      model: selectedModel,
     });
     return transcriptTokens + contextTokens;
   }, [
@@ -759,6 +765,7 @@ export function ChatPanel({
     planningTodos,
     projectFiles,
     runtimeEnv,
+    selectedModel,
   ]);
 
   const handleMentionChipClick = useCallback(
@@ -1495,6 +1502,7 @@ export function ChatPanel({
         consoleLogs: consoleContext,
         generatedImages,
         runtimeEnv,
+        modelChoice: selectedModel,
         composerMode,
         planningMode,
         gameEngine: effectiveEngine,
@@ -2083,6 +2091,19 @@ export function ChatPanel({
             </svg>
           </button>
         </form>
+
+        <div className="flex items-center gap-2 px-1 pt-1">
+          <label className="text-[9px] uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Model</label>
+          <select
+            value={selectedModel}
+            onChange={(e) => setSelectedModel(e.target.value as ModelChoice)}
+            className="h-6 bg-[var(--color-surface)] border border-[var(--color-border)] text-[10px] uppercase tracking-[0.08em] text-[var(--color-text-secondary)] px-1.5"
+          >
+            <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
+            <option value="grok-code-fast-1">Grok Code Fast 1</option>
+            <option value="grok-4.20-multi-agent-beta-0309">Grok 4.20 Multi-Agent Beta</option>
+          </select>
+        </div>
 
         <div className="flex items-center justify-between px-1 pt-1">
           <span className="text-[9px] text-[var(--color-text-muted)]">
