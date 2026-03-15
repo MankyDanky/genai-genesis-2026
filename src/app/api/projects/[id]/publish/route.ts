@@ -24,7 +24,7 @@ export async function POST(
       );
     }
 
-    const result = await publishProjectRevision(id, parsed.data.revisionNumber);
+    const result = await publishProjectRevision(id, parsed.data.revisionNumber, parsed.data.thumbnail);
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
     console.error("[Projects] Failed to publish revision", error);

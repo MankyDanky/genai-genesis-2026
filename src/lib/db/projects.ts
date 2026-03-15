@@ -298,6 +298,7 @@ export async function createRevisionFromSnapshot(
     controls: snapshot.controls,
     planningTodos: snapshot.planningTodos,
     generatedImages: snapshot.generatedImages,
+    generatedMeshes: snapshot.generatedMeshes ?? [],
     audioTracks: snapshot.audioTracks,
     runtimeEnv: snapshot.runtimeEnv,
     compiledHtml,
@@ -374,6 +375,7 @@ export async function getLatestProjectRevision(projectId: string | ObjectId) {
 export async function publishProjectRevision(
   projectId: string | ObjectId,
   revisionNumber?: number,
+  thumbnail?: string | null,
 ) {
   await ensureDbSetup();
   const db = getDb();
@@ -427,6 +429,7 @@ export async function publishProjectRevision(
     multiplayerRoomType: multiplayerMeta.multiplayerRoomType,
     runtimeEnv: revision.runtimeEnv ?? {},
     compiledHtml: publishedCompiledHtml,
+    thumbnail: thumbnail ?? null,
     createdAt: new Date(),
   };
 
@@ -521,6 +524,7 @@ export async function forkPublishedGame(gameId: string | ObjectId) {
         controls: revision.controls,
         planningTodos: [],
         generatedImages: revision.generatedImages,
+        generatedMeshes: revision.generatedMeshes ?? [],
         audioTracks: revision.audioTracks,
         runtimeEnv: revision.runtimeEnv ?? {},
         chatMessages: [],
@@ -541,6 +545,7 @@ export async function forkPublishedGame(gameId: string | ObjectId) {
     controls: [],
     planningTodos: [],
     generatedImages: [],
+    generatedMeshes: [],
     audioTracks: [],
     runtimeEnv: {},
     chatMessages: [],
@@ -584,6 +589,7 @@ export async function createStandalonePublishedGame(snapshot: {
       multiplayerRoomType: multiplayerMeta.multiplayerRoomType,
       runtimeEnv: {},
       compiledHtml,
+      thumbnail: null,
       createdAt: new Date(),
     };
 
@@ -616,7 +622,7 @@ export async function listPublishedGames(limit = 60) {
     await ensureDbSetup();
     const docs = await getDb()
       .collection<PublishedGameDocument>("published_games")
-      .find({})
+      .find({}, { projection: { compiledHtml: 0 } })
       .sort({ createdAt: -1 })
       .limit(cappedLimit)
       .toArray();
@@ -632,6 +638,7 @@ export async function listPublishedGames(limit = 60) {
       multiplayerProvider: doc.multiplayerProvider ?? null,
       multiplayerRoomType: doc.multiplayerRoomType ?? null,
       runtimeEnv: doc.runtimeEnv ?? {},
+      thumbnail: doc.thumbnail ?? null,
       createdAt: doc.createdAt,
     }));
   } catch (error) {
@@ -650,6 +657,7 @@ export async function listPublishedGames(limit = 60) {
         multiplayerProvider: game.multiplayerProvider,
         multiplayerRoomType: game.multiplayerRoomType,
         runtimeEnv: game.runtimeEnv ?? {},
+        thumbnail: null,
         createdAt: game.createdAt,
       }));
   }

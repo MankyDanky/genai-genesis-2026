@@ -10,6 +10,7 @@ export default async function ExplorePage() {
     engine: game.engine,
     multiplayer: game.multiplayer ?? false,
     multiplayerRoomType: game.multiplayerRoomType ?? null,
+    thumbnail: game.thumbnail ?? null,
     createdAt: game.createdAt.toISOString(),
   }));
 

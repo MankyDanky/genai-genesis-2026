@@ -6,6 +6,7 @@ import type { ProjectFile, ProjectFileKind } from "@/lib/project-files";
 import { compileProjectToHtml, normalizeProjectFiles } from "@/lib/project-files";
 import type { PersistedChatMessage } from "@/lib/db/schema";
 import { getDefaultRuntimeEnv, normalizeRuntimeEnv, type RuntimeEnvMap } from "@/lib/runtime-env";
+import { captureThumbnail } from "@/lib/capture-thumbnail";
 
 export interface PlanningTodo {
   id: string;
@@ -41,6 +42,17 @@ export interface AudioTrack {
   status: "pending" | "ready" | "error";
   error?: string | null;
   duration: number | null;
+  createdAt: number;
+}
+
+export interface GeneratedMesh {
+  id: string;
+  name: string;
+  prompt: string;
+  status: "pending" | "refining" | "ready" | "error";
+  glbUrl: string | null;
+  thumbnailUrl: string | null;
+  error?: string | null;
   createdAt: number;
 }
 
@@ -125,6 +137,9 @@ interface GameForgeContextValue {
   audioTracks: AudioTrack[];
   addAudioTrack: (track: AudioTrack) => void;
   removeAudioTrack: (id: string) => void;
+  generatedMeshes: GeneratedMesh[];
+  addMesh: (mesh: GeneratedMesh) => void;
+  removeMesh: (id: string) => void;
   addImage: (image: GeneratedImage) => void;
   setControls: (controls: GameControl[]) => void;
   setActiveCodePath: (path: string | null) => void;
@@ -297,6 +312,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [audioTracks, setAudioTracks] = useState<AudioTrack[]>([]);
   const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>([]);
+  const [generatedMeshes, setGeneratedMeshes] = useState<GeneratedMesh[]>([]);
   const [controls, setControlsState] = useState<GameControl[]>(DEFAULT_CONTROLS);
   const [focusedCodePath, setFocusedCodePath] = useState<string | null>(null);
   const [activeCodePath, setActiveCodePath] = useState<string | null>(null);
@@ -541,6 +557,18 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const addMesh = useCallback((mesh: GeneratedMesh) => {
+    setGeneratedMeshes((prev) => {
+      const existing = prev.find((m) => m.id === mesh.id);
+      if (!existing) return [...prev, mesh];
+      return prev.map((m) => (m.id === mesh.id ? { ...existing, ...mesh, createdAt: existing.createdAt } : m));
+    });
+  }, []);
+
+  const removeMesh = useCallback((id: string) => {
+    setGeneratedMeshes((prev) => prev.filter((m) => m.id !== id));
+  }, []);
+
   const setControls = useCallback((next: GameControl[]) => {
     const normalized = next
       .filter((item) => item.action && item.keys)
@@ -651,6 +679,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     setAssets([]);
     setAudioTracks([]);
     setGeneratedImages([]);
+    setGeneratedMeshes([]);
     setControlsState(DEFAULT_CONTROLS);
     setFocusedCodePath(null);
     setActiveCodePath(null);
@@ -681,6 +710,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     controls: GameControl[];
     planningTodos: PlanningTodo[];
     generatedImages: GeneratedImage[];
+    generatedMeshes?: GeneratedMesh[];
     audioTracks: AudioTrack[];
     runtimeEnv?: RuntimeEnvMap;
     currentCode: string;
@@ -696,6 +726,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     setAssets([]);
     setAudioTracks(snapshot.audioTracks);
     setGeneratedImages(snapshot.generatedImages);
+    setGeneratedMeshes(snapshot.generatedMeshes ?? []);
     setRuntimeEnv({
       ...getDefaultRuntimeEnv(),
       ...normalizeRuntimeEnv(snapshot.runtimeEnv),
@@ -720,6 +751,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     controls,
     planningTodos,
     generatedImages,
+    generatedMeshes,
     audioTracks,
     runtimeEnv,
     chatMessages,
@@ -731,6 +763,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     currentCode,
     currentEngine,
     generatedImages,
+    generatedMeshes,
     planningTodos,
     projectFiles,
   ]);
@@ -788,14 +821,22 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     setProjectError(null);
 
     try {
+      // Capture thumbnail from current game code (best-effort, non-blocking)
+      const gameCode = currentCode ?? compileProjectToHtml(projectFiles);
+      const thumbnailPromise = gameCode
+        ? captureThumbnail(gameCode).catch(() => null)
+        : Promise.resolve(null);
+
       const saved = await persistSnapshot();
       setProjectId(saved.projectId);
       setCurrentRevisionNumber(saved.revisionNumber);
 
+      const thumbnail = await thumbnailPromise;
+
       const publishResponse = await fetch(`/api/projects/${saved.projectId}/publish`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ revisionNumber: saved.revisionNumber }),
+        body: JSON.stringify({ revisionNumber: saved.revisionNumber, thumbnail }),
       });
       const published = await parseJsonResponse<{
         publishId: string;
@@ -817,7 +858,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     } finally {
       setProjectBusyAction(null);
     }
-  }, [persistSnapshot]);
+  }, [currentCode, persistSnapshot, projectFiles]);
 
   const loadProject = useCallback(async (nextProjectId: string) => {
     setProjectBusyAction("load");
@@ -911,6 +952,9 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       audioTracks,
       addAudioTrack,
       removeAudioTrack,
+      generatedMeshes,
+      addMesh,
+      removeMesh,
       addImage,
       setControls,
       setActiveCodePath,
@@ -969,6 +1013,9 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       audioTracks,
       addAudioTrack,
       removeAudioTrack,
+      generatedMeshes,
+      addMesh,
+      removeMesh,
       addImage,
       setControls,
       setActiveCodePath,

@@ -13,6 +13,8 @@ import type { PlanningTodo, ConsoleLogEntry, GeneratedImage, PendingFileWrite, G
 import { getGeneratedAudioId } from "@/lib/generated-audio";
 import type { PersistedChatMessage } from "@/lib/db/schema";
 import type { RuntimeEnvMap } from "@/lib/runtime-env";
+import { TemplateGallery } from "@/components/template-gallery";
+import type { GameTemplate } from "@/lib/game-templates";
 
 interface ChatPanelProps {
   currentCode: string | null;
@@ -60,12 +62,6 @@ interface ChatPanelProps {
 
 type ComposerMode = "agent" | "plan" | "debug" | "ask";
 
-const EXAMPLE_PROMPTS = [
-  "Space Invaders",
-  "Asteroids",
-  "Snake Game",
-  "Breakout",
-];
 
 function toMentionSlug(value: string): string {
   return value
@@ -1576,10 +1572,56 @@ export function ChatPanel({
     };
   }, [clampMentionsPopup]);
 
-  const handleExampleClick = (prompt: string) => {
-    setInput(prompt.toLowerCase());
-    textareaRef.current?.focus();
-  };
+  const handleTemplateSelect = useCallback(
+    (template: GameTemplate) => {
+      if (isLoading) return;
+      setSelectedEngine(template.engine);
+      onEngineUpdate(template.engine);
+      clearPendingFileWrites();
+      sendMessage(
+        { text: template.starterPrompt },
+        {
+          body: {
+            currentCode,
+            currentProjectFiles: projectFiles,
+            planningTodos,
+            mentionedFiles: [],
+            audioTracks: audioTracks.map((track) => ({
+              id: track.id,
+              name: track.name,
+              type: track.type,
+              description: track.description,
+              status: track.status,
+              duration: track.duration,
+              error: track.error ?? null,
+            })),
+            consoleLogs: [],
+            generatedImages,
+            runtimeEnv,
+            composerMode,
+            planningMode,
+            gameEngine: template.engine,
+            templateSkills: template.skills,
+          },
+        }
+      );
+    },
+    [
+      isLoading,
+      sendMessage,
+      currentCode,
+      projectFiles,
+      planningTodos,
+      audioTracks,
+      generatedImages,
+      runtimeEnv,
+      composerMode,
+      planningMode,
+      setSelectedEngine,
+      onEngineUpdate,
+      clearPendingFileWrites,
+    ]
+  );
 
   const handleUpdateTodo = (todoId: string, updates: Partial<PlanningTodo>) => {
     const next = planningTodos.map((todo) =>
@@ -1652,28 +1694,7 @@ export function ChatPanel({
     <div className="flex h-full flex-col bg-[var(--color-bg)]">
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
         {isEmpty ? (
-          <div className="flex flex-col items-center justify-center h-full gap-4 px-2">
-            <div className="text-center space-y-2">
-              <p className="text-[13px] text-[var(--color-text-secondary)] font-semibold">
-                What do you want to build?
-              </p>
-              <p className="text-[11px] text-[var(--color-text-muted)]">
-                Describe a game or try an example
-              </p>
-            </div>
-            <div className="flex flex-wrap justify-center gap-1.5">
-              {EXAMPLE_PROMPTS.map((prompt) => (
-                <button
-                  key={prompt}
-                  type="button"
-                  onClick={() => handleExampleClick(prompt)}
-                  className="gf-btn-chip text-[10px] text-[var(--color-text-muted)] px-2.5 py-1 border border-[var(--color-border)] uppercase tracking-wider font-semibold"
-                >
-                  {prompt}
-                </button>
-              ))}
-            </div>
-          </div>
+          <TemplateGallery onSelect={handleTemplateSelect} />
         ) : (
           <>
             {messages.map((message) => {

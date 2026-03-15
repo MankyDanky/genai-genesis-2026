@@ -679,6 +679,42 @@ body {
     }
 }
 
+@keyframes gameReveal {
+    0% {
+        opacity: 0;
+        transform: scale(0.97);
+        filter: brightness(1.6) blur(4px);
+    }
+    60% {
+        opacity: 1;
+        filter: brightness(1.1) blur(0px);
+    }
+    100% {
+        opacity: 1;
+        transform: scale(1);
+        filter: brightness(1) blur(0px);
+    }
+}
+
+@keyframes loadingTextSwap {
+    0% {
+        opacity: 0;
+        transform: translateY(6px);
+    }
+    12% {
+        opacity: 1;
+        transform: translateY(0);
+    }
+    88% {
+        opacity: 1;
+        transform: translateY(0);
+    }
+    100% {
+        opacity: 0;
+        transform: translateY(-6px);
+    }
+}
+
 /* ── Template gallery ── */
 .gf-template-card {
     transition:
