@@ -534,6 +534,7 @@ export function CodePanel() {
 
   const explorerRef = useRef<HTMLDivElement>(null);
   const createInputRef = useRef<HTMLInputElement>(null);
+  const fileUploadInputRef = useRef<HTMLInputElement>(null);
   const folderUploadInputRef = useRef<HTMLInputElement>(null);
   const dragDepthRef = useRef(0);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -904,7 +905,7 @@ export function CodePanel() {
     }
   }, [expandParents, patchProjectFiles, setActiveCodePath]);
 
-  const handleFolderInputChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImportInputChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     if (files.length === 0) return;
     const entries = files.map((file) => {
@@ -1008,18 +1009,32 @@ export function CodePanel() {
             <span className="text-[9px] uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Explorer</span>
             <div className="flex gap-1">
               <input
+                ref={fileUploadInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={handleImportInputChange}
+              />
+              <input
                 ref={folderUploadInputRef}
                 type="file"
                 multiple
                 className="hidden"
-                onChange={handleFolderInputChange}
+                onChange={handleImportInputChange}
               />
+              <button
+                type="button"
+                onClick={() => fileUploadInputRef.current?.click()}
+                className="px-1.5 py-0.5 text-[9px] uppercase tracking-wider border border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+              >
+                Upload
+              </button>
               <button
                 type="button"
                 onClick={() => folderUploadInputRef.current?.click()}
                 className="px-1.5 py-0.5 text-[9px] uppercase tracking-wider border border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
               >
-                Upload
+                Folder
               </button>
               <button
                 type="button"
