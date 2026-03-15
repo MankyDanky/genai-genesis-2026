@@ -16,6 +16,8 @@ Create `.env.local` (or copy from `.env.example`) with:
 
 ```bash
 ANTHROPIC_API_KEY=your-api-key
+XAI_API_KEY=your-api-key
+XAI_MODEL=grok-2-1212
 ELEVENLABS_API_KEY=your-api-key
 FAL_KEY=your-api-key
 GEMINI_API_KEY=your-api-key
@@ -24,6 +26,8 @@ NEXT_PUBLIC_PARTYKIT_PROTOCOL=ws
 ```
 
 - `ANTHROPIC_API_KEY` powers chat/tool orchestration.
+- `XAI_API_KEY` enables Grok AI model selection in Composer.
+- `XAI_MODEL` sets the Grok model id (default `grok-2-1212`).
 - `ELEVENLABS_API_KEY` powers sound effect + music generation.
 - `FAL_KEY` powers image generation via fal.ai.
 - `GEMINI_API_KEY` powers image editing/background workflows.

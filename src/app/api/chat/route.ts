@@ -1,4 +1,5 @@
 import { anthropic } from "@ai-sdk/anthropic";
+import { xai } from "@ai-sdk/xai";
 import { streamText, tool, stepCountIs, convertToModelMessages } from "ai";
 import { z } from "zod";
 import { getSystemPrompt } from "@/lib/system-prompt";
@@ -104,9 +105,14 @@ interface PlanningTodoPayload {
 }
 
 type ComposerMode = "agent" | "plan" | "debug" | "ask";
+type ModelChoice = "claude" | "grok";
 
 function isComposerMode(value: unknown): value is ComposerMode {
   return value === "agent" || value === "plan" || value === "debug" || value === "ask";
+}
+
+function isModelChoice(value: unknown): value is ModelChoice {
+  return value === "claude" || value === "grok";
 }
 
 function safeJsonPreview(value: unknown, max = 300): string {
@@ -547,6 +553,7 @@ export async function POST(req: Request) {
       generatedImages?: unknown;
       audioTracks?: unknown;
       generatedMeshes?: unknown;
+      modelChoice?: unknown;
       composerMode?: unknown;
       planningMode?: unknown;
       gameEngine?: unknown;
@@ -637,6 +644,9 @@ export async function POST(req: Request) {
       : parsed.planningMode === true
         ? "plan"
         : "agent";
+    const modelChoice: ModelChoice = isModelChoice(parsed.modelChoice)
+      ? parsed.modelChoice
+      : "claude";
     const planningMode = composerMode === "plan";
     const gameEngine: GameEngine = isGameEngine(parsed.gameEngine) ? parsed.gameEngine : "canvas2d";
     const templateSkills = typeof parsed.templateSkills === "string"
@@ -653,6 +663,7 @@ export async function POST(req: Request) {
       requestId,
       messageCount: messages.length,
       composerMode,
+      modelChoice,
       gameEngine,
       projectFileCount: currentProjectFiles.length,
       generatedImageCount: generatedImages.length,
@@ -663,6 +674,21 @@ export async function POST(req: Request) {
     const sanitizedMessages = sanitizeMessagesForModel(messages);
     const modelMessages = await convertToModelMessages(sanitizedMessages);
 
+    if (modelChoice === "grok" && !process.env.XAI_API_KEY) {
+      return new Response(
+        JSON.stringify({ error: "XAI_API_KEY is required when modelChoice is 'grok'" }),
+        {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    }
+
+    const selectedModel =
+      modelChoice === "grok"
+        ? xai(process.env.XAI_MODEL || "grok-2-1212")
+        : anthropic("claude-sonnet-4-6");
+
     console.log("[API] model message summary", {
       requestId,
       sanitizedCount: sanitizedMessages.length,
@@ -671,7 +697,7 @@ export async function POST(req: Request) {
     });
 
     const result = streamText({
-      model: anthropic("claude-sonnet-4-6"),
+      model: selectedModel,
       system: getSystemPrompt({
         currentCode,
         currentProjectFiles,
