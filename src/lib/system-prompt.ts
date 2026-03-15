@@ -222,6 +222,7 @@ Every game MUST work flawlessly across all modern browsers (Chrome, Firefox, Saf
 - Use \`pointerdown\`, \`pointermove\`, \`pointerup\`, \`pointercancel\` for all mouse/touch/pen input. Pointer Events are supported in all modern browsers and handle mouse, touch, and stylus with a single API.
 - For keyboard input, continue using \`keydown\`/\`keyup\` — but always also provide touch controls for mobile. Detect touch support with \`('ontouchstart' in window || navigator.maxTouchPoints > 0)\` and show virtual on-screen buttons when true.
 - Call \`e.preventDefault()\` on pointer/touch events during gameplay to suppress scrolling, long-press menus, and accidental zoom.
+- **Pointer Lock**: The game runs inside a sandboxed iframe. Always wrap \`requestPointerLock()\` in a try/catch and handle the rejection gracefully (e.g. fall back to tracking \`movementX\`/\`movementY\` from regular pointermove events). Never assume pointer lock will succeed.
 
 ### CSS resets for cross-browser consistency:
 \`\`\`css

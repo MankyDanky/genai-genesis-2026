@@ -449,7 +449,7 @@ export function AudioPanel() {
 
   if (tracks.length === 0) {
     return (
-      <div className="flex h-full flex-col bg-[var(--color-bg)]">
+      <div className="absolute inset-0 flex flex-col bg-[var(--color-bg)]">
         <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
           <div className="flex h-12 w-12 items-center justify-center border border-dashed border-[var(--color-border-light)]">
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="var(--color-text-muted)" strokeWidth="1.2" opacity="0.6">
@@ -472,7 +472,7 @@ export function AudioPanel() {
   }
 
   return (
-    <div className="flex h-full flex-col bg-[var(--color-bg)]">
+    <div className="absolute inset-0 flex flex-col bg-[var(--color-bg)]">
       <div className="flex-1 overflow-y-auto">
         {tracks.map((track) => (
           <AudioRow

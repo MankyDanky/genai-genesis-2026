@@ -198,6 +198,7 @@ body {
 .game-forge-theme .dv-content-container {
     background: var(--color-bg);
     overflow: hidden;
+    position: relative;
 }
 
 /* ── Chat markdown ── */

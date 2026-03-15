@@ -3,6 +3,11 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from "react";
 import type { AudioTrack, GeneratedMesh } from "@/lib/game-forge-context";
 import type { RuntimeEnvMap } from "@/lib/runtime-env";
+import {
+  injectCompatibilityLayer,
+  injectPointerLockShim,
+  injectFocusBridge,
+} from "@/lib/iframe-injections";
 
 const CODE_SYMBOLS = [
   { char: "{", x: 8, size: 18, duration: 4.2, delay: 0 },
@@ -202,41 +207,6 @@ function ShareBar({
       </button>
     </div>
   );
-}
-
-/**
- * Injects cross-browser/cross-device compatibility CSS and meta tags
- * to ensure the iframe game works on all browsers and devices.
- */
-function injectCompatibilityLayer(html: string): string {
-  const compatCSS = `<style data-gameforge-compat>
-*, *::before, *::after { box-sizing: border-box; }
-html, body {
-  margin: 0; padding: 0; overflow: hidden; width: 100%; height: 100%;
-  touch-action: none;
-  -webkit-touch-callout: none;
-  -webkit-user-select: none;
-  user-select: none;
-  -webkit-tap-highlight-color: transparent;
-}
-canvas { display: block; touch-action: none; }
-</style>`;
-
-  const compatMeta = `<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">`;
-
-  const hasViewport = /name\s*=\s*["']viewport["']/i.test(html);
-
-  if (/<head[^>]*>/i.test(html)) {
-    let result = html;
-    if (!hasViewport) {
-      result = result.replace(/<head([^>]*)>/i, `<head$1>${compatMeta}`);
-    }
-    // Insert compat CSS right after <head> (after potential meta injection)
-    result = result.replace(/<head([^>]*)>/i, `<head$1>${compatCSS}`);
-    return result;
-  }
-
-  return `${!hasViewport ? compatMeta : ""}${compatCSS}${html}`;
 }
 
 function buildInstrumentedSrcDoc(code: string, session: string): string {
@@ -479,7 +449,9 @@ export function Sandbox({ code, isGenerating = false, audioTracks = EMPTY_AUDIO_
   const srcDoc = useMemo(() => {
     if (!code) return null;
     const withCompat = injectCompatibilityLayer(code);
-    const withConsole = buildInstrumentedSrcDoc(withCompat, sessionRef.current);
+    const withPointerLock = injectPointerLockShim(withCompat);
+    const withFocus = injectFocusBridge(withPointerLock);
+    const withConsole = buildInstrumentedSrcDoc(withFocus, sessionRef.current);
     const withAudio = injectSoundBridge(withConsole, audioTracks);
     const withMeshes = injectMeshBridge(withAudio, generatedMeshes);
     const withInspector = injectInspectorBridge(withMeshes);
@@ -651,6 +623,17 @@ export function Sandbox({ code, isGenerating = false, audioTracks = EMPTY_AUDIO_
     onReload?.();
   }, [onReload]);
 
+  // Focus the active iframe's contentWindow. Uses rAF + setTimeout(0) to
+  // reliably run after Dockview's synchronous focus-steal on panel activation.
+  const focusActiveIframe = useCallback(() => {
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        const ref = activeIndexRef.current === 0 ? iframe0Ref : iframe1Ref;
+        try { ref.current?.contentWindow?.focus(); } catch (_e) { /* cross-origin */ }
+      }, 0);
+    });
+  }, []);
+
   const pendingMeshes = generatedMeshes.filter(
     (m) => m.status === "pending" || m.status === "refining"
   );
@@ -735,25 +718,29 @@ export function Sandbox({ code, isGenerating = false, audioTracks = EMPTY_AUDIO_
   };
 
   return (
-    <div ref={containerRef} className="relative h-full w-full bg-black overflow-hidden">
+    <div ref={containerRef} className="relative h-full w-full bg-black overflow-hidden" onMouseDown={focusActiveIframe} onPointerDown={focusActiveIframe}>
       <ShareBar code={code} openHtml={srcDoc ?? code} containerRef={containerRef} onReload={handleReload} />
       <iframe
         ref={iframe0Ref}
         srcDoc={iframe0SrcDoc ?? undefined}
-        sandbox="allow-scripts allow-pointer-lock allow-same-origin"
+        sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-forms allow-modals"
+        allow="pointer-lock; fullscreen; autoplay"
         title="Game Preview"
         className="border-none"
         style={activeIndex === 0 ? visibleStyle : hiddenStyle}
-        tabIndex={activeIndex === 0 ? undefined : -1}
+        tabIndex={activeIndex === 0 ? 0 : -1}
+        onLoad={focusActiveIframe}
       />
       <iframe
         ref={iframe1Ref}
         srcDoc={iframe1SrcDoc ?? undefined}
-        sandbox="allow-scripts allow-pointer-lock allow-same-origin"
+        sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-forms allow-modals"
+        allow="pointer-lock; fullscreen; autoplay"
         title="Game Preview (staging)"
         className="border-none"
         style={activeIndex === 1 ? visibleStyle : hiddenStyle}
-        tabIndex={activeIndex === 1 ? undefined : -1}
+        tabIndex={activeIndex === 1 ? 0 : -1}
+        onLoad={focusActiveIframe}
       />
       {hasPendingMeshes && (
         <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 pointer-events-none animate-[fadeIn_0.3s_ease-out]">

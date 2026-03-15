@@ -791,10 +791,15 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     if (normalized.length === 0) return;
     setPendingFileWritesState((prev) => {
       const byPath = new Map(prev.map((entry) => [entry.path, entry]));
+      let changed = false;
       for (const entry of normalized) {
-        byPath.set(entry.path, entry);
+        const existing = byPath.get(entry.path);
+        if (!existing || existing.status !== entry.status || existing.content !== entry.content) {
+          byPath.set(entry.path, entry);
+          changed = true;
+        }
       }
-      return Array.from(byPath.values());
+      return changed ? Array.from(byPath.values()) : prev;
     });
   }, []);
 

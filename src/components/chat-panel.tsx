@@ -153,7 +153,14 @@ function isReservedSdkPath(path: string) {
 
 type GenerationPhase = "connecting" | "thinking" | "coding" | "executing" | "done";
 
-const PHASE_MESSAGES: Record<"connecting" | "coding" | "executing", readonly string[]> = {
+const PHASE_MESSAGES: Record<"thinking" | "connecting" | "coding" | "executing", readonly string[]> = {
+  thinking: [
+    "Analyzing the game design...",
+    "Planning the architecture...",
+    "Considering the best approach...",
+    "Thinking through the logic...",
+    "Evaluating design patterns...",
+  ],
   connecting: [
     "Booting up the dev environment...",
     "Warming up the GPU...",
@@ -180,7 +187,8 @@ const PHASE_MESSAGES: Record<"connecting" | "coding" | "executing", readonly str
   ],
 };
 
-const PHASE_LABELS: Record<"connecting" | "coding" | "executing", string> = {
+const PHASE_LABELS: Record<"thinking" | "connecting" | "coding" | "executing", string> = {
+  thinking: "THINKING",
   connecting: "CONNECTING",
   coding: "CODING",
   executing: "EXECUTING",
@@ -235,14 +243,14 @@ function useRotatingMessage(phase: GenerationPhase, isActive: boolean) {
   const [count, setCount] = useState(0);
 
   useEffect(() => {
-    if (!isActive || phase === "done" || phase === "thinking") return;
+    if (!isActive || phase === "done") return;
     const interval = setInterval(() => {
       setCount((prev) => prev + 1);
     }, 3000);
     return () => clearInterval(interval);
   }, [phase, isActive]);
 
-  if (phase === "done" || phase === "thinking") return "";
+  if (phase === "done") return "";
   const msgs = PHASE_MESSAGES[phase];
   return msgs[count % msgs.length];
 }
@@ -317,7 +325,7 @@ function normalizeMentionToken(raw: string) {
 }
 
 function StreamingIndicator({ phase, timer, message }: {
-  phase: "connecting" | "coding" | "executing";
+  phase: "thinking" | "connecting" | "coding" | "executing";
   timer: string;
   message: string;
 }) {
@@ -795,6 +803,8 @@ export function ChatPanel({
   const streamingDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hydratedMessageIdsRef = useRef<Set<string>>(new Set());
   const initialChatMessagesRef = useRef(chatMessages);
+  const projectFilesRef = useRef(projectFiles);
+  projectFilesRef.current = projectFiles;
   const [input, setInput] = useState("");
   const [selectedEngine, setSelectedEngine] = useState<GameEngine>(currentEngine);
   const [selectedModel, setSelectedModel] = useState<ModelChoice>("claude-sonnet-4-6");
@@ -1402,7 +1412,8 @@ export function ChatPanel({
         if (partType === "tool-update_project_files") {
           const toolPart = part as { state: string; input?: { files?: ProjectFile[]; deletePaths?: string[] } };
           const rawFiles = Array.isArray(toolPart.input?.files) ? toolPart.input.files : [];
-          const existingPaths = new Set(projectFiles.map((file) => file.path));
+          const currentProjectFiles = projectFilesRef.current;
+          const existingPaths = new Set(currentProjectFiles.map((file) => file.path));
           const files = rawFiles.filter((file) => {
             if (!isStableProjectPath(file?.path)) return false;
             if (isReservedSdkPath(file.path)) return false;
@@ -1413,39 +1424,44 @@ export function ChatPanel({
             if (existingPaths.has(file.path)) return true;
             return hasMeaningfulContent(file?.content);
           });
-          const deletePaths = Array.isArray(toolPart.input?.deletePaths)
-            ? toolPart.input.deletePaths.filter((path): path is string =>
-                typeof path === "string" && !isImmutableProjectPath(path) && !isReservedSdkPath(path)
-              )
-            : [];
-          const filePaths = files.map((file) => file.path);
-          const pendingEntries = files.map((file) => ({
-            path: file.path,
-            status: toolPart.state === "input-streaming" ? "streaming" as const : "finalizing" as const,
-            content: hasMeaningfulContent(file.content) ? file.content : undefined,
-          }));
 
-          if (filePaths.length > 0) {
-            if (toolPart.state === "input-streaming" || toolPart.state === "input-available") {
+          // During streaming, only update pending file indicators (lightweight).
+          // Skip expensive JSON.stringify signature computation until output-available.
+          if (toolPart.state === "input-streaming" || toolPart.state === "input-available") {
+            const filePaths = files.map((file) => file.path);
+            if (filePaths.length > 0) {
+              const pendingEntries = files.map((file) => ({
+                path: file.path,
+                status: toolPart.state === "input-streaming" ? "streaming" as const : "finalizing" as const,
+                content: hasMeaningfulContent(file.content) ? file.content : undefined,
+              }));
               setPendingFileWrites(pendingEntries);
             }
+            continue;
           }
 
-          if (files.length > 0 || deletePaths.length > 0) {
-            const signature = JSON.stringify(
-              {
-                files: files.map((f) => ({
-                  path: f.path,
-                  kind: f.kind,
-                  content: f.content,
-                })),
-                deletePaths,
-              }
-            );
-            const key = `${message.id}:${partType}:${toolPart.state}`;
-            if (processedToolPayloadRef.current.get(key) === signature) continue;
-            processedToolPayloadRef.current.set(key, signature);
-            if (toolPart.state === "output-available") {
+          // output-available: compute signature, deduplicate, and commit the update
+          if (toolPart.state === "output-available") {
+            const deletePaths = Array.isArray(toolPart.input?.deletePaths)
+              ? toolPart.input.deletePaths.filter((path): path is string =>
+                  typeof path === "string" && !isImmutableProjectPath(path) && !isReservedSdkPath(path)
+                )
+              : [];
+            if (files.length > 0 || deletePaths.length > 0) {
+              const signature = JSON.stringify(
+                {
+                  files: files.map((f) => ({
+                    path: f.path,
+                    kind: f.kind,
+                    content: f.content,
+                  })),
+                  deletePaths,
+                }
+              );
+              const key = `${message.id}:${partType}:${toolPart.state}`;
+              if (processedToolPayloadRef.current.get(key) === signature) continue;
+              processedToolPayloadRef.current.set(key, signature);
+              const filePaths = files.map((file) => file.path);
               onProjectFilesUpdate(files, selectedEngine, deletePaths);
               clearPendingFileWrites(filePaths);
             }
@@ -1730,9 +1746,9 @@ export function ChatPanel({
         }
       }
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- projectFiles accessed via ref to avoid cascading re-runs; currentCode/planningTodos not read in effect body
   }, [
     messages,
-    currentCode,
     onCodeUpdate,
     onProjectFilesUpdate,
     patchProjectFiles,
@@ -1740,7 +1756,6 @@ export function ChatPanel({
     editProjectFile,
     deleteProjectFile,
     writePlanningTodos,
-    planningTodos,
     composerMode,
     addImage,
     addAudioTrack,
@@ -2269,7 +2284,7 @@ export function ChatPanel({
               );
             })}
 
-            {isLoading && phase !== "done" && phase !== "thinking" && (
+            {isLoading && phase !== "done" && (
               <StreamingIndicator
                 phase={phase}
                 timer={timer}

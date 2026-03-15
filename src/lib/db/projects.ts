@@ -32,8 +32,26 @@ interface FallbackPublishedGame {
   createdAt: Date;
 }
 
+interface ResolvedPublishedGame {
+  id: string;
+  projectId: string | null;
+  revisionId: string | null;
+  revisionNumber: number | null;
+  title: string;
+  engine: "canvas2d" | "threejs" | "phaser";
+  code: string;
+  multiplayer: boolean;
+  multiplayerProvider: "partykit" | null;
+  multiplayerRoomType: string | null;
+  runtimeEnv: Record<string, string>;
+  createdAt: Date;
+}
+
+const PUBLISHED_GAME_CACHE_MAX = 50;
+
 declare global {
   var __fallbackPublishedGames: Map<string, FallbackPublishedGame> | undefined;
+  var __publishedGameCache: Map<string, ResolvedPublishedGame> | undefined;
 }
 
 function getFallbackPublishedGamesStore() {
@@ -41,6 +59,23 @@ function getFallbackPublishedGamesStore() {
     globalThis.__fallbackPublishedGames = new Map<string, FallbackPublishedGame>();
   }
   return globalThis.__fallbackPublishedGames;
+}
+
+function getPublishedGameCache() {
+  if (!globalThis.__publishedGameCache) {
+    globalThis.__publishedGameCache = new Map<string, ResolvedPublishedGame>();
+  }
+  return globalThis.__publishedGameCache;
+}
+
+function cachePublishedGame(game: ResolvedPublishedGame) {
+  const cache = getPublishedGameCache();
+  cache.set(game.id, game);
+  // Evict oldest entries if cache grows too large
+  if (cache.size > PUBLISHED_GAME_CACHE_MAX) {
+    const firstKey = cache.keys().next().value;
+    if (firstKey) cache.delete(firstKey);
+  }
 }
 
 function fallbackGameId(gameId: string | ObjectId) {
@@ -444,6 +479,23 @@ export async function publishProjectRevision(
     },
   );
 
+  // Pre-populate the in-memory cache so the first /play visit is instant
+  // (skips the GridFS round-trip for resolving compiledHtml)
+  cachePublishedGame({
+    id: publishedGameId.toHexString(),
+    projectId: projectObjectId.toHexString(),
+    revisionId: revision._id.toHexString(),
+    revisionNumber: revision.revisionNumber,
+    title: revision.title,
+    engine: revision.engine,
+    code: htmlWithAssets,
+    multiplayer: multiplayerMeta.multiplayer,
+    multiplayerProvider: multiplayerMeta.multiplayerProvider,
+    multiplayerRoomType: multiplayerMeta.multiplayerRoomType,
+    runtimeEnv: revision.runtimeEnv ?? {},
+    createdAt: publishedDoc.createdAt,
+  });
+
   return {
     publishId: publishedGameId.toHexString(),
     projectId: projectObjectId.toHexString(),
@@ -453,13 +505,19 @@ export async function publishProjectRevision(
 }
 
 export async function getPublishedGame(gameId: string | ObjectId) {
+  const cacheKey = typeof gameId === "string" ? gameId : gameId.toHexString();
+
+  // Published games are immutable — serve from memory if available
+  const cached = getPublishedGameCache().get(cacheKey);
+  if (cached) return cached;
+
   try {
     await ensureDbSetup();
     const doc = await getDb()
       .collection<PublishedGameDocument>("published_games")
       .findOne({ _id: toObjectId(gameId) });
     if (doc) {
-      return {
+      const game: ResolvedPublishedGame = {
         id: doc._id.toHexString(),
         projectId: doc.projectId?.toHexString() ?? null,
         revisionId: doc.revisionId?.toHexString() ?? null,
@@ -473,6 +531,8 @@ export async function getPublishedGame(gameId: string | ObjectId) {
         runtimeEnv: doc.runtimeEnv ?? {},
         createdAt: doc.createdAt,
       };
+      cachePublishedGame(game);
+      return game;
     }
   } catch (error) {
     logOptionalDbFailure("Published games", error);

@@ -58,7 +58,7 @@ export function MeshesPanel({ meshes, onRemoveMesh }: MeshesPanelProps) {
 
   if (safeMeshes.length === 0) {
     return (
-      <div className="relative flex h-full flex-col bg-[var(--color-bg)]">
+      <div className="absolute inset-0 flex flex-col bg-[var(--color-bg)]">
         <div className="flex-1 flex flex-col items-center justify-center gap-4">
           <div className="w-12 h-12 border border-dashed border-[var(--color-border-light)] flex items-center justify-center">
             <svg
@@ -90,7 +90,7 @@ export function MeshesPanel({ meshes, onRemoveMesh }: MeshesPanelProps) {
   }
 
   return (
-    <div className="h-full w-full bg-[var(--color-bg)] flex flex-col overflow-hidden">
+    <div className="absolute inset-0 bg-[var(--color-bg)] flex flex-col">
       <div className="flex-1 overflow-y-auto px-2 py-2">
         <div className="grid grid-cols-2 gap-2">
           {safeMeshes.map((mesh) => (
