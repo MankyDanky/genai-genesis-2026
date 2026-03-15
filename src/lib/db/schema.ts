@@ -80,6 +80,7 @@ export interface ProjectRevisionDocument {
   generatedImages: GeneratedImage[];
   generatedMeshes: GeneratedMesh[];
   audioTracks: AudioTrack[];
+  runtimeEnv: Record<string, string>;
   compiledHtml: ArtifactRef;
   chatTranscript: ArtifactRef;
   createdAt: Date;
@@ -93,6 +94,10 @@ export interface PublishedGameDocument {
   revisionNumber: number | null;
   title: string;
   engine: GameEngine;
+  multiplayer: boolean;
+  multiplayerProvider: "partykit" | null;
+  multiplayerRoomType: string | null;
+  runtimeEnv: Record<string, string>;
   compiledHtml: ArtifactRef;
   createdAt: Date;
 }
@@ -161,6 +166,7 @@ export const SaveProjectSnapshotRequestSchema = z.object({
   generatedImages: z.array(GeneratedImageSchema).max(200).default([]),
   generatedMeshes: z.array(GeneratedMeshSchema).max(100).default([]),
   audioTracks: z.array(AudioTrackSchema).max(200).default([]),
+  runtimeEnv: z.record(z.string(), z.string()).default({}),
   chatMessages: z.array(PersistedChatMessageSchema).max(2000).default([]),
 });
 

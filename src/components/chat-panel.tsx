@@ -2,18 +2,17 @@
 
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
-import { useState, useEffect, useRef, useMemo, useCallback, memo, type FormEvent, type KeyboardEvent } from "react";
+import { createPortal } from "react-dom";
+import { useState, useEffect, useRef, useMemo, useCallback, type FormEvent, type KeyboardEvent } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Mention, MentionsInput } from "react-mentions";
 import type { GameEngine } from "@/lib/game-engine";
 import type { ProjectFile } from "@/lib/project-files";
-import type { PlanningTodo, ConsoleLogEntry, GeneratedImage, GeneratedMesh, PendingFileWrite, GameControl, AudioTrack, ChatTab } from "@/lib/game-forge-context";
+import type { PlanningTodo, ConsoleLogEntry, GeneratedImage, PendingFileWrite, GameControl, AudioTrack } from "@/lib/game-forge-context";
 import { getGeneratedAudioId } from "@/lib/generated-audio";
-import { useWaveformData, AudioWaveform, useAudioPlayback } from "@/components/audio-waveform";
 import type { PersistedChatMessage } from "@/lib/db/schema";
-import { TemplateGallery } from "@/components/template-gallery";
-import type { GameTemplate } from "@/lib/game-templates";
+import type { RuntimeEnvMap } from "@/lib/runtime-env";
 
 interface ChatPanelProps {
   currentCode: string | null;
@@ -24,6 +23,7 @@ interface ChatPanelProps {
   consoleLogs: ConsoleLogEntry[];
   generatedImages: GeneratedImage[];
   audioTracks: AudioTrack[];
+  runtimeEnv: RuntimeEnvMap;
   onCodeUpdate: (code: string, engine?: GameEngine) => void;
   onProjectFilesUpdate: (files: ProjectFile[], engine?: GameEngine, deletePaths?: string[]) => void;
   patchProjectFiles: (files: ProjectFile[], engine?: GameEngine) => void;
@@ -43,34 +43,29 @@ interface ChatPanelProps {
   onEngineUpdate: (engine: GameEngine) => void;
   addImage: (image: GeneratedImage) => void;
   addAudioTrack: (track: AudioTrack) => void;
-  generatedMeshes: GeneratedMesh[];
-  addMesh: (mesh: GeneratedMesh) => void;
-  updateMesh: (mesh: GeneratedMesh) => void;
   setControls: (controls: GameControl[]) => void;
   chatMessages: PersistedChatMessage[];
   chatSessionId: string;
-  chatTabs: ChatTab[];
-  activeChatTabId: string;
   setChatMessages: (messages: PersistedChatMessage[]) => void;
-  createChatTab: () => string;
-  deleteChatTab: (id: string) => void;
-  switchChatTab: (id: string) => void;
-  renameChatTab: (id: string, name: string) => void;
   focusCodeFile: (path: string) => void;
   focusConsolePanel: () => void;
   focusImagesPanel: () => void;
   focusAudioPanel: () => void;
-  focusMeshesPanel: () => void;
   setPendingFileWrites: (
     entries: Array<{ path: string; status: "streaming" | "finalizing"; content?: string }>
   ) => void;
   clearPendingFileWrites: (paths?: string[]) => void;
-  setRepromptAudioHandler: (handler: ((message: string) => void) | null) => void;
-  setStreamingCode: (code: string | null) => void;
+  updateRuntimeEnv: (set: RuntimeEnvMap, unset?: string[]) => void;
 }
 
 type ComposerMode = "agent" | "plan" | "debug" | "ask";
 
+const EXAMPLE_PROMPTS = [
+  "Space Invaders",
+  "Asteroids",
+  "Snake Game",
+  "Breakout",
+];
 
 function toMentionSlug(value: string): string {
   return value
@@ -83,15 +78,6 @@ function toMentionSlug(value: string): string {
 
 function inferEngineFromPrompt(prompt: string): GameEngine {
   const text = prompt.toLowerCase();
-  const phaserSignals = [
-    "phaser",
-    "phaserjs",
-    "phaser.js",
-    "phaser 3",
-    "phaser3",
-    "arcade physics",
-  ];
-  if (phaserSignals.some((token) => text.includes(token))) return "phaser";
   const threeSignals = [
     "three.js",
     "threejs",
@@ -121,6 +107,24 @@ function hasMeaningfulContent(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
 }
 
+const IMMUTABLE_PROJECT_PATHS = new Set<string>([
+  "src/net/party-session.js",
+]);
+
+function normalizeProjectPath(path: string) {
+  return path.trim().replace(/^\.\//, "").replace(/\\/g, "/").replace(/^\/+/, "");
+}
+
+function isImmutableProjectPath(path: string) {
+  return IMMUTABLE_PROJECT_PATHS.has(normalizeProjectPath(path));
+}
+
+function isReservedSdkPath(path: string) {
+  const normalized = normalizeProjectPath(path).toLowerCase();
+  if (normalized === "src/net/party-session.js") return false;
+  return /(^|\/)party-session[^/]*\.js$/.test(normalized);
+}
+
 type GenerationPhase = "connecting" | "thinking" | "coding" | "executing" | "done";
 
 const PHASE_MESSAGES: Record<"connecting" | "coding" | "executing", readonly string[]> = {
@@ -129,14 +133,14 @@ const PHASE_MESSAGES: Record<"connecting" | "coding" | "executing", readonly str
     "Warming up the GPU...",
     "Loading game engine...",
     "Initializing the pixel forge...",
-    "Dusting off the pixel art...",
+    "Dusting off the sprite sheets...",
   ],
   coding: [
     "Writing game loop...",
     "Spawning player entity...",
     "Wiring up the controls...",
     "Compiling shaders...",
-    "Building the assets...",
+    "Building the sprite sheet...",
     "Setting up collision detection...",
     "Laying out the HUD...",
     "Tuning the frame rate...",
@@ -217,6 +221,14 @@ function useRotatingMessage(phase: GenerationPhase, isActive: boolean) {
   return msgs[count % msgs.length];
 }
 
+function estimateTokensFromJson(value: unknown): number {
+  try {
+    return Math.max(0, Math.ceil(JSON.stringify(value).length / 4));
+  } catch {
+    return 0;
+  }
+}
+
 function useComposerAutoHeight(
   inputRef: { current: HTMLTextAreaElement | null },
   value: string
@@ -268,9 +280,6 @@ function normalizeMentionToken(raw: string) {
   if (token.toLowerCase().startsWith("audio:")) {
     return { kind: "audio" as const, value: token };
   }
-  if (token.toLowerCase().startsWith("mesh:")) {
-    return { kind: "meshes" as const, value: token };
-  }
   if (token.toLowerCase().startsWith("code:")) {
     const path = token.slice(5).trim();
     if (!path) return null;
@@ -279,53 +288,6 @@ function normalizeMentionToken(raw: string) {
   const normalized = token.toLowerCase().startsWith("file:") ? token.slice(5) : token;
   if (!normalized) return null;
   return { kind: "file" as const, value: normalized };
-}
-
-const MemoizedMarkdown = memo(function MemoizedMarkdown({ content }: { content: string }) {
-  return <Markdown remarkPlugins={[remarkGfm]}>{content}</Markdown>;
-});
-
-function StreamingText({ content }: { content: string }) {
-  return (
-    <span className="whitespace-pre-wrap">
-      {content}
-      <span className="streaming-cursor" />
-    </span>
-  );
-}
-
-function ThinkingIndicator({ timer }: { timer: string }) {
-  return (
-    <div
-      className="mx-1 my-2 border border-[var(--color-border-light)] bg-[var(--color-surface)] overflow-hidden"
-      style={{ animation: "fadeIn 0.3s ease-out" }}
-    >
-      <div className="h-[2px] w-full bg-[var(--color-accent)] opacity-20" />
-      <div className="px-3 py-2.5">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="flex gap-1">
-              {[0, 1, 2].map((i) => (
-                <div
-                  key={i}
-                  className="w-1.5 h-1.5 bg-[var(--color-text-muted)] rounded-full"
-                  style={{
-                    animation: `pulseGlow 1.4s ease-in-out ${i * 0.25}s infinite`,
-                  }}
-                />
-              ))}
-            </div>
-            <span className="text-[10px] text-[var(--color-text-muted)] uppercase tracking-[0.15em] font-bold">
-              THINKING
-            </span>
-          </div>
-          <span className="text-[10px] text-[var(--color-text-muted)] font-mono tabular-nums">
-            {timer}
-          </span>
-        </div>
-      </div>
-    </div>
-  );
 }
 
 function StreamingIndicator({ phase, timer, message }: {
@@ -384,71 +346,88 @@ function GeneratedAudioPlayer({
   audioKind: "sfx" | "music";
   audioTrack?: AudioTrack;
 }) {
+  const [isPlaying, setIsPlaying] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const status = audioTrack?.status ?? "pending";
   const dataUrl = audioTrack?.dataUrl ?? null;
   const errorText = audioTrack?.error ?? null;
   const duration = audioTrack?.duration ?? null;
-  const peaks = useWaveformData(status === "ready" ? dataUrl : null, 48);
-  const { isPlaying, progress, togglePlayback, seek } = useAudioPlayback(
-    status === "ready" ? dataUrl : null
-  );
+
+  const stopPlayback = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.pause();
+    audio.onplay = null;
+    audio.onpause = null;
+    audio.onended = null;
+    audioRef.current = null;
+    setIsPlaying(false);
+  }, []);
+
+  useEffect(() => {
+    return () => stopPlayback();
+  }, [stopPlayback]);
+
+  const togglePlayback = useCallback(() => {
+    if (status !== "ready" || !dataUrl) return;
+    const current = audioRef.current;
+    if (current) {
+      if (current.paused) {
+        current.play().then(() => setIsPlaying(true)).catch(() => {});
+      } else {
+        current.pause();
+        setIsPlaying(false);
+      }
+      return;
+    }
+
+    const next = new Audio(dataUrl);
+    next.onplay = () => setIsPlaying(true);
+    next.onpause = () => setIsPlaying(false);
+    next.onended = () => {
+      setIsPlaying(false);
+      audioRef.current = null;
+    };
+    audioRef.current = next;
+    next.play().then(() => setIsPlaying(true)).catch(() => {});
+  }, [dataUrl, status]);
 
   return (
     <div className="px-3 py-2 border-t border-[var(--color-border)] bg-[var(--color-bg)]">
-      <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] text-[var(--color-text-muted)] uppercase tracking-[0.1em]">
+          {audioKind === "music" ? "Music" : "SFX"}: {audioName}
+        </span>
         {status === "pending" ? (
-          <svg width="14" height="14" viewBox="0 0 14 14" className="animate-spin text-[var(--color-accent)] shrink-0">
-            <circle cx="7" cy="7" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeDasharray="24" strokeLinecap="round" />
-          </svg>
+          <span className="text-[10px] text-[var(--color-accent)] flex items-center gap-1">
+            <svg width="9" height="9" viewBox="0 0 10 10" className="animate-spin">
+              <circle cx="5" cy="5" r="4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeDasharray="18" strokeLinecap="round" />
+            </svg>
+            Generating
+          </span>
         ) : status === "ready" ? (
           <button
             type="button"
-            onClick={(e) => { e.stopPropagation(); togglePlayback(); }}
-            className="gf-btn-chip w-6 h-6 shrink-0 flex items-center justify-center border border-[var(--color-border-light)] bg-[var(--color-surface-light)] text-[var(--color-accent)]"
-            aria-label={isPlaying ? "Pause" : "Play"}
+            onClick={togglePlayback}
+            className="gf-btn-chip text-[10px] px-2 py-1 border border-[var(--color-border-light)] bg-[var(--color-surface-light)] text-[var(--color-accent)]"
           >
-            {isPlaying ? (
-              <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
-                <rect x="1.5" y="1" width="2.5" height="8" rx="0.5" />
-                <rect x="6" y="1" width="2.5" height="8" rx="0.5" />
-              </svg>
-            ) : (
-              <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
-                <path d="M2.5 1l6 4-6 4z" />
-              </svg>
-            )}
+            {isPlaying ? "Pause preview" : "Preview"}
           </button>
         ) : (
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="var(--color-danger)" strokeWidth="1.5" className="shrink-0">
-            <circle cx="7" cy="7" r="5.5" />
-            <path d="M5 5l4 4M9 5l-4 4" />
-          </svg>
-        )}
-
-        {status === "ready" && peaks ? (
-          <div className="flex-1 min-w-0">
-            <AudioWaveform peaks={peaks} progress={progress} onSeek={seek} />
-          </div>
-        ) : (
-          <span className="text-[10px] text-[var(--color-text-muted)] uppercase tracking-[0.1em] truncate flex-1">
-            {audioKind === "music" ? "Music" : "SFX"}: {audioName}{status === "pending" ? " — generating..." : ""}
-          </span>
-        )}
-
-        {status === "ready" && duration != null && (
-          <span className="text-[9px] text-[var(--color-text-muted)] tabular-nums shrink-0">
-            {Math.round(duration * 10) / 10}s
-          </span>
+          <span className="text-[10px] text-[var(--color-danger)]">Error</span>
         )}
       </div>
-      {status === "error" && errorText && (
+      {status === "error" && errorText ? (
         <p className="mt-1 text-[10px] text-[var(--color-danger)]">{errorText}</p>
-      )}
+      ) : null}
+      {status === "ready" && duration ? (
+        <p className="mt-1 text-[10px] text-[var(--color-text-muted)]">Duration: {Math.round(duration * 10) / 10}s</p>
+      ) : null}
     </div>
   );
 }
 
-function ToolCallCard({ part, audioTrack, compact, hideAudio }: {
+function ToolCallCard({ part, audioTrack }: {
   part: {
     type: string;
     state?: string;
@@ -456,8 +435,6 @@ function ToolCallCard({ part, audioTrack, compact, hideAudio }: {
     output?: Record<string, unknown>;
   };
   audioTrack?: AudioTrack;
-  compact?: boolean;
-  hideAudio?: boolean;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const rawToolName = part.type.replace("tool-", "");
@@ -526,6 +503,15 @@ function ToolCallCard({ part, audioTrack, compact, hideAudio }: {
       return `${controls} control${controls === 1 ? "" : "s"} updated`;
     }
 
+    if (rawToolName === "update_runtime_env") {
+      const setCount =
+        input.set && typeof input.set === "object"
+          ? Object.keys(input.set as Record<string, unknown>).length
+          : 0;
+      const unsetCount = Array.isArray(input.unset) ? input.unset.length : 0;
+      return `Env updated (+${setCount} / -${unsetCount})`;
+    }
+
     return null;
   };
 
@@ -563,27 +549,25 @@ function ToolCallCard({ part, audioTrack, compact, hideAudio }: {
 
   return (
     <div
-      className={compact ? "" : "mx-1 my-2 border border-[var(--color-border-light)] bg-[var(--color-surface)] overflow-hidden"}
-      style={compact ? undefined : { animation: "fadeIn 0.2s ease-out" }}
+      className="mx-1 my-2 border border-[var(--color-border-light)] bg-[var(--color-surface)] overflow-hidden"
+      style={{ animation: "fadeIn 0.2s ease-out" }}
     >
-      {!compact && (
-        <button
-          type="button"
-          onClick={() => setIsExpanded((prev) => !prev)}
-          className="w-full px-3 py-1.5 border-b border-[var(--color-border)] bg-[var(--color-surface-light)] flex items-center gap-2 text-left"
-          aria-label={isToolExpanded ? "Collapse tool details" : "Expand tool details"}
-        >
-          <span className="tool-chevron text-[10px] text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
-            <span className={isToolExpanded ? "is-open" : ""}>▸</span>
-          </span>
-          <span className="text-[9px] text-[var(--color-text-muted)] uppercase tracking-[0.15em] font-bold">
-            Tool
-          </span>
-          <span className="text-[10px] text-[var(--color-accent)] uppercase tracking-[0.1em] font-bold">
-            {toolName}
-          </span>
-        </button>
-      )}
+      <button
+        type="button"
+        onClick={() => setIsExpanded((prev) => !prev)}
+        className="w-full px-3 py-1.5 border-b border-[var(--color-border)] bg-[var(--color-surface-light)] flex items-center gap-2 text-left"
+        aria-label={isToolExpanded ? "Collapse tool details" : "Expand tool details"}
+      >
+        <span className="tool-chevron text-[10px] text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
+          <span className={isToolExpanded ? "is-open" : ""}>▸</span>
+        </span>
+        <span className="text-[9px] text-[var(--color-text-muted)] uppercase tracking-[0.15em] font-bold">
+          Tool
+        </span>
+        <span className="text-[10px] text-[var(--color-accent)] uppercase tracking-[0.1em] font-bold">
+          {toolName}
+        </span>
+      </button>
       <div className="px-3 py-2 flex items-center gap-2">
         <span style={{ color: statusColor }}>
           {state === "input-streaming" ? (
@@ -607,7 +591,7 @@ function ToolCallCard({ part, audioTrack, compact, hideAudio }: {
           </div>
         </div>
       </div>
-      {!hideAudio && isAudioTool && (state === "output-available" || state === "output-error") && audioId && audioName ? (
+      {isAudioTool && (state === "output-available" || state === "output-error") && audioId && audioName ? (
         <GeneratedAudioPlayer
           audioName={audioName}
           audioKind={audioKind}
@@ -660,150 +644,6 @@ function ReasoningBlock({ text, isStreaming }: { text: string; isStreaming: bool
   );
 }
 
-type ToolPartType = {
-  type: string;
-  state?: string;
-  input?: Record<string, unknown>;
-  output?: Record<string, unknown>;
-};
-
-function getToolStatusDot(state?: string) {
-  if (state === "input-streaming") return "var(--color-accent)";
-  if (state === "output-error") return "var(--color-danger)";
-  if (state === "input-available" || state === "output-available") return "var(--color-success)";
-  return "var(--color-text-muted)";
-}
-
-function getToolSummaryShort(rawToolName: string, input: Record<string, unknown>) {
-  if (rawToolName === "update_sandbox") {
-    const code = typeof input.code === "string" ? input.code : "";
-    return `${code.length.toLocaleString()} chars`;
-  }
-  if (rawToolName === "update_project_files") {
-    const files = Array.isArray(input.files) ? input.files : [];
-    return `${files.length} file${files.length === 1 ? "" : "s"}`;
-  }
-  if (rawToolName === "patch_project_file") {
-    const path = typeof input.path === "string" ? input.path : null;
-    return path || "patch";
-  }
-  if (rawToolName === "edit_file") {
-    const targetFile = typeof input.targetFile === "string" ? input.targetFile : null;
-    return targetFile || "edit";
-  }
-  if (rawToolName === "generate_image") {
-    const prompt = typeof input.prompt === "string" ? input.prompt : "";
-    return prompt.slice(0, 40) || "image";
-  }
-  if (rawToolName === "generate_sound_effect" || rawToolName === "generate_music") {
-    const name = typeof input.name === "string" ? input.name : "";
-    return name || (rawToolName === "generate_music" ? "music" : "sfx");
-  }
-  if (rawToolName === "todo_write") {
-    const todos = Array.isArray(input.todos) ? input.todos.length : 0;
-    return `${todos} task${todos === 1 ? "" : "s"}`;
-  }
-  if (rawToolName === "update_controls") {
-    const controls = Array.isArray(input.controls) ? input.controls.length : 0;
-    return `${controls} control${controls === 1 ? "" : "s"}`;
-  }
-  if (rawToolName === "delete_file") {
-    const targetFile = typeof input.targetFile === "string" ? input.targetFile : "";
-    return targetFile || "file";
-  }
-  return null;
-}
-
-function ToolCallGroupRow({ part, audioTrackById }: {
-  part: ToolPartType;
-  audioTrackById: Map<string, AudioTrack>;
-}) {
-  const isActive = part.state === "input-streaming" || part.state === "input-available";
-  const [isOpen, setIsOpen] = useState(isActive);
-  const rawToolName = part.type.replace("tool-", "");
-  const toolName = rawToolName.toUpperCase().replace(/_/g, "_");
-  const input = part.input ?? {};
-  const summary = getToolSummaryShort(rawToolName, input);
-  const isAudioTool = rawToolName === "generate_sound_effect" || rawToolName === "generate_music";
-  const audioKind: "sfx" | "music" = rawToolName === "generate_music" ? "music" : "sfx";
-  const audioName = isAudioTool && typeof input.name === "string" ? input.name : null;
-  const audioId = audioName ? getGeneratedAudioId(audioKind, audioName) : null;
-  const audioTrack = audioId ? audioTrackById.get(audioId) : undefined;
-  const showOpen = isOpen || isActive;
-
-  return (
-    <div>
-      <button
-        type="button"
-        onClick={() => setIsOpen((prev) => !prev)}
-        className="gf-list-row w-full px-3 py-1.5 flex items-center gap-2 text-left"
-      >
-        <span
-          className="w-1.5 h-1.5 rounded-full shrink-0"
-          style={{ backgroundColor: getToolStatusDot(part.state) }}
-        />
-        <span className="text-[10px] text-[var(--color-accent)] uppercase tracking-wider font-bold shrink-0">
-          {toolName}
-        </span>
-        {summary && (
-          <span className="text-[10px] text-[var(--color-text-muted)] truncate">
-            {summary}
-          </span>
-        )}
-        <span className="ml-auto tool-chevron text-[9px] text-[var(--color-text-muted)] shrink-0">
-          <span className={showOpen ? "is-open" : ""}>▸</span>
-        </span>
-      </button>
-      {isAudioTool && (part.state === "output-available" || part.state === "output-error") && audioId && audioName && (
-        <div className="px-3 pb-1">
-          <GeneratedAudioPlayer audioName={audioName} audioKind={audioKind} audioTrack={audioTrack} />
-        </div>
-      )}
-      {showOpen && (
-        <div className="border-t border-[var(--color-border)]">
-          <ToolCallCard part={part} audioTrack={audioTrack} compact hideAudio />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ToolCallGroup({ parts, audioTrackById }: {
-  parts: ToolPartType[];
-  audioTrackById: Map<string, AudioTrack>;
-}) {
-  if (parts.length === 1) {
-    const part = parts[0]!;
-    const rawToolName = part.type.replace("tool-", "");
-    const isAudioTool = rawToolName === "generate_sound_effect" || rawToolName === "generate_music";
-    const audioName = isAudioTool && typeof part.input?.name === "string" ? part.input.name : null;
-    const audioKind: "sfx" | "music" = rawToolName === "generate_music" ? "music" : "sfx";
-    const audioId = audioName ? getGeneratedAudioId(audioKind, audioName) : null;
-    return <ToolCallCard part={part} audioTrack={audioId ? audioTrackById.get(audioId) : undefined} />;
-  }
-
-  return (
-    <div
-      className="mx-1 my-2 border border-[var(--color-border-light)] bg-[var(--color-surface)] overflow-hidden"
-      style={{ animation: "fadeIn 0.2s ease-out" }}
-    >
-      <div className="px-3 py-1.5 border-b border-[var(--color-border)] bg-[var(--color-surface-light)] flex items-center gap-2">
-        <span className="text-[9px] text-[var(--color-text-muted)] uppercase tracking-[0.15em] font-bold">
-          Tools
-        </span>
-        <span className="text-[10px] text-[var(--color-accent)] uppercase tracking-[0.1em] font-bold">
-          {parts.length}
-        </span>
-      </div>
-      <div className="divide-y divide-[var(--color-border)]">
-        {parts.map((part, i) => (
-          <ToolCallGroupRow key={i} part={part} audioTrackById={audioTrackById} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
 export function ChatPanel({
   currentCode,
   currentEngine,
@@ -813,6 +653,7 @@ export function ChatPanel({
   consoleLogs,
   generatedImages,
   audioTracks,
+  runtimeEnv,
   onCodeUpdate,
   onProjectFilesUpdate,
   patchProjectFiles,
@@ -823,50 +664,42 @@ export function ChatPanel({
   onEngineUpdate,
   addImage,
   addAudioTrack,
-  generatedMeshes,
-  addMesh,
-  updateMesh,
   setControls,
   chatMessages,
   chatSessionId,
-  chatTabs,
-  activeChatTabId,
   setChatMessages,
-  createChatTab,
-  deleteChatTab,
-  switchChatTab,
-  renameChatTab,
   focusCodeFile,
   focusConsolePanel,
   focusImagesPanel,
   focusAudioPanel,
-  focusMeshesPanel,
   setPendingFileWrites,
   clearPendingFileWrites,
-  setRepromptAudioHandler,
-  setStreamingCode,
+  updateRuntimeEnv,
 }: ChatPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const modeMenuRef = useRef<HTMLDivElement>(null);
+  const modeMenuPopupRef = useRef<HTMLDivElement>(null);
+  const modeMenuButtonRef = useRef<HTMLButtonElement>(null);
   const planListRef = useRef<HTMLDivElement>(null);
   const lastPlanAutoScrollRef = useRef(0);
   const processedToolPayloadRef = useRef<Map<string, string>>(new Map());
   const audioPollInFlightRef = useRef(false);
   const audioPollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const meshPollInFlightRef = useRef(false);
-  const meshPollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hydratedMessageIdsRef = useRef<Set<string>>(new Set());
   const initialChatMessagesRef = useRef(chatMessages);
   const [input, setInput] = useState("");
   const [selectedEngine, setSelectedEngine] = useState<GameEngine>(currentEngine);
   const [composerMode, setComposerMode] = useState<ComposerMode>("agent");
-  const [showScrollBtn, setShowScrollBtn] = useState(false);
-  const [isComposerFocused, setIsComposerFocused] = useState(false);
+  const [isModeMenuOpen, setIsModeMenuOpen] = useState(false);
+  const [modeMenuPos, setModeMenuPos] = useState({ x: 0, y: 0 });
   const [isPlanCollapsed, setIsPlanCollapsed] = useState(false);
   const [dragTodoId, setDragTodoId] = useState<string | null>(null);
   const [planDropTarget, setPlanDropTarget] = useState<{ id: string; position: "before" | "after" } | null>(null);
   const planningMode = composerMode === "plan";
+  const canPortal = typeof document !== "undefined";
+
   const mentionItems = useMemo(
     () => {
       const imageSlugCounts = new Map<string, number>();
@@ -898,15 +731,39 @@ export function ChatPanel({
           display: `audio:${toMentionSlug(track.name) || `track-${index + 1}`}`,
           meta: track.name || "audio",
         })),
-        ...generatedMeshes.map((mesh, index) => ({
-          id: `mesh:${toMentionSlug(mesh.name) || `mesh-${index + 1}`}`,
-          display: `mesh:${toMentionSlug(mesh.name) || `mesh-${index + 1}`}`,
-          meta: mesh.name || "mesh",
-        })),
       ];
     },
-    [audioTracks, generatedImages, generatedMeshes, pendingFileWrites, projectFiles]
+    [audioTracks, generatedImages, pendingFileWrites, projectFiles]
   );
+
+  const estimatedTokens = useMemo(() => {
+    const transcriptTokens = estimateTokensFromJson(chatMessages);
+    const contextTokens = estimateTokensFromJson({
+      currentProjectFiles: projectFiles,
+      currentCode,
+      planningTodos,
+      generatedImages,
+      audioTracks: audioTracks.map((track) => ({
+        id: track.id,
+        name: track.name,
+        type: track.type,
+        status: track.status,
+        duration: track.duration,
+      })),
+      runtimeEnv,
+      composerMode,
+    });
+    return transcriptTokens + contextTokens;
+  }, [
+    audioTracks,
+    composerMode,
+    currentCode,
+    generatedImages,
+    chatMessages,
+    planningTodos,
+    projectFiles,
+    runtimeEnv,
+  ]);
 
   const handleMentionChipClick = useCallback(
     (label: string) => {
@@ -924,14 +781,10 @@ export function ChatPanel({
         focusAudioPanel();
         return;
       }
-      if (mention.kind === "meshes") {
-        focusMeshesPanel();
-        return;
-      }
       if (!projectFiles.some((file) => file.path === mention.value)) return;
       focusCodeFile(mention.value);
     },
-    [focusAudioPanel, focusCodeFile, focusConsolePanel, focusImagesPanel, focusMeshesPanel, projectFiles]
+    [focusAudioPanel, focusCodeFile, focusConsolePanel, focusImagesPanel, projectFiles]
   );
 
   const renderMessageTextWithMentions = useCallback((text: string) => {
@@ -945,7 +798,6 @@ export function ChatPanel({
         ? mention.kind === "console" ||
           mention.kind === "images" ||
           mention.kind === "audio" ||
-          mention.kind === "meshes" ||
           projectFiles.some((file) => file.path === mention.value)
         : false;
       if (!isClickable) return <span key={`txt-${index}`}>{segment}</span>;
@@ -962,9 +814,7 @@ export function ChatPanel({
                 ? "Open Images panel"
                 : mention?.kind === "audio"
                   ? "Open Audio panel"
-                  : mention?.kind === "meshes"
-                    ? "Open Meshes panel"
-                    : `Open ${mention?.value ?? ""} in Code panel`
+              : `Open ${mention?.value ?? ""} in Code panel`
           }
         >
           {segment}
@@ -1037,7 +887,7 @@ export function ChatPanel({
               duration: typeof payload.duration === "number" ? payload.duration : null,
               error: typeof payload.error === "string" ? payload.error : null,
               name: typeof payload.name === "string" ? payload.name : track.name,
-              kind: (payload.kind === "music" ? "music" : "sfx") as "music" | "sfx",
+              kind: payload.kind === "music" ? "music" : "sfx",
             };
           })
         );
@@ -1104,118 +954,73 @@ export function ChatPanel({
     };
   }, [addAudioTrack, audioTrackById, pendingAudioIdsKey]);
 
-  const meshById = useMemo(
-    () => new Map(generatedMeshes.map((mesh) => [mesh.id, mesh])),
-    [generatedMeshes]
-  );
-
-  const pendingMeshIdsKey = useMemo(
-    () =>
-      generatedMeshes
-        .filter((mesh) => mesh.status === "pending" || mesh.status === "refining")
-        .map((mesh) => mesh.id)
-        .sort()
-        .join("|"),
-    [generatedMeshes]
-  );
-
-  useEffect(() => {
-    if (!pendingMeshIdsKey) {
-      if (meshPollTimerRef.current) {
-        clearTimeout(meshPollTimerRef.current);
-        meshPollTimerRef.current = null;
-      }
-      return;
-    }
-
-    let cancelled = false;
-    const maxRounds = 120;
-    let round = 0;
-
-    const pollRound = async () => {
-      if (cancelled || meshPollInFlightRef.current) return;
-
-      const currentPending = Array.from(meshById.values()).filter(
-        (mesh) => mesh.status === "pending" || mesh.status === "refining"
-      );
-      if (currentPending.length === 0) return;
-
-      round += 1;
-      meshPollInFlightRef.current = true;
-      try {
-        const results = await Promise.all(
-          currentPending.map(async (mesh) => {
-            const res = await fetch(`/api/meshes/${encodeURIComponent(mesh.id)}`);
-            if (!res.ok) return { id: mesh.id, status: mesh.status, name: mesh.name, prompt: mesh.prompt, glbUrl: null, thumbnailUrl: null, error: `Request failed (${res.status})` };
-            return res.json() as Promise<{
-              id: string;
-              status: "pending" | "refining" | "ready" | "error";
-              name: string;
-              prompt: string;
-              glbUrl: string | null;
-              thumbnailUrl: string | null;
-              error: string | null;
-            }>;
-          })
-        );
-
-        let stillProcessing = false;
-        for (const result of results) {
-          if (cancelled) break;
-          const existing = meshById.get(result.id);
-          if (!existing) continue;
-          if (result.status === "pending" || result.status === "refining") {
-            stillProcessing = true;
-            if (result.status !== existing.status) {
-              updateMesh({ ...existing, status: result.status });
-            }
-            continue;
-          }
-          updateMesh({
-            ...existing,
-            status: result.status,
-            glbUrl: result.glbUrl ?? null,
-            thumbnailUrl: result.thumbnailUrl ?? null,
-            error: result.error ?? null,
-          });
-        }
-
-        if (!cancelled && stillProcessing && round < maxRounds) {
-          meshPollTimerRef.current = setTimeout(() => {
-            meshPollTimerRef.current = null;
-            void pollRound();
-          }, 4000);
-        } else if (!cancelled && stillProcessing && round >= maxRounds) {
-          for (const mesh of currentPending) {
-            if (mesh.status !== "pending" && mesh.status !== "refining") continue;
-            updateMesh({
-              ...mesh,
-              status: "error",
-              error: "Mesh generation timed out",
-            });
-          }
-        }
-      } finally {
-        meshPollInFlightRef.current = false;
-      }
-    };
-
-    if (!meshPollTimerRef.current) {
-      void pollRound();
-    }
-
-    return () => {
-      cancelled = true;
-      if (meshPollTimerRef.current) {
-        clearTimeout(meshPollTimerRef.current);
-        meshPollTimerRef.current = null;
-      }
-    };
-  }, [updateMesh, meshById, pendingMeshIdsKey]);
-
   useEffect(() => {
     setSelectedEngine(currentEngine);
   }, [currentEngine]);
+
+  useEffect(() => {
+    if (!isModeMenuOpen) return;
+    const onClick = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (modeMenuRef.current?.contains(target)) return;
+      if (modeMenuPopupRef.current?.contains(target)) return;
+      setIsModeMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [isModeMenuOpen]);
+
+  useEffect(() => {
+    if (!isModeMenuOpen) return;
+    const buttonEl = modeMenuButtonRef.current;
+    const menuEl = modeMenuPopupRef.current;
+    if (!buttonEl || !menuEl) return;
+
+    const updatePosition = () => {
+      const buttonRect = buttonEl.getBoundingClientRect();
+      const menuRect = menuEl.getBoundingClientRect();
+      const pad = 8;
+      const gap = 4;
+      const viewportW = window.innerWidth;
+      const viewportH = window.innerHeight;
+
+      let x = buttonRect.left;
+      let y = buttonRect.bottom + gap;
+
+      if (x + menuRect.width > viewportW - pad) x = viewportW - menuRect.width - pad;
+      if (x < pad) x = pad;
+
+      if (y + menuRect.height > viewportH - pad) {
+        const upY = buttonRect.top - menuRect.height - gap;
+        y = upY >= pad ? upY : viewportH - menuRect.height - pad;
+      }
+      if (y < pad) y = pad;
+
+      setModeMenuPos({ x, y });
+    };
+
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [isModeMenuOpen]);
+
+  const toggleModeMenu = useCallback(() => {
+    if (isModeMenuOpen) {
+      setIsModeMenuOpen(false);
+      return;
+    }
+
+    const buttonEl = modeMenuButtonRef.current;
+    if (buttonEl) {
+      const rect = buttonEl.getBoundingClientRect();
+      setModeMenuPos({ x: rect.left, y: rect.bottom + 4 });
+    }
+    setIsModeMenuOpen(true);
+  }, [isModeMenuOpen]);
 
   const transport = useMemo(
     () => new DefaultChatTransport({ api: "/api/chat" }),
@@ -1266,13 +1071,7 @@ export function ChatPanel({
 
         if (partType === "tool-update_sandbox") {
           const toolPart = part as { state: string; input?: { code?: string } };
-          if (toolPart.state === "input-streaming" || toolPart.state === "input-available") {
-            if (toolPart.input?.code) {
-              setStreamingCode(toolPart.input.code);
-            }
-          }
           if (toolPart.state === "output-available") {
-            setStreamingCode(null);
             if (toolPart.input?.code) {
               const key = `${message.id}:${partType}:${toolPart.state}`;
               if (processedToolPayloadRef.current.get(key) === toolPart.input.code) continue;
@@ -1289,10 +1088,19 @@ export function ChatPanel({
           const existingPaths = new Set(projectFiles.map((file) => file.path));
           const files = rawFiles.filter((file) => {
             if (!isStableProjectPath(file?.path)) return false;
+            if (isReservedSdkPath(file.path)) return false;
+            if (isImmutableProjectPath(file.path)) {
+              // Immutable files may be created once, then become read-only.
+              return !existingPaths.has(file.path) && hasMeaningfulContent(file?.content);
+            }
             if (existingPaths.has(file.path)) return true;
             return hasMeaningfulContent(file?.content);
           });
-          const deletePaths = Array.isArray(toolPart.input?.deletePaths) ? toolPart.input.deletePaths : [];
+          const deletePaths = Array.isArray(toolPart.input?.deletePaths)
+            ? toolPart.input.deletePaths.filter((path): path is string =>
+                typeof path === "string" && !isImmutableProjectPath(path) && !isReservedSdkPath(path)
+              )
+            : [];
           const filePaths = files.map((file) => file.path);
           const pendingEntries = files.map((file) => ({
             path: file.path,
@@ -1321,7 +1129,6 @@ export function ChatPanel({
             if (processedToolPayloadRef.current.get(key) === signature) continue;
             processedToolPayloadRef.current.set(key, signature);
             if (toolPart.state === "output-available") {
-              setStreamingCode(null);
               onProjectFilesUpdate(files, selectedEngine, deletePaths);
               clearPendingFileWrites(filePaths);
             }
@@ -1337,6 +1144,8 @@ export function ChatPanel({
             };
           };
           if (!toolPart.input?.path || !Array.isArray(toolPart.input.edits) || toolPart.input.edits.length === 0) continue;
+          if (isReservedSdkPath(toolPart.input.path)) continue;
+          if (isImmutableProjectPath(toolPart.input.path)) continue;
           if (toolPart.state === "input-streaming" || toolPart.state === "input-available") {
             if (isStableProjectPath(toolPart.input.path)) {
               setPendingFileWrites([
@@ -1373,6 +1182,8 @@ export function ChatPanel({
           };
           if (toolPart.state === "input-streaming" || toolPart.state === "input-available") {
             if (isStableProjectPath(toolPart.input?.targetFile)) {
+              if (isReservedSdkPath(toolPart.input.targetFile)) continue;
+              if (isImmutableProjectPath(toolPart.input.targetFile)) continue;
               setPendingFileWrites(
                 [{
                   path: toolPart.input.targetFile,
@@ -1384,6 +1195,8 @@ export function ChatPanel({
           }
           if (toolPart.state !== "output-available") continue;
           if (!isStableProjectPath(toolPart.input?.targetFile) || typeof toolPart.input.newString !== "string") continue;
+          if (isReservedSdkPath(toolPart.input.targetFile)) continue;
+          if (isImmutableProjectPath(toolPart.input.targetFile)) continue;
 
           const signature = JSON.stringify(toolPart.input);
           const key = `${message.id}:${partType}:${toolPart.input.targetFile}`;
@@ -1404,10 +1217,68 @@ export function ChatPanel({
           const toolPart = part as { state: string; input?: { targetFile?: string } };
           if (toolPart.state !== "output-available") continue;
           if (!toolPart.input?.targetFile) continue;
+          if (isReservedSdkPath(toolPart.input.targetFile)) continue;
+          if (isImmutableProjectPath(toolPart.input.targetFile)) continue;
           const key = `${message.id}:${partType}:${toolPart.input.targetFile}`;
           if (processedToolPayloadRef.current.get(key) === "1") continue;
           processedToolPayloadRef.current.set(key, "1");
           deleteProjectFile(toolPart.input.targetFile);
+        }
+
+        if (partType === "tool-update_runtime_env") {
+          const toolPart = part as {
+            state: string;
+            input?: { set?: Record<string, string>; unset?: string[] };
+          };
+          if (toolPart.state !== "output-available") continue;
+          const setVars =
+            toolPart.input?.set && typeof toolPart.input.set === "object" ? toolPart.input.set : {};
+          const unsetVars = Array.isArray(toolPart.input?.unset) ? toolPart.input.unset : [];
+          const signature = JSON.stringify({ set: setVars, unset: unsetVars });
+          const key = `${message.id}:${partType}`;
+          if (processedToolPayloadRef.current.get(key) === signature) continue;
+          processedToolPayloadRef.current.set(key, signature);
+          updateRuntimeEnv(setVars, unsetVars);
+        }
+
+        if (partType === "tool-multiplayer_partykit_scaffold") {
+          const toolPart = part as {
+            state: string;
+            output?: {
+              files?: Array<{ path?: string; kind?: string; content?: string }>;
+            };
+          };
+          if (toolPart.state !== "output-available") continue;
+          const filesRaw = Array.isArray(toolPart.output?.files) ? toolPart.output.files : [];
+          const existingPaths = new Set(projectFiles.map((file) => file.path));
+          const files: ProjectFile[] = filesRaw
+            .filter((file): file is { path: string; kind?: string; content?: string } =>
+              typeof file?.path === "string" && typeof file?.content === "string"
+            )
+            .filter((file) => isStableProjectPath(file.path))
+            .filter((file) => !isReservedSdkPath(file.path))
+            .filter((file) => !(isImmutableProjectPath(file.path) && existingPaths.has(file.path)))
+            .filter((file) => !existingPaths.has(file.path))
+            .map((file) => ({
+              path: file.path,
+              content: file.content,
+              kind:
+                file.kind === "script"
+                  ? "script"
+                  : file.kind === "config"
+                    ? "config"
+                    : file.path.endsWith(".html")
+                      ? "html"
+                      : file.path.endsWith(".css")
+                        ? "style"
+                        : "other",
+            }));
+          if (files.length === 0) continue;
+          const signature = JSON.stringify(files.map((file) => ({ path: file.path, content: file.content })));
+          const key = `${message.id}:${partType}`;
+          if (processedToolPayloadRef.current.get(key) === signature) continue;
+          processedToolPayloadRef.current.set(key, signature);
+          patchProjectFiles(files, selectedEngine);
         }
 
         if (partType === "tool-todo_write") {
@@ -1480,23 +1351,6 @@ export function ChatPanel({
           setControls(normalized);
         }
 
-        if (partType === "tool-set_engine") {
-          const toolPart = part as {
-            state: string;
-            output?: { engine?: string };
-          };
-          if (toolPart.state !== "output-available") continue;
-          const newEngine = toolPart.output?.engine;
-          if (newEngine === "canvas2d" || newEngine === "phaser" || newEngine === "threejs") {
-            const key = `${message.id}:${partType}`;
-            if (processedToolPayloadRef.current.get(key) === newEngine) continue;
-            processedToolPayloadRef.current.set(key, newEngine);
-            console.log("[Chat] set_engine ->", newEngine);
-            setSelectedEngine(newEngine);
-            onEngineUpdate(newEngine);
-          }
-        }
-
         if (partType === "tool-generate_sound_effect" || partType === "tool-generate_music") {
           const toolPart = part as {
             state: string;
@@ -1522,31 +1376,6 @@ export function ChatPanel({
             createdAt: Date.now(),
           });
         }
-
-        if (partType === "tool-generate_mesh") {
-          const toolPart = part as {
-            state: string;
-            input?: { name?: string; prompt?: string };
-            output?: { meshId?: string; name?: string; status?: string; error?: string };
-          };
-          if (toolPart.state !== "output-available" && toolPart.state !== "output-error") continue;
-          const name = toolPart.input?.name;
-          if (!name) continue;
-          const meshId = toolPart.output?.meshId ?? `mesh:${name}`;
-          const key = `${message.id}:${partType}:${meshId}`;
-          if (processedToolPayloadRef.current.get(key) === "1") continue;
-          processedToolPayloadRef.current.set(key, "1");
-          addMesh({
-            id: meshId,
-            name,
-            prompt: toolPart.input?.prompt ?? "",
-            status: toolPart.output?.status === "error" ? "error" : "pending",
-            glbUrl: null,
-            thumbnailUrl: null,
-            error: toolPart.output?.error ?? null,
-            createdAt: Date.now(),
-          });
-        }
       }
     }
   }, [
@@ -1563,11 +1392,10 @@ export function ChatPanel({
     composerMode,
     addImage,
     addAudioTrack,
-    addMesh,
     setControls,
     setPendingFileWrites,
     clearPendingFileWrites,
-    setStreamingCode,
+    updateRuntimeEnv,
     selectedEngine,
     projectFiles,
   ]);
@@ -1577,9 +1405,8 @@ export function ChatPanel({
     if (!el) return;
     const handleScroll = () => {
       const threshold = 80;
-      const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
-      isNearBottomRef.current = isNearBottom;
-      setShowScrollBtn(!isNearBottom);
+      isNearBottomRef.current =
+        el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
     };
     el.addEventListener("scroll", handleScroll, { passive: true });
     return () => el.removeEventListener("scroll", handleScroll);
@@ -1593,19 +1420,6 @@ export function ChatPanel({
 
   const isLoading = status === "streaming" || status === "submitted";
 
-  // Safety net: clear any leftover streaming state when the chat stream finishes.
-  // Tool part state transitions (input-streaming -> output-available) can occasionally
-  // be missed by the effect, leaving pending file writes or streaming code stuck.
-  const prevStatusRef = useRef(status);
-  useEffect(() => {
-    const prev = prevStatusRef.current;
-    prevStatusRef.current = status;
-    if (prev !== "ready" && prev !== "error" && (status === "ready" || status === "error")) {
-      clearPendingFileWrites();
-      setStreamingCode(null);
-    }
-  }, [status, clearPendingFileWrites, setStreamingCode]);
-
   const phase = getGenerationPhase(
     status,
     messages as Array<{ role: string; parts: Array<{ type: string; state?: string }> }>
@@ -1614,54 +1428,6 @@ export function ChatPanel({
   const timer = useElapsedTimer(isLoading);
   const quirkyMessage = useRotatingMessage(phase, isLoading);
   useComposerAutoHeight(textareaRef, input);
-
-  const handleRepromptAudio = useCallback(
-    (message: string) => {
-      if (isLoading || !message.trim()) return;
-      sendMessage(
-        { text: message },
-        {
-          body: {
-            currentCode,
-            currentProjectFiles: projectFiles,
-            planningTodos,
-            mentionedFiles: [],
-            audioTracks: audioTracks.map((track) => ({
-              id: track.id,
-              name: track.name,
-              type: track.type,
-              description: track.description,
-              status: track.status,
-              duration: track.duration,
-              error: track.error ?? null,
-            })),
-            consoleLogs: [],
-            generatedImages,
-            composerMode,
-            planningMode,
-            gameEngine: selectedEngine,
-          },
-        }
-      );
-    },
-    [
-      isLoading,
-      sendMessage,
-      currentCode,
-      projectFiles,
-      planningTodos,
-      audioTracks,
-      generatedImages,
-      composerMode,
-      planningMode,
-      selectedEngine,
-    ]
-  );
-
-  useEffect(() => {
-    setRepromptAudioHandler(handleRepromptAudio);
-    return () => setRepromptAudioHandler(null);
-  }, [handleRepromptAudio, setRepromptAudioHandler]);
 
   const doSubmit = () => {
     const visibleText = textareaRef.current?.value ?? input;
@@ -1732,15 +1498,7 @@ export function ChatPanel({
         })),
         consoleLogs: consoleContext,
         generatedImages,
-        generatedMeshes: generatedMeshes.map((mesh) => ({
-          id: mesh.id,
-          name: mesh.name,
-          prompt: mesh.prompt,
-          status: mesh.status,
-          glbUrl: mesh.glbUrl,
-          thumbnailUrl: mesh.thumbnailUrl,
-          error: mesh.error ?? null,
-        })),
+        runtimeEnv,
         composerMode,
         planningMode,
         gameEngine: effectiveEngine,
@@ -1750,24 +1508,12 @@ export function ChatPanel({
       .catch((err) => console.error("[Chat] sendMessage rejected:", err));
   };
 
-  const handleRetry = () => {
-    const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
-    if (!lastUserMsg || isLoading) return;
-    const textParts = lastUserMsg.parts.filter(
-      (p): p is Extract<typeof p, { type: "text" }> => p.type === "text"
-    );
-    const text = textParts.map((p) => p.text).join("").trim();
-    if (!text) return;
-    setInput(text);
-    requestAnimationFrame(() => doSubmit());
-  };
-
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     doSubmit();
   };
 
-  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>) => {
+  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       const cursor = textareaRef.current?.selectionStart ?? input.length;
       if (isMentionQueryActive(input, cursor)) return;
@@ -1830,54 +1576,10 @@ export function ChatPanel({
     };
   }, [clampMentionsPopup]);
 
-  const handleTemplateSelect = useCallback(
-    (template: GameTemplate) => {
-      if (isLoading) return;
-      setSelectedEngine(template.engine);
-      onEngineUpdate(template.engine);
-      clearPendingFileWrites();
-      sendMessage(
-        { text: template.starterPrompt },
-        {
-          body: {
-            currentCode,
-            currentProjectFiles: projectFiles,
-            planningTodos,
-            mentionedFiles: [],
-            audioTracks: audioTracks.map((track) => ({
-              id: track.id,
-              name: track.name,
-              type: track.type,
-              description: track.description,
-              status: track.status,
-              duration: track.duration,
-              error: track.error ?? null,
-            })),
-            consoleLogs: [],
-            generatedImages,
-            composerMode,
-            planningMode,
-            gameEngine: template.engine,
-            templateSkills: template.skills,
-          },
-        }
-      );
-    },
-    [
-      isLoading,
-      sendMessage,
-      currentCode,
-      projectFiles,
-      planningTodos,
-      audioTracks,
-      generatedImages,
-      composerMode,
-      planningMode,
-      setSelectedEngine,
-      onEngineUpdate,
-      clearPendingFileWrites,
-    ]
-  );
+  const handleExampleClick = (prompt: string) => {
+    setInput(prompt.toLowerCase());
+    textareaRef.current?.focus();
+  };
 
   const handleUpdateTodo = (todoId: string, updates: Partial<PlanningTodo>) => {
     const next = planningTodos.map((todo) =>
@@ -1946,88 +1648,35 @@ export function ChatPanel({
   const isEmpty = messages.length === 0;
   const canSend = input.trim().length > 0 && !isLoading;
 
-  const [editingTabId, setEditingTabId] = useState<string | null>(null);
-  const [editingTabName, setEditingTabName] = useState("");
-
-  const scrollToBottom = () => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  };
-
   return (
     <div className="flex h-full flex-col bg-[var(--color-bg)]">
-      <div className="shrink-0 flex items-center border-t border-b border-[var(--color-border)] bg-[var(--color-surface)] overflow-x-auto">
-        {chatTabs.map((tab) => (
-          <div
-            key={tab.id}
-            className={`group flex items-center gap-1 px-2.5 py-1.5 border-r border-[var(--color-border)] cursor-pointer min-w-0 ${
-              tab.id === activeChatTabId
-                ? "bg-[var(--color-bg)] text-[var(--color-text)]"
-                : "text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-light)]"
-            }`}
-            onClick={() => {
-              if (tab.id !== activeChatTabId) switchChatTab(tab.id);
-            }}
-            onDoubleClick={() => {
-              setEditingTabId(tab.id);
-              setEditingTabName(tab.name);
-            }}
-          >
-            {editingTabId === tab.id ? (
-              <input
-                autoFocus
-                value={editingTabName}
-                onChange={(e) => setEditingTabName(e.target.value)}
-                onBlur={() => {
-                  renameChatTab(tab.id, editingTabName);
-                  setEditingTabId(null);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    renameChatTab(tab.id, editingTabName);
-                    setEditingTabId(null);
-                  }
-                  if (e.key === "Escape") setEditingTabId(null);
-                }}
-                onClick={(e) => e.stopPropagation()}
-                className="bg-[var(--color-surface)] border border-[var(--color-accent)] text-[10px] text-[var(--color-text)] px-1 py-0 w-[70px] outline-none"
-              />
-            ) : (
-              <span className="text-[10px] uppercase tracking-[0.08em] font-semibold truncate max-w-[80px]">
-                {tab.name}
-              </span>
-            )}
-            {chatTabs.length > 1 && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  deleteChatTab(tab.id);
-                }}
-                className="opacity-0 group-hover:opacity-100 text-[9px] text-[var(--color-text-muted)] hover:text-[var(--color-danger)] ml-0.5 shrink-0"
-                aria-label={`Close ${tab.name}`}
-              >
-                ✕
-              </button>
-            )}
-          </div>
-        ))}
-        <button
-          type="button"
-          onClick={() => createChatTab()}
-          className="shrink-0 px-2 py-1.5 text-[11px] text-[var(--color-text-muted)] hover:text-[var(--color-accent)] hover:bg-[var(--color-surface-light)]"
-          aria-label="New chat"
-          title="New chat"
-        >
-          +
-        </button>
-      </div>
-      <div className="relative flex-1 min-h-0">
-        <div ref={scrollRef} className="absolute inset-0 overflow-y-auto px-3 py-3 space-y-3">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
         {isEmpty ? (
-          <TemplateGallery onSelect={handleTemplateSelect} />
+          <div className="flex flex-col items-center justify-center h-full gap-4 px-2">
+            <div className="text-center space-y-2">
+              <p className="text-[13px] text-[var(--color-text-secondary)] font-semibold">
+                What do you want to build?
+              </p>
+              <p className="text-[11px] text-[var(--color-text-muted)]">
+                Describe a game or try an example
+              </p>
+            </div>
+            <div className="flex flex-wrap justify-center gap-1.5">
+              {EXAMPLE_PROMPTS.map((prompt) => (
+                <button
+                  key={prompt}
+                  type="button"
+                  onClick={() => handleExampleClick(prompt)}
+                  className="gf-btn-chip text-[10px] text-[var(--color-text-muted)] px-2.5 py-1 border border-[var(--color-border)] uppercase tracking-wider font-semibold"
+                >
+                  {prompt}
+                </button>
+              ))}
+            </div>
+          </div>
         ) : (
           <>
-            {messages.map((message, messageIndex) => {
+            {messages.map((message) => {
               const textParts = message.parts.filter(
                 (p): p is Extract<typeof p, { type: "text" }> => p.type === "text"
               );
@@ -2046,31 +1695,22 @@ export function ChatPanel({
               if (!textContent && toolParts.length === 0 && reasoningParts.length === 0) return null;
 
               const isUser = message.role === "user";
-              const isLastAssistant = !isUser && isLoading && messageIndex === messages.length - 1;
-              const isStreamingText = isLastAssistant && textContent.length > 0 && phase !== "done";
 
               return (
                 <div key={message.id} style={{ animation: "fadeIn 0.2s ease-out" }}>
                   {isUser ? (
                     <div className="flex items-start gap-2">
                       <div className="shrink-0 w-5 h-5 rounded-full bg-[var(--color-accent)] flex items-center justify-center mt-0.5">
-                        <svg width="10" height="10" viewBox="0 0 10 10" fill="var(--color-bg)">
-                          <circle cx="5" cy="3.5" r="2" />
-                          <path d="M1 9.5a4 4 0 018 0z" />
-                        </svg>
+                        <span className="text-[9px] text-[var(--color-bg)] font-bold">U</span>
                       </div>
-                      <div className="bg-[var(--color-surface)] border border-[var(--color-border)] px-2.5 py-1.5 text-[12px] text-[var(--color-text)] whitespace-pre-wrap leading-relaxed">
+                      <div className="text-[12px] text-[var(--color-text)] whitespace-pre-wrap leading-relaxed pt-0.5">
                         {renderMessageTextWithMentions(textContent)}
                       </div>
                     </div>
                   ) : (
                     <div className="flex items-start gap-2">
                       <div className="shrink-0 w-5 h-5 rounded-full bg-[var(--color-surface-elevated)] border border-[var(--color-border-light)] flex items-center justify-center mt-0.5">
-                        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--color-accent)" strokeWidth="1.2" strokeLinecap="round">
-                          <path d="M2 2l2 3-2 3" />
-                          <path d="M8 2l-2 3 2 3" />
-                          <path d="M4 8h2" />
-                        </svg>
+                        <span className="text-[9px] text-[var(--color-accent)] font-bold">G</span>
                       </div>
                       <div className="min-w-0 flex-1 space-y-1">
                         {reasoningParts.map((part, i) => (
@@ -2082,19 +1722,34 @@ export function ChatPanel({
                         ))}
                         {textContent && (
                           <div className="chat-markdown text-[12px] text-[var(--color-text)] leading-relaxed">
-                            {isStreamingText ? (
-                              <StreamingText content={textContent} />
-                            ) : (
-                              <MemoizedMarkdown content={textContent} />
-                            )}
+                            <Markdown remarkPlugins={[remarkGfm]}>{textContent}</Markdown>
                           </div>
                         )}
-                        {toolParts.length > 0 && (
-                          <ToolCallGroup
-                            parts={toolParts as ToolPartType[]}
-                            audioTrackById={audioTrackById}
-                          />
-                        )}
+                        {toolParts.map((part, i) => (
+                          (() => {
+                            const typedPart = part as {
+                              type: string;
+                              state?: string;
+                              input?: Record<string, unknown>;
+                              output?: Record<string, unknown>;
+                            };
+                            const rawToolName = typedPart.type.replace("tool-", "");
+                            const isAudioTool = rawToolName === "generate_sound_effect" || rawToolName === "generate_music";
+                            const audioName =
+                              isAudioTool && typeof typedPart.input?.name === "string"
+                                ? typedPart.input.name
+                                : null;
+                            const audioKind: "sfx" | "music" = rawToolName === "generate_music" ? "music" : "sfx";
+                            const audioId = audioName ? getGeneratedAudioId(audioKind, audioName) : null;
+                            return (
+                              <ToolCallCard
+                                key={i}
+                                part={typedPart}
+                                audioTrack={audioId ? audioTrackById.get(audioId) : undefined}
+                              />
+                            );
+                          })()
+                        ))}
                       </div>
                     </div>
                   )}
@@ -2102,56 +1757,25 @@ export function ChatPanel({
               );
             })}
 
-            {isLoading && phase !== "done" && (
-              phase === "thinking" ? (
-                <ThinkingIndicator timer={timer} />
-              ) : (
-                <StreamingIndicator
-                  phase={phase}
-                  timer={timer}
-                  message={quirkyMessage}
-                />
-              )
+            {isLoading && phase !== "done" && phase !== "thinking" && (
+              <StreamingIndicator
+                phase={phase}
+                timer={timer}
+                message={quirkyMessage}
+              />
             )}
 
             {error && (
-              <div
-                className="mx-1 my-2 border border-[var(--color-danger)]/30 bg-[var(--color-surface)] overflow-hidden"
-                style={{ animation: "fadeIn 0.2s ease-out" }}
-              >
-                <div className="px-3 py-2.5 flex items-center gap-2">
-                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="var(--color-danger)" strokeWidth="1.5" className="shrink-0">
-                    <circle cx="6" cy="6" r="5" />
-                    <line x1="6" y1="3.5" x2="6" y2="6.5" />
-                    <circle cx="6" cy="8.5" r="0.5" fill="var(--color-danger)" />
-                  </svg>
-                  <span className="text-[11px] text-[var(--color-danger)] uppercase truncate flex-1">
-                    {error.message}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleRetry}
-                    className="gf-btn-chip shrink-0 text-[9px] uppercase tracking-[0.1em] font-semibold px-2 py-0.5 border border-[var(--color-border)] text-[var(--color-text-muted)]"
-                  >
-                    Retry
-                  </button>
-                </div>
+              <div className="px-3 py-2 text-[11px] text-[var(--color-danger)] border border-[var(--color-danger)]/30 bg-[var(--color-danger)]/5 uppercase flex items-center gap-2">
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <circle cx="6" cy="6" r="5" />
+                  <line x1="6" y1="3.5" x2="6" y2="6.5" />
+                  <circle cx="6" cy="8.5" r="0.5" fill="currentColor" />
+                </svg>
+                {error.message}
               </div>
             )}
           </>
-        )}
-        </div>
-        {showScrollBtn && (
-          <button
-            type="button"
-            onClick={scrollToBottom}
-            className="scroll-to-bottom-btn absolute bottom-3 right-3 z-10 w-7 h-7 flex items-center justify-center bg-[var(--color-surface)] border border-[var(--color-border-light)] text-[var(--color-text-muted)] hover:text-[var(--color-accent)] hover:border-[var(--color-accent)]"
-            aria-label="Scroll to bottom"
-          >
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M2 4.5l4 4 4-4" />
-            </svg>
-          </button>
         )}
       </div>
 
@@ -2298,22 +1922,57 @@ export function ChatPanel({
       <div className="shrink-0 border-t border-[var(--color-border)] p-2">
         <div className="mb-2 flex items-center gap-2">
           <span className="text-[9px] uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Mode</span>
-          <div className="inline-flex">
-            {(["agent", "plan", "debug", "ask"] as const).map((mode, i) => (
-              <button
-                key={mode}
-                type="button"
-                onClick={() => setComposerMode(mode)}
-                className={`text-[10px] uppercase tracking-wider font-semibold px-2 py-1 border border-[var(--color-border)] ${i > 0 ? "-ml-px" : ""} ${
-                  composerMode === mode
-                    ? "bg-[var(--color-accent-glow)] border-[var(--color-accent)] text-[var(--color-accent)] z-[1]"
-                    : "bg-[var(--color-surface)] text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
-                }`}
+          <div ref={modeMenuRef} className="relative">
+            <button
+              ref={modeMenuButtonRef}
+              type="button"
+              onClick={toggleModeMenu}
+              className="inline-flex items-center gap-2 bg-[var(--color-surface)] border border-[var(--color-border)] text-[10px] uppercase tracking-wider text-[var(--color-text-secondary)] px-2 py-1"
+            >
+              <span>{composerMode}</span>
+              <span className="text-[9px]">{isModeMenuOpen ? "▴" : "▾"}</span>
+            </button>
+            {canPortal && isModeMenuOpen
+              ? createPortal(
+              <div
+                ref={modeMenuPopupRef}
+                className="fixed min-w-[120px] bg-[var(--color-surface)] border border-[var(--color-border-light)] z-50 shadow-[0_12px_24px_rgba(0,0,0,0.45)]"
+                style={{ left: modeMenuPos.x, top: modeMenuPos.y }}
               >
-                {mode}
-              </button>
-            ))}
+                {(["agent", "plan", "debug", "ask"] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => {
+                      setComposerMode(mode);
+                      setIsModeMenuOpen(false);
+                    }}
+                    className={`w-full text-left px-2 py-1.5 text-[10px] uppercase tracking-wider flex items-center justify-between hover:bg-[var(--color-surface-light)] ${
+                      composerMode === mode ? "text-[var(--color-accent)]" : "text-[var(--color-text-secondary)]"
+                    }`}
+                  >
+                    <span>{mode}</span>
+                    <span className="text-[10px]">{composerMode === mode ? "✓" : ""}</span>
+                  </button>
+                ))}
+              </div>
+                ,
+                document.body
+              )
+              : null}
           </div>
+          <span className="text-[9px] text-[var(--color-text-muted)]">
+            {composerMode === "debug"
+              ? "Auto-attaches console logs"
+              : composerMode === "plan"
+                ? "Read-only planning"
+                : composerMode === "ask"
+                  ? "Q&A mode"
+                  : "Full edit mode"}
+          </span>
+          <span className="ml-auto text-[9px] text-[var(--color-text-muted)]">
+            ~{estimatedTokens.toLocaleString()} tokens
+          </span>
         </div>
 
         <form onSubmit={handleSubmit} className="flex gap-2">
@@ -2329,8 +1988,6 @@ export function ChatPanel({
                 if (e.key === "Shift" || e.key === "Control" || e.key === "Alt" || e.key === "Meta") return;
                 requestAnimationFrame(() => clampMentionsPopup());
               }}
-              onFocus={() => setIsComposerFocused(true)}
-              onBlur={() => setIsComposerFocused(false)}
               onScroll={handleComposerScroll}
               onMouseUp={() => {
                 const inputEl = textareaRef.current;
@@ -2387,7 +2044,7 @@ export function ChatPanel({
                       @{highlightedDisplay}
                     </span>
                     <span className="composer-mentions-row-meta">
-                      {typeof (entry as unknown as { meta?: unknown }).meta === "string" ? (entry as unknown as { meta: string }).meta : "resource"}
+                      {typeof (entry as { meta?: unknown }).meta === "string" ? (entry as { meta: string }).meta : "resource"}
                     </span>
                   </span>
                 )}
@@ -2397,11 +2054,7 @@ export function ChatPanel({
           <button
             type="submit"
             disabled={!canSend}
-            className={`shrink-0 w-[34px] self-stretch flex items-center justify-center border ${
-              canSend
-                ? "gf-btn-primary bg-[var(--color-accent)] border-[var(--color-accent)] text-[var(--color-bg)]"
-                : "gf-btn-chip border-[var(--color-border-light)] bg-[var(--color-surface)] text-[var(--color-text-muted)] opacity-20 cursor-default"
-            }`}
+            className="gf-btn-chip shrink-0 w-[34px] self-stretch flex items-center justify-center border border-[var(--color-border-light)] bg-[var(--color-surface)] text-[var(--color-text-muted)] disabled:opacity-20 disabled:cursor-default"
             aria-label="Send"
           >
             <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
@@ -2412,9 +2065,7 @@ export function ChatPanel({
 
         <div className="flex items-center justify-between px-1 pt-1">
           <span className="text-[9px] text-[var(--color-text-muted)]">
-            {isComposerFocused || !input.trim()
-              ? "Enter to send, Shift+Enter newline, @code:path / @console / @image:name / @audio:name"
-              : "Enter to send"}
+            Enter to send, Shift+Enter newline, @code:path / @console / @image:name / @audio:name
           </span>
         </div>
       </div>

@@ -5,6 +5,7 @@ import { getPublishedGame } from "@/lib/db/projects";
 
 interface PageProps {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ room?: string }>;
 }
 
 export async function generateMetadata({
@@ -23,8 +24,9 @@ export async function generateMetadata({
   };
 }
 
-export default async function PlayPage({ params }: PageProps) {
+export default async function PlayPage({ params, searchParams }: PageProps) {
   const { id } = await params;
+  const query = await searchParams;
 
   const game = await getPublishedGame(id);
 
@@ -32,5 +34,22 @@ export default async function PlayPage({ params }: PageProps) {
     notFound();
   }
 
-  return <GamePlayer code={game.code} title={game.title} gameId={game.id} />;
+  const roomId = typeof query.room === "string" && query.room.trim().length > 0
+    ? query.room.trim()
+    : game.multiplayer
+      ? `game-${game.id}`
+      : null;
+
+  return (
+    <GamePlayer
+      code={game.code}
+      title={game.title}
+      gameId={game.id}
+      multiplayer={game.multiplayer}
+      multiplayerProvider={game.multiplayerProvider}
+      multiplayerRoomType={game.multiplayerRoomType}
+      runtimeEnv={game.runtimeEnv ?? {}}
+      roomId={roomId}
+    />
+  );
 }

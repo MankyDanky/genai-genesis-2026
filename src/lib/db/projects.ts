@@ -18,14 +18,17 @@ import {
   type SaveProjectSnapshotRequest,
 } from "@/lib/db/schema";
 import { compileProjectToHtml } from "@/lib/project-files";
-import type { AudioTrack, GeneratedMesh } from "@/lib/game-forge-context";
-import { getMesh } from "@/lib/mesh-store";
+import type { AudioTrack } from "@/lib/game-forge-context";
 
 interface FallbackPublishedGame {
   id: string;
   title: string;
-  engine: "canvas2d" | "phaser" | "threejs";
+  engine: "canvas2d" | "threejs";
   code: string;
+  multiplayer: boolean;
+  multiplayerProvider: "partykit" | null;
+  multiplayerRoomType: string | null;
+  runtimeEnv: Record<string, string>;
   createdAt: Date;
 }
 
@@ -50,6 +53,38 @@ function deriveTitle(snapshot: SaveProjectSnapshotRequest) {
   const html = snapshot.currentCode ?? snapshot.projectFiles.find((file) => file.path === "index.html")?.content ?? "";
   const titleMatch = html.match(/<title>(.*?)<\/title>/i);
   return titleMatch?.[1]?.trim() || "Untitled Game";
+}
+
+function detectPublishedGameMultiplayer(html: string) {
+  const lower = html.toLowerCase();
+  const multiplayerHints = [
+    "createpartysession(",
+    "__partykit_host__",
+    "__partykit_room_id__",
+    "/parties/",
+    "partykit",
+  ];
+  const multiplayer = multiplayerHints.some((hint) => lower.includes(hint));
+
+  if (!multiplayer) {
+    return {
+      multiplayer: false,
+      multiplayerProvider: null as const,
+      multiplayerRoomType: null as string | null,
+    };
+  }
+
+  const roomTypeMatch =
+    html.match(/__GAMEFORGE_PARTYKIT_ROOM_TYPE__\s*=\s*["']([^"'\\\n]+)["']/i) ??
+    html.match(/roomType\s*=\s*["']([^"'\\\n]+)["']/i) ??
+    html.match(/\/parties\/([^/"'\\\n]+)\//i);
+  const roomType = roomTypeMatch?.[1]?.trim() || "game";
+
+  return {
+    multiplayer: true,
+    multiplayerProvider: "partykit" as const,
+    multiplayerRoomType: roomType,
+  };
 }
 
 function toObjectId(value: string | ObjectId) {
@@ -114,47 +149,6 @@ window.__GAMEFORGE_MUSIC__ = ${JSON.stringify(musicMap)};
     return html.replace(/<head([^>]*)>/i, `<head$1>${combined}`);
   }
   return `${combined}${html}`;
-}
-
-async function injectMeshesIntoHtml(
-  html: string,
-  meshes: GeneratedMesh[],
-): Promise<string> {
-  const readyMeshes = meshes.filter((m) => m.status === "ready" && !!m.glbUrl);
-  if (readyMeshes.length === 0) return html;
-
-  const meshMap: Record<string, { glbUrl: string; name: string }> = {};
-
-  for (const mesh of readyMeshes) {
-    const stored = await getMesh(mesh.id);
-    if (stored?.artifactId) {
-      try {
-        const artifact = await readArtifactBuffer(stored.artifactId);
-        if (artifact) {
-          const base64 = artifact.buffer.toString("base64");
-          const dataUrl = `data:model/gltf-binary;base64,${base64}`;
-          meshMap[mesh.name] = { glbUrl: dataUrl, name: mesh.name };
-          continue;
-        }
-      } catch {
-        // fall through to URL
-      }
-    }
-    if (mesh.glbUrl) {
-      meshMap[mesh.name] = { glbUrl: mesh.glbUrl, name: mesh.name };
-    }
-  }
-
-  if (Object.keys(meshMap).length === 0) return html;
-
-  const meshScript = `<script>
-window.__GAMEFORGE_MESHES__ = ${JSON.stringify(meshMap)};
-</script>`;
-
-  if (/<head[^>]*>/i.test(html)) {
-    return html.replace(/<head([^>]*)>/i, `<head$1>${meshScript}`);
-  }
-  return `${meshScript}${html}`;
 }
 
 async function inlineImageUrls(html: string): Promise<string> {
@@ -229,8 +223,8 @@ async function hydrateRevision(revision: ProjectRevisionDocument) {
     controls: revision.controls,
     planningTodos: revision.planningTodos,
     generatedImages: revision.generatedImages,
-    generatedMeshes: revision.generatedMeshes ?? [],
     audioTracks: revision.audioTracks,
+    runtimeEnv: revision.runtimeEnv ?? {},
     currentCode: compiledHtml,
     chatMessages: (JSON.parse(rawChatMessages || "[]") as PersistedChatMessage[]),
     createdAt: revision.createdAt,
@@ -304,8 +298,8 @@ export async function createRevisionFromSnapshot(
     controls: snapshot.controls,
     planningTodos: snapshot.planningTodos,
     generatedImages: snapshot.generatedImages,
-    generatedMeshes: snapshot.generatedMeshes ?? [],
     audioTracks: snapshot.audioTracks,
+    runtimeEnv: snapshot.runtimeEnv,
     compiledHtml,
     chatTranscript: chatMessages,
     createdAt: now,
@@ -404,11 +398,11 @@ export async function publishProjectRevision(
     throw new Error("Revision not found");
   }
 
-  // Resolve the base HTML and inline all assets (images + audio + meshes) as data URLs
+  // Resolve the base HTML and inline all assets (images + audio) as data URLs
   const baseHtml = await resolveTextArtifact(revision.compiledHtml);
   const htmlWithImages = await inlineImageUrls(baseHtml);
-  const htmlWithSounds = await injectSoundsIntoHtml(htmlWithImages, revision.audioTracks ?? []);
-  const htmlWithAssets = await injectMeshesIntoHtml(htmlWithSounds, revision.generatedMeshes ?? []);
+  const htmlWithAssets = await injectSoundsIntoHtml(htmlWithImages, revision.audioTracks ?? []);
+  const multiplayerMeta = detectPublishedGameMultiplayer(htmlWithAssets);
 
   const publishedCompiledHtml = await createTextArtifactRef({
     kind: "compiled-html",
@@ -428,6 +422,10 @@ export async function publishProjectRevision(
     revisionNumber: revision.revisionNumber,
     title: revision.title,
     engine: revision.engine,
+    multiplayer: multiplayerMeta.multiplayer,
+    multiplayerProvider: multiplayerMeta.multiplayerProvider,
+    multiplayerRoomType: multiplayerMeta.multiplayerRoomType,
+    runtimeEnv: revision.runtimeEnv ?? {},
     compiledHtml: publishedCompiledHtml,
     createdAt: new Date(),
   };
@@ -466,6 +464,10 @@ export async function getPublishedGame(gameId: string | ObjectId) {
         title: doc.title,
         engine: doc.engine,
         code: await resolveTextArtifact(doc.compiledHtml),
+        multiplayer: doc.multiplayer ?? false,
+        multiplayerProvider: doc.multiplayerProvider ?? null,
+        multiplayerRoomType: doc.multiplayerRoomType ?? null,
+        runtimeEnv: doc.runtimeEnv ?? {},
         createdAt: doc.createdAt,
       };
     }
@@ -483,6 +485,10 @@ export async function getPublishedGame(gameId: string | ObjectId) {
     title: fallback.title,
     engine: fallback.engine,
     code: fallback.code,
+    multiplayer: fallback.multiplayer,
+    multiplayerProvider: fallback.multiplayerProvider,
+    multiplayerRoomType: fallback.multiplayerRoomType,
+    runtimeEnv: fallback.runtimeEnv ?? {},
     createdAt: fallback.createdAt,
   };
 }
@@ -515,8 +521,8 @@ export async function forkPublishedGame(gameId: string | ObjectId) {
         controls: revision.controls,
         planningTodos: [],
         generatedImages: revision.generatedImages,
-        generatedMeshes: revision.generatedMeshes ?? [],
         audioTracks: revision.audioTracks,
+        runtimeEnv: revision.runtimeEnv ?? {},
         chatMessages: [],
       };
 
@@ -535,8 +541,8 @@ export async function forkPublishedGame(gameId: string | ObjectId) {
     controls: [],
     planningTodos: [],
     generatedImages: [],
-    generatedMeshes: [],
     audioTracks: [],
+    runtimeEnv: {},
     chatMessages: [],
   };
 
@@ -545,13 +551,14 @@ export async function forkPublishedGame(gameId: string | ObjectId) {
 
 export async function createStandalonePublishedGame(snapshot: {
   title?: string | null;
-  engine?: "canvas2d" | "threejs" | "phaser";
+  engine?: "canvas2d" | "threejs";
   code: string;
 }) {
   const title =
     snapshot.title?.trim() ||
     snapshot.code.match(/<title>(.*?)<\/title>/i)?.[1]?.trim() ||
     "Untitled Game";
+  const multiplayerMeta = detectPublishedGameMultiplayer(snapshot.code);
   try {
     await ensureDbSetup();
     const db = getDb();
@@ -572,6 +579,10 @@ export async function createStandalonePublishedGame(snapshot: {
       revisionNumber: null,
       title,
       engine: snapshot.engine ?? "canvas2d",
+      multiplayer: multiplayerMeta.multiplayer,
+      multiplayerProvider: multiplayerMeta.multiplayerProvider,
+      multiplayerRoomType: multiplayerMeta.multiplayerRoomType,
+      runtimeEnv: {},
       compiledHtml,
       createdAt: new Date(),
     };
@@ -589,6 +600,10 @@ export async function createStandalonePublishedGame(snapshot: {
       title,
       engine: snapshot.engine ?? "canvas2d",
       code: snapshot.code,
+      multiplayer: multiplayerMeta.multiplayer,
+      multiplayerProvider: multiplayerMeta.multiplayerProvider,
+      multiplayerRoomType: multiplayerMeta.multiplayerRoomType,
+      runtimeEnv: {},
       createdAt: new Date(),
     });
     return { id, title };
@@ -613,6 +628,10 @@ export async function listPublishedGames(limit = 60) {
       revisionNumber: doc.revisionNumber,
       title: doc.title,
       engine: doc.engine,
+      multiplayer: doc.multiplayer ?? false,
+      multiplayerProvider: doc.multiplayerProvider ?? null,
+      multiplayerRoomType: doc.multiplayerRoomType ?? null,
+      runtimeEnv: doc.runtimeEnv ?? {},
       createdAt: doc.createdAt,
     }));
   } catch (error) {
@@ -627,6 +646,10 @@ export async function listPublishedGames(limit = 60) {
         revisionNumber: null,
         title: game.title,
         engine: game.engine,
+        multiplayer: game.multiplayer,
+        multiplayerProvider: game.multiplayerProvider,
+        multiplayerRoomType: game.multiplayerRoomType,
+        runtimeEnv: game.runtimeEnv ?? {},
         createdAt: game.createdAt,
       }));
   }

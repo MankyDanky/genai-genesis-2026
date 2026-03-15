@@ -1,10 +1,11 @@
 "use client";
 
-import { createContext, useContext, useState, useCallback, useRef, useEffect, type ReactNode, useMemo } from "react";
+import { createContext, useContext, useState, useCallback, type ReactNode, useMemo } from "react";
 import type { GameEngine } from "@/lib/game-engine";
 import type { ProjectFile, ProjectFileKind } from "@/lib/project-files";
 import { compileProjectToHtml, normalizeProjectFiles } from "@/lib/project-files";
 import type { PersistedChatMessage } from "@/lib/db/schema";
+import { getDefaultRuntimeEnv, normalizeRuntimeEnv, type RuntimeEnvMap } from "@/lib/runtime-env";
 
 export interface PlanningTodo {
   id: string;
@@ -48,23 +49,12 @@ export interface GeneratedImage {
   prompt: string;
 }
 
-export interface GeneratedMesh {
-  id: string;
-  name: string;
-  prompt: string;
-  status: "pending" | "refining" | "ready" | "error";
-  glbUrl: string | null;
-  thumbnailUrl: string | null;
-  error?: string | null;
-  createdAt: number;
-}
-
 export interface GameControl {
   action: string;
   keys: string;
 }
 
-type FocusPanel = "code" | "console" | "images" | "audio" | "meshes";
+type FocusPanel = "code" | "console" | "images" | "audio";
 
 export interface PanelFocusRequest {
   id: number;
@@ -77,13 +67,6 @@ export interface PendingFileWrite {
   content?: string;
 }
 
-export interface ChatTab {
-  id: string;
-  name: string;
-  sessionId: string;
-  messages: PersistedChatMessage[];
-}
-
 const DEFAULT_CONTROLS: GameControl[] = [
   { action: "Move", keys: "Arrow Keys / WASD" },
   { action: "Action", keys: "Space" },
@@ -92,11 +75,8 @@ const DEFAULT_CONTROLS: GameControl[] = [
 
 interface GameForgeContextValue {
   currentCode: string | null;
-  previousCode: string | null;
-  streamingCode: string | null;
   currentEngine: GameEngine;
   projectFiles: ProjectFile[];
-  previousProjectFiles: ProjectFile[];
   pendingFileWrites: PendingFileWrite[];
   planningTodos: PlanningTodo[];
   consoleLogs: ConsoleLogEntry[];
@@ -112,17 +92,9 @@ interface GameForgeContextValue {
   projectStatusMessage: string | null;
   projectError: string | null;
   projectBusyAction: "save" | "load" | "publish" | null;
+  runtimeEnv: RuntimeEnvMap;
   chatMessages: PersistedChatMessage[];
   chatSessionId: string;
-  chatTabs: ChatTab[];
-  activeChatTabId: string;
-  currentFps: number | null;
-  fpsHistory: number[];
-  isPaused: boolean;
-  sandboxReloadTrigger: number;
-  screenshotRequest: number;
-  pauseRequest: number;
-  setStreamingCode: (code: string | null) => void;
   onCodeUpdate: (code: string, engine?: GameEngine) => void;
   onProjectFilesUpdate: (files: ProjectFile[], engine?: GameEngine, deletePaths?: string[]) => void;
   patchProjectFiles: (files: ProjectFile[], engine?: GameEngine) => void;
@@ -154,34 +126,20 @@ interface GameForgeContextValue {
   addAudioTrack: (track: AudioTrack) => void;
   removeAudioTrack: (id: string) => void;
   addImage: (image: GeneratedImage) => void;
-  generatedMeshes: GeneratedMesh[];
-  addMesh: (mesh: GeneratedMesh) => void;
-  updateMesh: (mesh: GeneratedMesh) => void;
-  removeMesh: (id: string) => void;
   setControls: (controls: GameControl[]) => void;
   setActiveCodePath: (path: string | null) => void;
   focusCodeFile: (path: string) => void;
   focusConsolePanel: () => void;
   focusImagesPanel: () => void;
   focusAudioPanel: () => void;
-  focusMeshesPanel: () => void;
   setPendingFileWrites: (
     entries: Array<{ path: string; status: "streaming" | "finalizing"; content?: string }>
   ) => void;
   clearPendingFileWrites: (paths?: string[]) => void;
-  updateFps: (fps: number) => void;
-  triggerSandboxReload: () => void;
-  triggerScreenshot: () => void;
-  togglePause: () => void;
-  setIsPaused: (paused: boolean) => void;
-  onScreenshotReady: (dataUrl: string) => void;
-  onRepromptAudio: (message: string) => void;
-  setRepromptAudioHandler: (handler: ((message: string) => void) | null) => void;
+  updateRuntimeEnv: (set: RuntimeEnvMap, unset?: string[]) => void;
+  setRuntimeEnvVar: (key: string, value: string) => void;
+  removeRuntimeEnvVar: (key: string) => void;
   setChatMessages: (messages: PersistedChatMessage[]) => void;
-  createChatTab: () => string;
-  deleteChatTab: (id: string) => void;
-  switchChatTab: (id: string) => void;
-  renameChatTab: (id: string, name: string) => void;
   saveProjectRevision: () => Promise<{
     projectId: string;
     revisionNumber: number;
@@ -307,6 +265,16 @@ function areChatMessagesEqual(a: PersistedChatMessage[], b: PersistedChatMessage
   return true;
 }
 
+function areRuntimeEnvMapsEqual(a: RuntimeEnvMap, b: RuntimeEnvMap): boolean {
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  for (const key of aKeys) {
+    if (a[key] !== b[key]) return false;
+  }
+  return true;
+}
+
 async function parseJsonResponse<T>(response: Response): Promise<T> {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -329,7 +297,6 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [audioTracks, setAudioTracks] = useState<AudioTrack[]>([]);
   const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>([]);
-  const [generatedMeshes, setGeneratedMeshes] = useState<GeneratedMesh[]>([]);
   const [controls, setControlsState] = useState<GameControl[]>(DEFAULT_CONTROLS);
   const [focusedCodePath, setFocusedCodePath] = useState<string | null>(null);
   const [activeCodePath, setActiveCodePath] = useState<string | null>(null);
@@ -341,61 +308,14 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
   const [projectStatusMessage, setProjectStatusMessage] = useState<string | null>(null);
   const [projectError, setProjectError] = useState<string | null>(null);
   const [projectBusyAction, setProjectBusyAction] = useState<"save" | "load" | "publish" | null>(null);
-  const [chatTabs, setChatTabs] = useState<ChatTab[]>(() => {
-    const initialSessionId = createChatSessionId();
-    return [{ id: initialSessionId, name: "Chat 1", sessionId: initialSessionId, messages: [] }];
-  });
-  const [activeChatTabId, setActiveChatTabId] = useState<string>(() => chatTabs[0].id);
-
-  const activeTab = chatTabs.find((tab) => tab.id === activeChatTabId) ?? chatTabs[0];
-  const chatMessages = activeTab.messages;
-  const chatSessionId = activeTab.sessionId;
-  const [currentFps, setCurrentFps] = useState<number | null>(null);
-  const [fpsHistory, setFpsHistory] = useState<number[]>([]);
-  const [isPaused, setIsPaused] = useState(false);
-  const [sandboxReloadTrigger, setSandboxReloadTrigger] = useState(0);
-  const [screenshotRequest, setScreenshotRequest] = useState(0);
-  const [pauseRequest, setPauseRequest] = useState(0);
-  const [previousCode, setPreviousCode] = useState<string | null>(null);
-  const [previousProjectFiles, setPreviousProjectFiles] = useState<ProjectFile[]>([]);
-  const [streamingCode, setStreamingCodeState] = useState<string | null>(null);
-  const previousCodeRef = useRef<string | null>(null);
-  const previousProjectFilesRef = useRef<ProjectFile[]>([]);
-  const repromptAudioHandlerRef = useRef<((message: string) => void) | null>(null);
-
-  const setStreamingCode = useCallback((code: string | null) => {
-    setStreamingCodeState(code);
-  }, []);
-
-  useEffect(() => {
-    const prev = previousCodeRef.current;
-    if (currentCode !== null && prev !== null && prev !== currentCode) {
-      setPreviousCode(prev);
-    }
-    if (currentCode === null) {
-      setPreviousCode(null);
-    }
-    previousCodeRef.current = currentCode;
-  }, [currentCode]);
-
-  useEffect(() => {
-    const prev = previousProjectFilesRef.current;
-    if (projectFiles.length > 0 && prev.length > 0 && !areProjectFilesEqual(prev, projectFiles)) {
-      setPreviousProjectFiles(prev);
-    }
-    if (projectFiles.length === 0) {
-      setPreviousProjectFiles([]);
-    }
-    previousProjectFilesRef.current = projectFiles;
-  }, [projectFiles]);
+  const [runtimeEnv, setRuntimeEnv] = useState<RuntimeEnvMap>(() => getDefaultRuntimeEnv());
+  const [chatMessages, setChatMessagesState] = useState<PersistedChatMessage[]>([]);
+  const [chatSessionId, setChatSessionId] = useState<string>(() => createChatSessionId());
 
   const onCodeUpdate = useCallback((code: string, engine?: GameEngine) => {
     setCurrentCode(code);
     setProjectFiles([{ path: "index.html", content: code, kind: "html" }]);
     setConsoleLogs([]);
-    setCurrentFps(null);
-    setFpsHistory([]);
-    setIsPaused(false);
     if (engine) setCurrentEngine(engine);
   }, []);
 
@@ -584,38 +504,6 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     setConsoleLogs([]);
   }, []);
 
-  const updateFps = useCallback((fps: number) => {
-    setCurrentFps(fps);
-    setFpsHistory((prev) => {
-      const next = [...prev, fps];
-      return next.length > 60 ? next.slice(next.length - 60) : next;
-    });
-  }, []);
-
-  const triggerSandboxReload = useCallback(() => {
-    setSandboxReloadTrigger((prev) => prev + 1);
-    setCurrentFps(null);
-    setFpsHistory([]);
-    setConsoleLogs([]);
-    setIsPaused(false);
-  }, []);
-
-  const triggerScreenshot = useCallback(() => {
-    setScreenshotRequest((prev) => prev + 1);
-  }, []);
-
-  const togglePause = useCallback(() => {
-    setIsPaused((prev) => !prev);
-    setPauseRequest((prev) => prev + 1);
-  }, []);
-
-  const onScreenshotReady = useCallback((dataUrl: string) => {
-    const a = document.createElement("a");
-    a.href = dataUrl;
-    a.download = `screenshot-${Date.now()}.png`;
-    a.click();
-  }, []);
-
   const onEngineUpdate = useCallback((engine: GameEngine) => {
     setCurrentEngine(engine);
   }, []);
@@ -653,24 +541,6 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const addMesh = useCallback((mesh: GeneratedMesh) => {
-    setGeneratedMeshes((prev) => {
-      const existing = prev.find((m) => m.id === mesh.id);
-      if (!existing) return [mesh, ...prev];
-      return prev.map((m) => (m.id === mesh.id ? { ...existing, ...mesh, createdAt: existing.createdAt } : m));
-    });
-  }, []);
-
-  const updateMesh = useCallback((mesh: GeneratedMesh) => {
-    setGeneratedMeshes((prev) =>
-      prev.map((m) => (m.id === mesh.id ? { ...m, ...mesh } : m))
-    );
-  }, []);
-
-  const removeMesh = useCallback((id: string) => {
-    setGeneratedMeshes((prev) => prev.filter((m) => m.id !== id));
-  }, []);
-
   const setControls = useCallback((next: GameControl[]) => {
     const normalized = next
       .filter((item) => item.action && item.keys)
@@ -703,10 +573,6 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     setPanelFocusRequest({ id: Date.now(), panel: "audio" });
   }, []);
 
-  const focusMeshesPanel = useCallback(() => {
-    setPanelFocusRequest({ id: Date.now(), panel: "meshes" });
-  }, []);
-
   const setPendingFileWrites = useCallback((
     entries: Array<{ path: string; status: "streaming" | "finalizing"; content?: string }>
   ) => {
@@ -736,72 +602,47 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     setPendingFileWritesState((prev) => prev.filter((entry) => !remove.has(entry.path)));
   }, []);
 
-  const setRepromptAudioHandler = useCallback((handler: ((message: string) => void) | null) => {
-    repromptAudioHandlerRef.current = handler;
+  const updateRuntimeEnv = useCallback((set: RuntimeEnvMap, unset: string[] = []) => {
+    const normalizedSet = normalizeRuntimeEnv(set);
+    const normalizedUnset = unset
+      .map((key) => key.trim())
+      .filter((key) => key.length > 0);
+    if (Object.keys(normalizedSet).length === 0 && normalizedUnset.length === 0) return;
+
+    setRuntimeEnv((prev) => {
+      const next = { ...prev, ...normalizedSet };
+      for (const key of normalizedUnset) delete next[key];
+      return areRuntimeEnvMapsEqual(prev, next) ? prev : next;
+    });
   }, []);
 
-  const onRepromptAudio = useCallback((message: string) => {
-    repromptAudioHandlerRef.current?.(message);
+  const setRuntimeEnvVar = useCallback((key: string, value: string) => {
+    const normalizedKey = key.trim();
+    if (!normalizedKey) return;
+    setRuntimeEnv((prev) => {
+      if (prev[normalizedKey] === value) return prev;
+      return { ...prev, [normalizedKey]: value };
+    });
+  }, []);
+
+  const removeRuntimeEnvVar = useCallback((key: string) => {
+    const normalizedKey = key.trim();
+    if (!normalizedKey) return;
+    setRuntimeEnv((prev) => {
+      if (!(normalizedKey in prev)) return prev;
+      const next = { ...prev };
+      delete next[normalizedKey];
+      return areRuntimeEnvMapsEqual(prev, next) ? prev : next;
+    });
   }, []);
 
   const setChatMessages = useCallback((messages: PersistedChatMessage[]) => {
     const normalized = normalizeChatMessages(messages);
-    setChatTabs((prev) =>
-      prev.map((tab) =>
-        tab.id === activeChatTabId && !areChatMessagesEqual(tab.messages, normalized)
-          ? { ...tab, messages: normalized }
-          : tab
-      )
-    );
-  }, [activeChatTabId]);
-
-  const createChatTab = useCallback(() => {
-    const sessionId = createChatSessionId();
-    const tabCount = chatTabs.length;
-    const newTab: ChatTab = {
-      id: sessionId,
-      name: `Chat ${tabCount + 1}`,
-      sessionId,
-      messages: [],
-    };
-    setChatTabs((prev) => [...prev, newTab]);
-    setActiveChatTabId(sessionId);
-    return sessionId;
-  }, [chatTabs.length]);
-
-  const deleteChatTab = useCallback((id: string) => {
-    setChatTabs((prev) => {
-      if (prev.length <= 1) return prev;
-      const idx = prev.findIndex((tab) => tab.id === id);
-      if (idx < 0) return prev;
-      const next = prev.filter((tab) => tab.id !== id);
-      if (id === activeChatTabId) {
-        const newIdx = Math.min(idx, next.length - 1);
-        setActiveChatTabId(next[newIdx].id);
-      }
-      return next;
-    });
-  }, [activeChatTabId]);
-
-  const switchChatTab = useCallback((id: string) => {
-    setActiveChatTabId(id);
-  }, []);
-
-  const renameChatTab = useCallback((id: string, name: string) => {
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    setChatTabs((prev) =>
-      prev.map((tab) => (tab.id === id ? { ...tab, name: trimmed } : tab))
-    );
+    setChatMessagesState((prev) => (areChatMessagesEqual(prev, normalized) ? prev : normalized));
   }, []);
 
   const resetWorkspace = useCallback(() => {
     setCurrentCode(null);
-    setPreviousCode(null);
-    setPreviousProjectFiles([]);
-    setStreamingCodeState(null);
-    previousCodeRef.current = null;
-    previousProjectFilesRef.current = [];
     setCurrentEngine("canvas2d");
     setProjectFiles([]);
     setPendingFileWritesState([]);
@@ -810,7 +651,6 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     setAssets([]);
     setAudioTracks([]);
     setGeneratedImages([]);
-    setGeneratedMeshes([]);
     setControlsState(DEFAULT_CONTROLS);
     setFocusedCodePath(null);
     setActiveCodePath(null);
@@ -822,12 +662,9 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     setProjectStatusMessage(null);
     setProjectError(null);
     setProjectBusyAction(null);
-    const freshSessionId = createChatSessionId();
-    setChatTabs([{ id: freshSessionId, name: "Chat 1", sessionId: freshSessionId, messages: [] }]);
-    setActiveChatTabId(freshSessionId);
-    setCurrentFps(null);
-    setFpsHistory([]);
-    setIsPaused(false);
+    setRuntimeEnv(getDefaultRuntimeEnv());
+    setChatMessagesState([]);
+    setChatSessionId(createChatSessionId());
   }, []);
 
   const clearProjectFeedback = useCallback(() => {
@@ -844,16 +681,12 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     controls: GameControl[];
     planningTodos: PlanningTodo[];
     generatedImages: GeneratedImage[];
-    generatedMeshes?: GeneratedMesh[];
     audioTracks: AudioTrack[];
+    runtimeEnv?: RuntimeEnvMap;
     currentCode: string;
     chatMessages: PersistedChatMessage[];
   }) => {
     const normalizedFiles = normalizeProjectFiles(snapshot.projectFiles);
-    setPreviousCode(null);
-    setPreviousProjectFiles([]);
-    previousCodeRef.current = null;
-    previousProjectFilesRef.current = [];
     setCurrentCode(snapshot.currentCode || compileProjectToHtml(normalizedFiles));
     setCurrentEngine(snapshot.engine);
     setProjectFiles(normalizedFiles);
@@ -863,7 +696,10 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     setAssets([]);
     setAudioTracks(snapshot.audioTracks);
     setGeneratedImages(snapshot.generatedImages);
-    setGeneratedMeshes(snapshot.generatedMeshes ?? []);
+    setRuntimeEnv({
+      ...getDefaultRuntimeEnv(),
+      ...normalizeRuntimeEnv(snapshot.runtimeEnv),
+    });
     setControlsState(snapshot.controls.length > 0 ? snapshot.controls : DEFAULT_CONTROLS);
     setFocusedCodePath(null);
     setActiveCodePath(normalizedFiles[0]?.path ?? null);
@@ -872,10 +708,8 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     setCurrentRevisionNumber(snapshot.revisionNumber);
     setLastPublishedGameId(null);
     setLastPublishedPlayPath(null);
-    const loadedSessionId = createChatSessionId();
-    const loadedMessages = normalizeChatMessages(snapshot.chatMessages);
-    setChatTabs([{ id: loadedSessionId, name: "Chat 1", sessionId: loadedSessionId, messages: loadedMessages }]);
-    setActiveChatTabId(loadedSessionId);
+    setChatMessagesState(normalizeChatMessages(snapshot.chatMessages));
+    setChatSessionId(createChatSessionId());
   }, []);
 
   const buildSnapshotPayload = useCallback(() => ({
@@ -886,17 +720,17 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     controls,
     planningTodos,
     generatedImages,
-    generatedMeshes,
     audioTracks,
+    runtimeEnv,
     chatMessages,
   }), [
     audioTracks,
+    runtimeEnv,
     chatMessages,
     controls,
     currentCode,
     currentEngine,
     generatedImages,
-    generatedMeshes,
     planningTodos,
     projectFiles,
   ]);
@@ -1010,6 +844,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
         planningTodos: PlanningTodo[];
         generatedImages: GeneratedImage[];
         audioTracks: AudioTrack[];
+        runtimeEnv?: RuntimeEnvMap;
         currentCode: string;
         chatMessages: PersistedChatMessage[];
       }>(
@@ -1039,11 +874,8 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
   const value = useMemo(
     () => ({
       currentCode,
-      previousCode,
-      streamingCode,
       currentEngine,
       projectFiles,
-      previousProjectFiles,
       pendingFileWrites,
       planningTodos,
       consoleLogs,
@@ -1059,17 +891,9 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       projectStatusMessage,
       projectError,
       projectBusyAction,
+      runtimeEnv,
       chatMessages,
       chatSessionId,
-      chatTabs,
-      activeChatTabId,
-      currentFps,
-      fpsHistory,
-      isPaused,
-      sandboxReloadTrigger,
-      screenshotRequest,
-      pauseRequest,
-      setStreamingCode,
       onCodeUpdate,
       onProjectFilesUpdate,
       patchProjectFiles,
@@ -1088,32 +912,18 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       addAudioTrack,
       removeAudioTrack,
       addImage,
-      generatedMeshes,
-      addMesh,
-      updateMesh,
-      removeMesh,
       setControls,
       setActiveCodePath,
       focusCodeFile,
       focusConsolePanel,
       focusImagesPanel,
       focusAudioPanel,
-      focusMeshesPanel,
       setPendingFileWrites,
       clearPendingFileWrites,
-      updateFps,
-      triggerSandboxReload,
-      triggerScreenshot,
-      togglePause,
-      setIsPaused,
-      onScreenshotReady,
-      onRepromptAudio: onRepromptAudio,
-      setRepromptAudioHandler,
+      updateRuntimeEnv,
+      setRuntimeEnvVar,
+      removeRuntimeEnvVar,
       setChatMessages,
-      createChatTab,
-      deleteChatTab,
-      switchChatTab,
-      renameChatTab,
       saveProjectRevision,
       publishProject,
       loadProject,
@@ -1122,11 +932,8 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     }),
     [
       currentCode,
-      previousCode,
-      streamingCode,
       currentEngine,
       projectFiles,
-      previousProjectFiles,
       pendingFileWrites,
       planningTodos,
       consoleLogs,
@@ -1142,17 +949,9 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       projectStatusMessage,
       projectError,
       projectBusyAction,
+      runtimeEnv,
       chatMessages,
       chatSessionId,
-      chatTabs,
-      activeChatTabId,
-      currentFps,
-      fpsHistory,
-      isPaused,
-      sandboxReloadTrigger,
-      screenshotRequest,
-      pauseRequest,
-      setStreamingCode,
       onCodeUpdate,
       onProjectFilesUpdate,
       patchProjectFiles,
@@ -1171,32 +970,18 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       addAudioTrack,
       removeAudioTrack,
       addImage,
-      generatedMeshes,
-      addMesh,
-      updateMesh,
-      removeMesh,
       setControls,
       setActiveCodePath,
       focusCodeFile,
       focusConsolePanel,
       focusImagesPanel,
-      focusMeshesPanel,
       focusAudioPanel,
       setPendingFileWrites,
       clearPendingFileWrites,
-      updateFps,
-      triggerSandboxReload,
-      triggerScreenshot,
-      togglePause,
-      setIsPaused,
-      onScreenshotReady,
-      onRepromptAudio,
-      setRepromptAudioHandler,
+      updateRuntimeEnv,
+      setRuntimeEnvVar,
+      removeRuntimeEnvVar,
       setChatMessages,
-      createChatTab,
-      deleteChatTab,
-      switchChatTab,
-      renameChatTab,
       saveProjectRevision,
       publishProject,
       loadProject,

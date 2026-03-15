@@ -19,56 +19,159 @@ function sanitizeRoomType(roomType: string): string {
 export function buildPartyKitScaffold(inputRoomType = "game"): MultiplayerScaffold {
   const roomType = sanitizeRoomType(inputRoomType);
 
-  const clientFile = `// PartyKit multiplayer client (browser-safe)
-export function createPartySession({
+  const clientFile = `// PartyKit multiplayer client (browser-safe, non-module)
+(function () {
+function createPartySession({
   host = (window.__PARTYKIT_HOST__ || "localhost:1999"),
-  protocol = (window.__PARTYKIT_PROTOCOL__ || (location.protocol === "https:" ? "wss" : "ws")),
+  protocol = (window.__PARTYKIT_PROTOCOL__ || ""),
   roomType = "${roomType}",
   roomId,
   playerId = crypto.randomUUID(),
   onState,
   onPlayers,
+  onPlayerState,
   onEvent,
 } = {}) {
-  if (!roomId) throw new Error("roomId is required");
+  const fallbackRoomId =
+    typeof window !== "undefined" && typeof window.__PARTYKIT_ROOM_ID__ === "string"
+      ? window.__PARTYKIT_ROOM_ID__
+      : "";
+  const resolvedRoomId = roomId || fallbackRoomId;
+  if (!resolvedRoomId) throw new Error("roomId is required");
+  const isLocalHost = /^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(host);
+  const resolvedProtocol =
+    protocol ||
+    (location.protocol === "https:" || !isLocalHost ? "wss" : "ws");
 
-  const wsUrl = \`\${protocol}://\${host}/parties/\${roomType}/\${encodeURIComponent(roomId)}\`;
-  const socket = new WebSocket(wsUrl);
+  const wsCandidates = [
+    \`\${resolvedProtocol}://\${host}/parties/\${roomType}/\${encodeURIComponent(resolvedRoomId)}\`,
+    \`\${resolvedProtocol}://\${host}/parties/game/\${encodeURIComponent(resolvedRoomId)}\`,
+    \`\${resolvedProtocol}://\${host}/party/\${encodeURIComponent(resolvedRoomId)}\`,
+  ];
+  let socket = null;
   let connected = false;
+  let currentWsUrl = "";
+  let closedManually = false;
+  let candidateIndex = 0;
+  const players = new Map();
+  let roomState = {};
 
   const send = (type, payload = {}) => {
     const message = JSON.stringify({ type, playerId, payload, ts: Date.now() });
-    if (socket.readyState === WebSocket.OPEN) socket.send(message);
+    if (socket && socket.readyState === WebSocket.OPEN) socket.send(message);
   };
 
-  socket.addEventListener("open", () => {
-    connected = true;
-    send("join", { playerId });
-  });
-
-  socket.addEventListener("close", () => {
-    connected = false;
-  });
-
-  socket.addEventListener("message", (event) => {
-    let message;
-    try {
-      message = JSON.parse(event.data);
-    } catch {
+  const connectAt = (index) => {
+    if (index >= wsCandidates.length) {
+      if (typeof onEvent === "function") {
+        onEvent({ type: "connection_error", payload: { tried: wsCandidates } });
+      }
       return;
     }
 
-    if (message?.type === "state" && typeof onState === "function") onState(message.payload);
-    if (message?.type === "players" && typeof onPlayers === "function") onPlayers(message.payload);
-    if (typeof onEvent === "function") onEvent(message);
-  });
+    candidateIndex = index;
+    currentWsUrl = wsCandidates[index];
+    socket = new WebSocket(currentWsUrl);
+
+    socket.addEventListener("open", () => {
+      connected = true;
+      send("join", { playerId });
+      if (typeof onEvent === "function") {
+        onEvent({ type: "connected", payload: { wsUrl: currentWsUrl, candidateIndex } });
+      }
+    });
+
+    socket.addEventListener("close", () => {
+      const wasConnected = connected;
+      connected = false;
+      if (!closedManually && !wasConnected) {
+        connectAt(index + 1);
+      }
+    });
+
+    socket.addEventListener("error", () => {
+      if (typeof onEvent === "function") {
+        onEvent({ type: "socket_error", payload: { wsUrl: currentWsUrl, candidateIndex } });
+      }
+    });
+
+    socket.addEventListener("message", (event) => {
+      let message;
+      try {
+        message = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+
+      if (message?.type === "state") {
+        roomState = message.payload || {};
+        if (typeof onState === "function") onState(roomState);
+      }
+
+      if (message?.type === "players") {
+        const list = Array.isArray(message.payload) ? message.payload : [];
+        const nextIds = new Set(list.map((item) => item?.id || item).filter(Boolean));
+        for (const id of Array.from(players.keys())) {
+          if (!nextIds.has(id)) players.delete(id);
+        }
+        for (const raw of list) {
+          const id = raw?.id || raw;
+          if (!id) continue;
+          const prev = players.get(id) || {};
+          const merged = typeof raw === "object" ? { ...prev, ...raw, id } : { ...prev, id };
+          players.set(id, merged);
+        }
+        if (typeof onPlayers === "function") onPlayers(Array.from(players.values()));
+      }
+
+      if (message?.type === "player_state") {
+        const payload = message.payload || {};
+        const id = payload.id || message.playerId;
+        if (id) {
+          const prev = players.get(id) || { id };
+          const merged = { ...prev, ...payload, id };
+          players.set(id, merged);
+          if (typeof onPlayerState === "function") onPlayerState(merged);
+          if (typeof onPlayers === "function") onPlayers(Array.from(players.values()));
+        }
+      }
+
+      if (message?.type === "presence") {
+        const table = message.payload || {};
+        for (const id of Object.keys(table)) {
+          const prev = players.get(id) || { id };
+          players.set(id, { ...prev, presence: table[id] });
+        }
+        if (typeof onPlayers === "function") onPlayers(Array.from(players.values()));
+      }
+
+      if (typeof onEvent === "function") onEvent(message);
+    });
+  };
+
+  connectAt(0);
 
   return {
     get playerId() {
       return playerId;
     },
+    get roomId() {
+      return resolvedRoomId;
+    },
     get connected() {
       return connected;
+    },
+    get wsUrl() {
+      return currentWsUrl;
+    },
+    getState() {
+      return roomState;
+    },
+    getPlayers() {
+      return Array.from(players.values());
+    },
+    getPlayer(id) {
+      return players.get(id) || null;
     },
     sendInput(input) {
       send("input", input);
@@ -79,11 +182,18 @@ export function createPartySession({
     updatePresence(presence) {
       send("presence", presence);
     },
+    updatePlayerState(patch) {
+      send("player_state", patch);
+    },
     close() {
-      socket.close();
+      closedManually = true;
+      if (socket) socket.close();
     },
   };
 }
+
+window.GameForgePartySession = { createPartySession };
+})();
 `;
 
   const roomFile = `// PartyKit room server for room type: "${roomType}"
@@ -93,6 +203,7 @@ export default class GameRoom {
     this.room = room;
     this.players = new Map();
     this.presence = {};
+    this.playerState = {};
     this.state = {
       seed: Math.floor(Math.random() * 1000000),
       startedAt: Date.now(),
@@ -103,7 +214,8 @@ export default class GameRoom {
   onConnect(conn) {
     // Send the latest room state to newly connected clients.
     conn.send(JSON.stringify({ type: "state", payload: this.state }));
-    conn.send(JSON.stringify({ type: "players", payload: Array.from(this.players.keys()) }));
+    conn.send(JSON.stringify({ type: "players", payload: this.getPlayersPayload() }));
+    conn.send(JSON.stringify({ type: "presence", payload: this.presence }));
   }
 
   onMessage(raw, sender) {
@@ -116,7 +228,8 @@ export default class GameRoom {
 
     if (msg?.type === "join") {
       const id = msg.playerId || sender.id;
-      this.players.set(id, { id, joinedAt: Date.now() });
+      this.players.set(id, { id, connId: sender.id, joinedAt: Date.now() });
+      this.playerState[id] = this.playerState[id] || { id };
       this.broadcastPlayers();
       return;
     }
@@ -143,6 +256,15 @@ export default class GameRoom {
           ts: msg.ts || Date.now(),
         })
       );
+      return;
+    }
+
+    if (msg?.type === "player_state") {
+      const id = msg.playerId || sender.id;
+      const patch = msg.payload || {};
+      const next = { ...(this.playerState[id] || { id }), ...patch, id, updatedAt: Date.now() };
+      this.playerState[id] = next;
+      this.room.broadcast(JSON.stringify({ type: "player_state", playerId: id, payload: next }));
     }
   }
 
@@ -150,13 +272,28 @@ export default class GameRoom {
     for (const [id, player] of this.players.entries()) {
       if (player?.connId === conn.id || id === conn.id) {
         this.players.delete(id);
+        delete this.playerState[id];
+        delete this.presence[id];
       }
     }
     this.broadcastPlayers();
+    this.room.broadcast(JSON.stringify({ type: "presence", payload: this.presence }));
   }
 
   broadcastPlayers() {
-    this.room.broadcast(JSON.stringify({ type: "players", payload: Array.from(this.players.keys()) }));
+    this.room.broadcast(JSON.stringify({ type: "players", payload: this.getPlayersPayload() }));
+  }
+
+  getPlayersPayload() {
+    return Array.from(this.players.keys()).map((id) => {
+      const base = this.players.get(id) || { id };
+      return {
+        id,
+        ...base,
+        state: this.playerState[id] || null,
+        presence: this.presence[id] || null,
+      };
+    });
   }
 }
 `;
@@ -165,6 +302,9 @@ export default class GameRoom {
   "$schema": "https://www.partykit.io/schema.json",
   "name": "game-forge-room",
   "main": "partykit/room.js",
+  "parties": {
+    "game": "partykit/room.js"
+  },
   "compatibilityDate": "2026-03-14"
 }
 `;
@@ -180,8 +320,8 @@ export default class GameRoom {
     quickStart: [
       "Set NEXT_PUBLIC_PARTYKIT_HOST (for local dev use localhost:1999).",
       "Run PartyKit room server with: pnpm dlx partykit dev",
-      "In your game code, import src/net/party-session.js and call createPartySession({ roomId, onState, onPlayers }).",
+      "In index.html, include <script src=\"src/net/party-session.js\"></script>, then call window.GameForgePartySession.createPartySession({ roomId, onState, onPlayers, onPlayerState }).",
+      "Use session.getPlayers()/getPlayer(id) for rendering remote players, and session.updatePlayerState({ x, y, ... }) to replicate local player motion.",
     ],
   };
 }
-
