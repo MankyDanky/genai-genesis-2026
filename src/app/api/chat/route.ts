@@ -105,14 +105,21 @@ interface PlanningTodoPayload {
 }
 
 type ComposerMode = "agent" | "plan" | "debug" | "ask";
-type ModelChoice = "claude-sonnet-4-6" | "grok-code-fast-1";
+type ModelChoice =
+  | "claude-sonnet-4-6"
+  | "grok-code-fast-1"
+  | "grok-4.20-multi-agent-beta-0309";
 
 function isComposerMode(value: unknown): value is ComposerMode {
   return value === "agent" || value === "plan" || value === "debug" || value === "ask";
 }
 
 function isModelChoice(value: unknown): value is ModelChoice {
-  return value === "claude-sonnet-4-6" || value === "grok-code-fast-1";
+  return (
+    value === "claude-sonnet-4-6" ||
+    value === "grok-code-fast-1" ||
+    value === "grok-4.20-multi-agent-beta-0309"
+  );
 }
 
 function safeJsonPreview(value: unknown, max = 300): string {
@@ -685,9 +692,11 @@ export async function POST(req: Request) {
     const sanitizedMessages = sanitizeMessagesForModel(messages);
     const modelMessages = await convertToModelMessages(sanitizedMessages);
 
-    if (modelChoice === "grok-code-fast-1" && !process.env.XAI_API_KEY) {
+    const isXaiModel = modelChoice.startsWith("grok-");
+
+    if (isXaiModel && !process.env.XAI_API_KEY) {
       return new Response(
-        JSON.stringify({ error: "XAI_API_KEY is required when modelChoice is 'grok-code-fast-1'" }),
+        JSON.stringify({ error: `XAI_API_KEY is required when modelChoice is '${modelChoice}'` }),
         {
           status: 400,
           headers: { "Content-Type": "application/json" },
@@ -695,10 +704,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const selectedModel =
-      modelChoice === "grok-code-fast-1"
-        ? xai(modelChoice)
-        : anthropic(modelChoice);
+    const selectedModel = isXaiModel ? xai(modelChoice) : anthropic(modelChoice);
 
     console.log("[API] model message summary", {
       requestId,
