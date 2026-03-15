@@ -84,7 +84,7 @@ function inferImportedKind(path: string): ProjectFile["kind"] {
   if (lower.endsWith(".json") || lower.endsWith(".toml") || lower.endsWith(".yaml") || lower.endsWith(".yml")) {
     return "config";
   }
-  if (lower.startsWith("assets/")) return "asset";
+  if (lower.startsWith("assets/") || /(png|jpg|jpeg|gif|svg|webp|mp3|wav|ogg|glb|gltf|obj|fbx)$/i.test(lower)) return "asset";
   return "other";
 }
 
@@ -94,6 +94,16 @@ function isLikelyBinaryPath(path: string): boolean {
     if (lower.endsWith(ext)) return true;
   }
   return false;
+}
+
+function arrayBufferToBinaryString(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  let output = "";
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    output += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return output;
 }
 
 function writeAscii(target: Uint8Array, offset: number, length: number, value: string) {
@@ -604,6 +614,8 @@ export function CodePanel() {
 
   const explorerRef = useRef<HTMLDivElement>(null);
   const createInputRef = useRef<HTMLInputElement>(null);
+  const uploadMenuButtonRef = useRef<HTMLButtonElement>(null);
+  const uploadMenuRef = useRef<HTMLDivElement>(null);
   const fileUploadInputRef = useRef<HTMLInputElement>(null);
   const folderUploadInputRef = useRef<HTMLInputElement>(null);
   const dragDepthRef = useRef(0);
@@ -621,6 +633,8 @@ export function CodePanel() {
   const [draggedFilePath, setDraggedFilePath] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [isFolderDropActive, setIsFolderDropActive] = useState(false);
+  const [isUploadMenuOpen, setIsUploadMenuOpen] = useState(false);
+  const [uploadMenuPos, setUploadMenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const canPortal = typeof document !== "undefined";
 
   const tree = useMemo(
@@ -936,14 +950,17 @@ export function CodePanel() {
     for (const entry of entries) {
       const normalizedPath = normalizeUserPath(entry.path);
       if (!normalizedPath || normalizedPath.endsWith("/")) continue;
-      if (isLikelyBinaryPath(normalizedPath)) continue;
 
       try {
-        const content = await entry.file.text();
+        const kind = inferImportedKind(normalizedPath);
+        const content =
+          kind === "asset" || isLikelyBinaryPath(normalizedPath)
+            ? arrayBufferToBinaryString(await entry.file.arrayBuffer())
+            : await entry.file.text();
         importedFiles.push({
           path: normalizedPath,
           content,
-          kind: inferImportedKind(normalizedPath),
+          kind,
         });
       } catch {
         // Skip unreadable entries.
@@ -1046,6 +1063,19 @@ export function CodePanel() {
     input.directory = true;
   }, []);
 
+  useEffect(() => {
+    if (!isUploadMenuOpen) return;
+    const onMouseDown = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (uploadMenuButtonRef.current?.contains(target)) return;
+      if (uploadMenuRef.current?.contains(target)) return;
+      setIsUploadMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onMouseDown);
+    return () => document.removeEventListener("mousedown", onMouseDown);
+  }, [isUploadMenuOpen]);
+
   const handleDownloadAll = useCallback(() => {
     if (projectFiles.length === 0) return;
     const archive = buildTarBlob(
@@ -1122,18 +1152,22 @@ export function CodePanel() {
                 Download
               </button>
               <button
+                ref={uploadMenuButtonRef}
                 type="button"
-                onClick={() => fileUploadInputRef.current?.click()}
+                onClick={() => {
+                  if (isUploadMenuOpen) {
+                    setIsUploadMenuOpen(false);
+                    return;
+                  }
+                  const rect = uploadMenuButtonRef.current?.getBoundingClientRect();
+                  if (rect) {
+                    setUploadMenuPos({ x: rect.left, y: rect.bottom + 4 });
+                  }
+                  setIsUploadMenuOpen(true);
+                }}
                 className="px-1.5 py-0.5 text-[9px] uppercase tracking-wider border border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
               >
                 Upload
-              </button>
-              <button
-                type="button"
-                onClick={() => folderUploadInputRef.current?.click()}
-                className="px-1.5 py-0.5 text-[9px] uppercase tracking-wider border border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-              >
-                Folder
               </button>
               <button
                 type="button"
@@ -1430,6 +1464,41 @@ export function CodePanel() {
           ) : null}
         </div>
           ,
+          document.body
+        )
+        : null}
+
+      {canPortal && isUploadMenuOpen
+        ? createPortal(
+          <div
+            ref={uploadMenuRef}
+            className="fixed z-50 min-w-[120px] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[0_10px_24px_rgba(0,0,0,0.5)]"
+            style={{
+              left: uploadMenuPos.x,
+              top: uploadMenuPos.y,
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => {
+                setIsUploadMenuOpen(false);
+                fileUploadInputRef.current?.click();
+              }}
+              className="w-full text-left px-2 py-1.5 text-[10px] uppercase tracking-wider text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-light)]"
+            >
+              Files
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setIsUploadMenuOpen(false);
+                folderUploadInputRef.current?.click();
+              }}
+              className="w-full text-left px-2 py-1.5 text-[10px] uppercase tracking-wider text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-light)]"
+            >
+              Folder
+            </button>
+          </div>,
           document.body
         )
         : null}
