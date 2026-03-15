@@ -761,6 +761,7 @@ export async function POST(req: Request) {
             "edit_file",
             "todo_write",
             "set_engine",
+            "search_web",
           ] as const;
 
           const mutatingTools = new Set<string>([
@@ -1201,6 +1202,58 @@ export async function POST(req: Request) {
             label: engine === "threejs" ? "Three.js / WebGL" : engine === "phaser" ? "Phaser.js" : "HTML5 Canvas",
             reason: reason ?? null,
           }),
+        }),
+        search_web: tool({
+          description:
+            "Search the web for documentation, tutorials, or game dev references. Use only when uncertain about external knowledge.",
+          inputSchema: z.object({
+            query: z.string().min(1).max(200),
+            num_results: z.number().int().min(1).max(10).default(5),
+          }),
+          execute: async ({ query, num_results }) => {
+            try {
+              const apiKey = process.env.SERPAPI_API_KEY;
+              if (!apiKey) {
+                return { success: false, error: "SERPAPI_API_KEY is not set.", query };
+              }
+
+              const params = new URLSearchParams({
+                q: query,
+                api_key: apiKey,
+                engine: "google",
+                num: String(num_results),
+              });
+
+              const res = await fetch(`https://serpapi.com/search.json?${params.toString()}`);
+
+              if (res.status === 429) {
+                return {
+                  success: false,
+                  error: "Web search rate limit reached. Use your built-in knowledge instead.",
+                  query,
+                };
+              }
+
+              if (!res.ok) {
+                const text = await res.text();
+                return { success: false, error: `SerpAPI error (${res.status}): ${text.slice(0, 200)}`, query };
+              }
+
+              const data = (await res.json()) as {
+                organic_results?: Array<{ title?: string; link?: string; snippet?: string }>;
+              };
+
+              const results = (data.organic_results ?? []).map((r) => ({
+                title: r.title ?? "",
+                url: r.link ?? "",
+                snippet: r.snippet ?? "",
+              }));
+
+              return { success: true, query, count: results.length, results };
+            } catch (error) {
+              return { success: false, error: error instanceof Error ? error.message : "Web search failed", query };
+            }
+          },
         }),
       },
       providerOptions: {

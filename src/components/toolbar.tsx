@@ -20,6 +20,7 @@ interface ToolbarProps {
   onResetProject: () => void;
   onShareClick?: () => void;
   onPlayPathClick?: () => void;
+  onShowSplash?: () => void;
   engineLabel?: string;
   projectId?: string | null;
   revisionNumber?: number | null;
@@ -144,6 +145,7 @@ export function Toolbar({
   onResetProject,
   onShareClick,
   onPlayPathClick,
+  onShowSplash,
   engineLabel,
   projectId,
   revisionNumber,
@@ -187,7 +189,11 @@ export function Toolbar({
         background: "var(--color-surface)",
       }}
     >
-      <div className="px-4 flex items-center h-full border-r border-[var(--color-border)] gap-2">
+      <button
+        type="button"
+        onClick={onShowSplash}
+        className="px-4 flex items-center h-full border-r border-[var(--color-border)] gap-2 cursor-pointer bg-transparent hover:bg-[var(--color-surface-light)] transition-colors"
+      >
         <Image src="/axiom.png" alt="Axiom" width={20} height={20} className="object-contain" />
         <span className="text-[11px] text-[var(--color-accent)] font-bold tracking-[0.12em] uppercase">
           AXIOM
@@ -197,7 +203,7 @@ export function Toolbar({
             {engineLabel}
           </span>
         ) : null}
-      </div>
+      </button>
 
       <DropdownMenu
         label="Project"

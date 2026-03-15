@@ -69,7 +69,7 @@ function detectPublishedGameMultiplayer(html: string) {
   if (!multiplayer) {
     return {
       multiplayer: false,
-      multiplayerProvider: null as const,
+      multiplayerProvider: null as null,
       multiplayerRoomType: null as string | null,
     };
   }

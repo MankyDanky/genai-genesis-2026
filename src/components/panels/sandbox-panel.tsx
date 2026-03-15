@@ -57,6 +57,7 @@ function SandboxLoadingOverlay() {
 export function SandboxPanel() {
   const {
     currentCode,
+    streamingCode,
     addConsoleLog,
     clearConsoleLogs,
     audioTracks,
@@ -64,6 +65,7 @@ export function SandboxPanel() {
     runtimeEnv,
     gamePaused,
     restartCounter,
+    isGenerating,
     projectBusyAction,
     setInspectorMetrics,
     setCanvasInfo,
@@ -97,13 +99,15 @@ export function SandboxPanel() {
     [setInspectorMetrics, setCanvasInfo, setActiveInputs]
   );
 
+  const effectiveCode = streamingCode ?? currentCode;
+
   if (projectBusyAction === "load") {
     return <SandboxLoadingOverlay />;
   }
 
   return (
     <Sandbox
-      code={currentCode}
+      code={effectiveCode}
       onConsoleMessage={addConsoleLog}
       onReload={clearConsoleLogs}
       audioTracks={audioTracks}
@@ -111,6 +115,7 @@ export function SandboxPanel() {
       runtimeEnv={runtimeEnv}
       gamePaused={gamePaused}
       restartCounter={restartCounter}
+      isGenerating={isGenerating}
       onInspectorMessage={handleInspectorMessage}
     />
   );

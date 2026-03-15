@@ -4,8 +4,32 @@ import { useState, useCallback, useRef, useMemo, useEffect } from "react";
 import type { AudioTrack, GeneratedMesh } from "@/lib/game-forge-context";
 import type { RuntimeEnvMap } from "@/lib/runtime-env";
 
+const CODE_SYMBOLS = [
+  { char: "{", x: 8, size: 18, duration: 4.2, delay: 0 },
+  { char: "}", x: 92, size: 16, duration: 3.8, delay: 0.5 },
+  { char: "<", x: 15, size: 14, duration: 5.0, delay: 1.2 },
+  { char: ">", x: 78, size: 20, duration: 3.5, delay: 0.3 },
+  { char: "/", x: 45, size: 16, duration: 4.5, delay: 1.8 },
+  { char: ";", x: 62, size: 12, duration: 3.2, delay: 0.8 },
+  { char: "(", x: 25, size: 15, duration: 4.8, delay: 2.1 },
+  { char: ")", x: 55, size: 17, duration: 3.6, delay: 1.5 },
+  { char: "=", x: 35, size: 13, duration: 5.2, delay: 0.7 },
+  { char: ".", x: 70, size: 11, duration: 4.0, delay: 2.5 },
+  { char: "0", x: 18, size: 14, duration: 3.9, delay: 1.0 },
+  { char: "1", x: 82, size: 16, duration: 4.3, delay: 1.7 },
+  { char: "[]", x: 50, size: 12, duration: 5.5, delay: 0.2 },
+  { char: "=>", x: 30, size: 13, duration: 3.4, delay: 2.3 },
+  { char: "fn", x: 68, size: 15, duration: 4.7, delay: 0.9 },
+  { char: "if", x: 40, size: 14, duration: 3.7, delay: 1.4 },
+  { char: "&&", x: 85, size: 11, duration: 5.1, delay: 2.0 },
+  { char: "++", x: 12, size: 13, duration: 4.1, delay: 0.6 },
+  { char: "::", x: 58, size: 12, duration: 3.3, delay: 1.9 },
+  { char: "~", x: 75, size: 16, duration: 4.6, delay: 1.1 },
+];
+
 interface SandboxProps {
   code: string | null;
+  isGenerating?: boolean;
   audioTracks?: AudioTrack[];
   generatedMeshes?: GeneratedMesh[];
   runtimeEnv?: RuntimeEnvMap;
@@ -422,7 +446,7 @@ const EMPTY_AUDIO_TRACKS: AudioTrack[] = [];
 const EMPTY_MESHES: GeneratedMesh[] = [];
 const EMPTY_RUNTIME_ENV: RuntimeEnvMap = {};
 
-export function Sandbox({ code, audioTracks = EMPTY_AUDIO_TRACKS, generatedMeshes = EMPTY_MESHES, runtimeEnv = EMPTY_RUNTIME_ENV, gamePaused = false, restartCounter = 0, onConsoleMessage, onInspectorMessage, onReload }: SandboxProps) {
+export function Sandbox({ code, isGenerating = false, audioTracks = EMPTY_AUDIO_TRACKS, generatedMeshes = EMPTY_MESHES, runtimeEnv = EMPTY_RUNTIME_ENV, gamePaused = false, restartCounter = 0, onConsoleMessage, onInspectorMessage, onReload }: SandboxProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const iframe0Ref = useRef<HTMLIFrameElement>(null);
   const iframe1Ref = useRef<HTMLIFrameElement>(null);
@@ -633,6 +657,39 @@ export function Sandbox({ code, audioTracks = EMPTY_AUDIO_TRACKS, generatedMeshe
   const hasPendingMeshes = pendingMeshes.length > 0;
 
   if (!code) {
+    if (isGenerating) {
+      return (
+        <div className="relative flex h-full w-full items-center justify-center bg-[var(--color-bg)] overflow-hidden">
+          {CODE_SYMBOLS.map((sym, i) => (
+            <span
+              key={i}
+              className="absolute text-[var(--color-accent)] font-mono pointer-events-none select-none"
+              style={{
+                left: `${sym.x}%`,
+                bottom: 0,
+                fontSize: `${sym.size}px`,
+                opacity: 0,
+                animation: `codeFloat ${sym.duration}s linear ${sym.delay}s infinite`,
+              }}
+            >
+              {sym.char}
+            </span>
+          ))}
+          <div className="relative text-center space-y-3 z-10">
+            <p
+              className="text-[13px] text-[var(--color-accent)] uppercase tracking-[0.2em] font-bold"
+              style={{ animation: "pulseGlow 2s ease-in-out infinite" }}
+            >
+              Generating Game
+            </p>
+            <p className="text-[10px] text-[var(--color-text-muted)] opacity-60">
+              Building your experience...
+            </p>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="relative flex h-full w-full items-center justify-center bg-[var(--color-bg)] overflow-hidden">
         <div className="relative text-center animate-[fadeIn_0.4s_ease-out] space-y-3">

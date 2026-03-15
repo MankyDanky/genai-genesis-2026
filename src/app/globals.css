@@ -197,6 +197,7 @@ body {
 
 .game-forge-theme .dv-content-container {
     background: var(--color-bg);
+    overflow: hidden;
 }
 
 /* ── Chat markdown ── */
@@ -292,6 +293,23 @@ body {
 .chat-markdown th {
     background: var(--color-surface-light);
     color: var(--color-text);
+}
+
+/* ── Streaming cursor ── */
+.chat-markdown.is-streaming > *:last-child::after {
+    content: "";
+    display: inline-block;
+    width: 2px;
+    height: 1.1em;
+    background: var(--color-accent);
+    margin-left: 2px;
+    vertical-align: text-bottom;
+    animation: streamCursorBlink 0.8s step-end infinite;
+}
+
+@keyframes streamCursorBlink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.15; }
 }
 
 .composer-mentions {
@@ -459,7 +477,7 @@ body {
     display: grid;
     grid-template-rows: 0fr;
     overflow: hidden;
-    transition: grid-template-rows 0.2s ease;
+    transition: grid-template-rows 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .reasoning-content.is-open {
@@ -475,12 +493,12 @@ body {
     padding-left: 0;
     transform: translateY(-2px);
     transition:
-        opacity 0.18s ease,
-        transform 0.18s ease,
-        padding-top 0.2s ease,
-        padding-right 0.2s ease,
-        padding-bottom 0.2s ease,
-        padding-left 0.2s ease;
+        opacity 0.25s ease,
+        transform 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+        padding-top 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+        padding-right 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+        padding-bottom 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+        padding-left 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .reasoning-content.is-open .reasoning-content-inner {
@@ -504,7 +522,7 @@ body {
 .tool-collapsible {
     display: grid;
     grid-template-rows: 1fr;
-    transition: grid-template-rows 0.2s ease;
+    transition: grid-template-rows 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .tool-collapsible.is-collapsed {
@@ -514,7 +532,7 @@ body {
 .tool-collapsible-inner {
     min-height: 0;
     opacity: 1;
-    transition: opacity 0.18s ease;
+    transition: opacity 0.2s ease;
 }
 
 .tool-collapsible.is-collapsed .tool-collapsible-inner {
@@ -586,6 +604,32 @@ body {
 }
 
 /* ── Animations ── */
+@keyframes splashGridPulse {
+    0%, 100% {
+        opacity: 0.03;
+    }
+    50% {
+        opacity: 0.08;
+    }
+}
+
+@keyframes codeFloat {
+    0% {
+        transform: translateY(0);
+        opacity: 0;
+    }
+    10% {
+        opacity: 0.7;
+    }
+    90% {
+        opacity: 0.7;
+    }
+    100% {
+        transform: translateY(-100vh);
+        opacity: 0;
+    }
+}
+
 @keyframes cursorBlink {
     0% { opacity: 1; }
     50% { opacity: 0; }
@@ -595,11 +639,37 @@ body {
 @keyframes fadeIn {
     from {
         opacity: 0;
-        transform: translateY(4px);
+        transform: translateY(6px);
     }
     to {
         opacity: 1;
         transform: translateY(0);
+    }
+}
+
+/* Smoother entry for chat messages and tool cards */
+@keyframes messageSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+        filter: blur(1px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+        filter: blur(0px);
+    }
+}
+
+/* Tool card entry - slightly more subtle */
+@keyframes toolCardSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(4px) scale(0.995);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
     }
 }
 

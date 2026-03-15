@@ -93,6 +93,13 @@ export interface PendingFileWrite {
   content?: string;
 }
 
+export interface ChatTab {
+  id: string;
+  name: string;
+  sessionId: string;
+  messages: PersistedChatMessage[];
+}
+
 const DEFAULT_CONTROLS: GameControl[] = [
   { action: "Move", keys: "Arrow Keys / WASD" },
   { action: "Action", keys: "Space" },
@@ -101,6 +108,7 @@ const DEFAULT_CONTROLS: GameControl[] = [
 
 interface GameForgeContextValue {
   currentCode: string | null;
+  streamingCode: string | null;
   currentEngine: GameEngine;
   projectFiles: ProjectFile[];
   pendingFileWrites: PendingFileWrite[];
@@ -121,17 +129,22 @@ interface GameForgeContextValue {
   runtimeEnv: RuntimeEnvMap;
   chatMessages: PersistedChatMessage[];
   chatSessionId: string;
+  chatTabs: ChatTab[];
+  activeChatTabId: string;
   inspectorMetrics: InspectorMetrics;
   canvasInfo: CanvasInfo;
   activeInputs: string[];
+  isGenerating: boolean;
   gamePaused: boolean;
   restartCounter: number;
+  setIsGenerating: (v: boolean) => void;
   setInspectorMetrics: (metrics: InspectorMetrics) => void;
   setCanvasInfo: (info: CanvasInfo) => void;
   setActiveInputs: (inputs: string[]) => void;
   setGamePaused: (paused: boolean) => void;
   requestGameRestart: () => void;
   onCodeUpdate: (code: string, engine?: GameEngine) => void;
+  setStreamingCode: (code: string | null) => void;
   onProjectFilesUpdate: (files: ProjectFile[], engine?: GameEngine, deletePaths?: string[]) => void;
   patchProjectFiles: (files: ProjectFile[], engine?: GameEngine) => void;
   patchProjectFileContent: (
@@ -179,6 +192,10 @@ interface GameForgeContextValue {
   setRuntimeEnvVar: (key: string, value: string) => void;
   removeRuntimeEnvVar: (key: string) => void;
   setChatMessages: (messages: PersistedChatMessage[]) => void;
+  createChatTab: () => string;
+  deleteChatTab: (id: string) => void;
+  switchChatTab: (id: string) => void;
+  renameChatTab: (id: string, name: string) => void;
   saveProjectRevision: () => Promise<{
     projectId: string;
     revisionNumber: number;
@@ -388,6 +405,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
   const cached = autosaveRef.current;
 
   const [currentCode, setCurrentCode] = useState<string | null>(cached?.currentCode ?? null);
+  const [streamingCode, setStreamingCodeState] = useState<string | null>(null);
   const [currentEngine, setCurrentEngine] = useState<GameEngine>(cached?.currentEngine ?? "canvas2d");
   const [projectFiles, setProjectFiles] = useState<ProjectFile[]>(cached?.projectFiles ?? []);
   const [pendingFileWrites, setPendingFileWritesState] = useState<PendingFileWrite[]>([]);
@@ -412,11 +430,24 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     ...getDefaultRuntimeEnv(),
     ...(cached?.runtimeEnv ?? {}),
   }));
-  const [chatMessages, setChatMessagesState] = useState<PersistedChatMessage[]>(cached?.chatMessages ?? []);
-  const [chatSessionId, setChatSessionId] = useState<string>(() => cached?.chatSessionId ?? createChatSessionId());
+  const [chatTabs, setChatTabs] = useState<ChatTab[]>(() => {
+    const initialSessionId = cached?.chatSessionId ?? createChatSessionId();
+    return [{
+      id: initialSessionId,
+      name: "Chat 1",
+      sessionId: initialSessionId,
+      messages: cached?.chatMessages ?? [],
+    }];
+  });
+  const [activeChatTabId, setActiveChatTabId] = useState<string>(() => chatTabs[0].id);
+
+  const activeTab = chatTabs.find((tab) => tab.id === activeChatTabId) ?? chatTabs[0];
+  const chatMessages = activeTab.messages;
+  const chatSessionId = activeTab.sessionId;
   const [inspectorMetrics, setInspectorMetricsState] = useState<InspectorMetrics>({ fps: 0, frameTime: 0, fpsMin: 0, fpsMax: 0 });
   const [canvasInfo, setCanvasInfoState] = useState<CanvasInfo>({ width: 0, height: 0, contextType: "none", pixelRatio: 1 });
   const [activeInputs, setActiveInputsState] = useState<string[]>([]);
+  const [isGenerating, setIsGeneratingState] = useState(false);
   const [gamePaused, setGamePausedState] = useState(false);
   const [restartCounter, setRestartCounter] = useState(0);
 
@@ -465,8 +496,13 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     activeCodePath,
   ]);
 
+  const setStreamingCode = useCallback((code: string | null) => {
+    setStreamingCodeState(code);
+  }, []);
+
   const onCodeUpdate = useCallback((code: string, engine?: GameEngine) => {
     setCurrentCode(code);
+    setStreamingCodeState(null);
     setProjectFiles([{ path: "index.html", content: code, kind: "html" }]);
     setConsoleLogs([]);
     setInspectorMetricsState({ fps: 0, frameTime: 0, fpsMin: 0, fpsMax: 0 });
@@ -807,7 +843,53 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
 
   const setChatMessages = useCallback((messages: PersistedChatMessage[]) => {
     const normalized = normalizeChatMessages(messages);
-    setChatMessagesState((prev) => (areChatMessagesEqual(prev, normalized) ? prev : normalized));
+    setChatTabs((prev) =>
+      prev.map((tab) =>
+        tab.id === activeChatTabId && !areChatMessagesEqual(tab.messages, normalized)
+          ? { ...tab, messages: normalized }
+          : tab
+      )
+    );
+  }, [activeChatTabId]);
+
+  const createChatTab = useCallback(() => {
+    const sessionId = createChatSessionId();
+    const tabCount = chatTabs.length;
+    const newTab: ChatTab = {
+      id: sessionId,
+      name: `Chat ${tabCount + 1}`,
+      sessionId,
+      messages: [],
+    };
+    setChatTabs((prev) => [...prev, newTab]);
+    setActiveChatTabId(sessionId);
+    return sessionId;
+  }, [chatTabs.length]);
+
+  const deleteChatTab = useCallback((id: string) => {
+    setChatTabs((prev) => {
+      if (prev.length <= 1) return prev;
+      const idx = prev.findIndex((tab) => tab.id === id);
+      if (idx < 0) return prev;
+      const next = prev.filter((tab) => tab.id !== id);
+      if (id === activeChatTabId) {
+        const newIdx = Math.min(idx, next.length - 1);
+        setActiveChatTabId(next[newIdx].id);
+      }
+      return next;
+    });
+  }, [activeChatTabId]);
+
+  const switchChatTab = useCallback((id: string) => {
+    setActiveChatTabId(id);
+  }, []);
+
+  const renameChatTab = useCallback((id: string, name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setChatTabs((prev) =>
+      prev.map((tab) => (tab.id === id ? { ...tab, name: trimmed } : tab))
+    );
   }, []);
 
   const setInspectorMetrics = useCallback((metrics: InspectorMetrics) => {
@@ -822,6 +904,10 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     setActiveInputsState(inputs);
   }, []);
 
+  const setIsGenerating = useCallback((v: boolean) => {
+    setIsGeneratingState(v);
+  }, []);
+
   const setGamePaused = useCallback((paused: boolean) => {
     setGamePausedState(paused);
   }, []);
@@ -833,6 +919,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
 
   const resetWorkspace = useCallback(() => {
     setCurrentCode(null);
+    setStreamingCodeState(null);
     setCurrentEngine("canvas2d");
     setProjectFiles([]);
     setPendingFileWritesState([]);
@@ -854,11 +941,13 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     setProjectError(null);
     setProjectBusyAction(null);
     setRuntimeEnv(getDefaultRuntimeEnv());
-    setChatMessagesState([]);
-    setChatSessionId(createChatSessionId());
+    const freshSessionId = createChatSessionId();
+    setChatTabs([{ id: freshSessionId, name: "Chat 1", sessionId: freshSessionId, messages: [] }]);
+    setActiveChatTabId(freshSessionId);
     setInspectorMetricsState({ fps: 0, frameTime: 0, fpsMin: 0, fpsMax: 0 });
     setCanvasInfoState({ width: 0, height: 0, contextType: "none", pixelRatio: 1 });
     setActiveInputsState([]);
+    setIsGeneratingState(false);
     setGamePausedState(false);
     setRestartCounter(0);
     clearAutosave();
@@ -907,8 +996,10 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     setCurrentRevisionNumber(snapshot.revisionNumber);
     setLastPublishedGameId(null);
     setLastPublishedPlayPath(null);
-    setChatMessagesState(normalizeChatMessages(snapshot.chatMessages));
-    setChatSessionId(createChatSessionId());
+    const loadedSessionId = createChatSessionId();
+    const loadedMessages = normalizeChatMessages(snapshot.chatMessages);
+    setChatTabs([{ id: loadedSessionId, name: "Chat 1", sessionId: loadedSessionId, messages: loadedMessages }]);
+    setActiveChatTabId(loadedSessionId);
   }, []);
 
   const buildSnapshotPayload = useCallback(() => ({
@@ -1034,8 +1125,9 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     // Clear stale state immediately so the UI shows a fresh workspace while loading
     setCurrentCode(null);
     setProjectFiles([]);
-    setChatMessagesState([]);
-    setChatSessionId(createChatSessionId());
+    const clearSessionId = createChatSessionId();
+    setChatTabs([{ id: clearSessionId, name: "Chat 1", sessionId: clearSessionId, messages: [] }]);
+    setActiveChatTabId(clearSessionId);
 
     try {
       const project = await parseJsonResponse<{
@@ -1088,6 +1180,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
   const value = useMemo(
     () => ({
       currentCode,
+      streamingCode,
       currentEngine,
       projectFiles,
       pendingFileWrites,
@@ -1108,7 +1201,10 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       runtimeEnv,
       chatMessages,
       chatSessionId,
+      chatTabs,
+      activeChatTabId,
       onCodeUpdate,
+      setStreamingCode,
       onProjectFilesUpdate,
       patchProjectFiles,
       patchProjectFileContent,
@@ -1141,6 +1237,10 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       setRuntimeEnvVar,
       removeRuntimeEnvVar,
       setChatMessages,
+      createChatTab,
+      deleteChatTab,
+      switchChatTab,
+      renameChatTab,
       saveProjectRevision,
       publishProject,
       loadProject,
@@ -1149,8 +1249,10 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       inspectorMetrics,
       canvasInfo,
       activeInputs,
+      isGenerating,
       gamePaused,
       restartCounter,
+      setIsGenerating,
       setInspectorMetrics,
       setCanvasInfo,
       setActiveInputs,
@@ -1159,6 +1261,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     }),
     [
       currentCode,
+      streamingCode,
       currentEngine,
       projectFiles,
       pendingFileWrites,
@@ -1179,7 +1282,10 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       runtimeEnv,
       chatMessages,
       chatSessionId,
+      chatTabs,
+      activeChatTabId,
       onCodeUpdate,
+      setStreamingCode,
       onProjectFilesUpdate,
       patchProjectFiles,
       patchProjectFileContent,
@@ -1212,6 +1318,10 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       setRuntimeEnvVar,
       removeRuntimeEnvVar,
       setChatMessages,
+      createChatTab,
+      deleteChatTab,
+      switchChatTab,
+      renameChatTab,
       saveProjectRevision,
       publishProject,
       loadProject,
@@ -1220,8 +1330,10 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       inspectorMetrics,
       canvasInfo,
       activeInputs,
+      isGenerating,
       gamePaused,
       restartCounter,
+      setIsGenerating,
       setInspectorMetrics,
       setCanvasInfo,
       setActiveInputs,

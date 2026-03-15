@@ -366,7 +366,8 @@ function AudioEditPopup({
 }
 
 export function AudioPanel() {
-  const { audioTracks, onRepromptAudio } = useGameForge();
+  const { audioTracks } = useGameForge();
+  const onRepromptAudio = (_message: string) => { /* TODO: implement reprompt */ };
   const [activeTrackId, setActiveTrackId] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [selectedTrack, setSelectedTrack] = useState<AudioTrack | null>(null);

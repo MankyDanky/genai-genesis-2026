@@ -9,12 +9,15 @@ import remarkGfm from "remark-gfm";
 import { Mention, MentionsInput } from "react-mentions";
 import type { GameEngine } from "@/lib/game-engine";
 import type { ProjectFile } from "@/lib/project-files";
-import type { PlanningTodo, ConsoleLogEntry, GeneratedImage, PendingFileWrite, GameControl, AudioTrack, GeneratedMesh } from "@/lib/game-forge-context";
+import type { PlanningTodo, ConsoleLogEntry, GeneratedImage, PendingFileWrite, GameControl, AudioTrack, GeneratedMesh, ChatTab } from "@/lib/game-forge-context";
 import { getGeneratedAudioId } from "@/lib/generated-audio";
+import { useWaveformData, AudioWaveform, useAudioPlayback } from "@/components/audio-waveform";
 import type { PersistedChatMessage } from "@/lib/db/schema";
 import type { RuntimeEnvMap } from "@/lib/runtime-env";
 import { TemplateGallery } from "@/components/template-gallery";
 import type { GameTemplate } from "@/lib/game-templates";
+import { playCompletionChime } from "@/lib/completion-chime";
+import { useVoiceInput } from "@/hooks/use-voice-input";
 
 interface ChatPanelProps {
   currentCode: string | null;
@@ -51,7 +54,13 @@ interface ChatPanelProps {
   setControls: (controls: GameControl[]) => void;
   chatMessages: PersistedChatMessage[];
   chatSessionId: string;
+  chatTabs: ChatTab[];
+  activeChatTabId: string;
   setChatMessages: (messages: PersistedChatMessage[]) => void;
+  createChatTab: () => string;
+  deleteChatTab: (id: string) => void;
+  switchChatTab: (id: string) => void;
+  renameChatTab: (id: string, name: string) => void;
   focusCodeFile: (path: string) => void;
   focusConsolePanel: () => void;
   focusImagesPanel: () => void;
@@ -61,6 +70,8 @@ interface ChatPanelProps {
   ) => void;
   clearPendingFileWrites: (paths?: string[]) => void;
   updateRuntimeEnv: (set: RuntimeEnvMap, unset?: string[]) => void;
+  setStreamingCode: (code: string | null) => void;
+  setIsGenerating: (v: boolean) => void;
 }
 
 type ComposerMode = "agent" | "plan" | "debug" | "ask";
@@ -313,7 +324,7 @@ function StreamingIndicator({ phase, timer, message }: {
   return (
     <div
       className="mx-1 my-2 border border-[var(--color-border-light)] bg-[var(--color-surface)] overflow-hidden"
-      style={{ animation: "fadeIn 0.3s ease-out" }}
+      style={{ animation: "toolCardSlideIn 0.35s cubic-bezier(0.16, 1, 0.3, 1)" }}
     >
       <div className="h-[2px] w-full bg-[var(--color-accent)] opacity-40" />
 
@@ -361,64 +372,20 @@ function GeneratedAudioPlayer({
   audioKind: "sfx" | "music";
   audioTrack?: AudioTrack;
 }) {
-  const [isPlaying, setIsPlaying] = useState(false);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
   const status = audioTrack?.status ?? "pending";
   const dataUrl = audioTrack?.dataUrl ?? null;
   const errorText = audioTrack?.error ?? null;
-  const duration = audioTrack?.duration ?? null;
+  const trackDuration = audioTrack?.duration ?? null;
 
-  const stopPlayback = useCallback(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    audio.pause();
-    audio.onplay = null;
-    audio.onpause = null;
-    audio.onended = null;
-    audioRef.current = null;
-    setIsPlaying(false);
-  }, []);
-
-  useEffect(() => {
-    return () => stopPlayback();
-  }, [stopPlayback]);
-
-  const togglePlayback = useCallback(() => {
-    if (status !== "ready" || !dataUrl) return;
-    const current = audioRef.current;
-    if (current) {
-      if (current.paused) {
-        current.play().then(() => setIsPlaying(true)).catch(() => {});
-      } else {
-        current.pause();
-        setIsPlaying(false);
-      }
-      return;
-    }
-
-    const next = new Audio(dataUrl);
-    next.onplay = () => setIsPlaying(true);
-    next.onpause = () => setIsPlaying(false);
-    next.onended = () => {
-      setIsPlaying(false);
-      audioRef.current = null;
-    };
-    audioRef.current = next;
-    next.play().then(() => setIsPlaying(true)).catch(() => {});
-  }, [dataUrl, status]);
+  const barCount = 40;
+  const peaks = useWaveformData(status === "ready" ? dataUrl : null, barCount);
+  const { isPlaying, progress, togglePlayback, seek } = useAudioPlayback(dataUrl);
 
   const formatDuration = (seconds: number) => {
     const m = Math.floor(seconds / 60);
     const s = Math.round(seconds % 60);
     return m > 0 ? `${m}:${String(s).padStart(2, "0")}` : `0:${String(s).padStart(2, "0")}`;
   };
-
-  const barCount = 20;
-  const barHeights = useMemo(
-    () => Array.from({ length: barCount }, () => 0.2 + Math.random() * 0.8),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [audioName]
-  );
 
   return (
     <div className="px-3 py-2.5 border-t border-[var(--color-border)] bg-[var(--color-bg)]">
@@ -455,24 +422,29 @@ function GeneratedAudioPlayer({
             )}
           </button>
 
-          <div className="flex items-end gap-[2px] h-5 flex-1 min-w-0">
-            {barHeights.map((h, i) => (
-              <div
-                key={i}
-                className={`audio-wave-bar flex-1 rounded-[1px] ${isPlaying ? "audio-wave-bar--active" : ""}`}
-                style={{
-                  height: `${h * 100}%`,
-                  backgroundColor: "var(--color-accent)",
-                  opacity: isPlaying ? 1 : 0.35,
-                  animationDelay: isPlaying ? `${i * 0.05}s` : undefined,
-                }}
-              />
-            ))}
+          <div className="flex-1 min-w-0">
+            {peaks ? (
+              <AudioWaveform peaks={peaks} progress={progress} onSeek={seek} height={20} />
+            ) : (
+              <div className="flex items-center gap-px h-5">
+                {Array.from({ length: barCount }, (_, i) => (
+                  <div
+                    key={i}
+                    className="flex-1 rounded-sm"
+                    style={{
+                      height: 4,
+                      minWidth: 1,
+                      backgroundColor: "var(--color-border-light)",
+                    }}
+                  />
+                ))}
+              </div>
+            )}
           </div>
 
-          {duration != null && (
+          {trackDuration != null && (
             <span className="flex-shrink-0 text-[10px] text-[var(--color-text-muted)] font-mono tabular-nums">
-              {formatDuration(duration)}
+              {formatDuration(trackDuration)}
             </span>
           )}
         </div>
@@ -611,7 +583,7 @@ function ToolCallCard({ part, audioTrack }: {
   return (
     <div
       className="mx-1 my-2 border border-[var(--color-border-light)] bg-[var(--color-surface)] overflow-hidden"
-      style={{ animation: "fadeIn 0.2s ease-out" }}
+      style={{ animation: "toolCardSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1)" }}
     >
       <button
         type="button"
@@ -631,7 +603,7 @@ function ToolCallCard({ part, audioTrack }: {
       </button>
       <div className="px-3 py-2 flex items-center gap-2 min-h-[34px]">
         <span className="w-[10px] h-[10px] flex items-center justify-center shrink-0" style={{ color: statusColor }}>
-          {state === "input-streaming" || !["input-available", "output-available", "output-error"].includes(state) ? (
+          {state === "input-streaming" || !["input-available", "output-available", "output-error"].includes(state ?? "") ? (
             <svg width="10" height="10" viewBox="0 0 10 10" className="animate-spin">
               <circle cx="5" cy="5" r="4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeDasharray="18" strokeLinecap="round" />
             </svg>
@@ -669,13 +641,63 @@ function ToolCallCard({ part, audioTrack }: {
   );
 }
 
+function StreamingMarkdown({ text, isStreaming }: { text: string; isStreaming: boolean }) {
+  const displayedLenRef = useRef(isStreaming ? 0 : text.length);
+  const targetTextRef = useRef(text);
+  const rafRef = useRef<number>(0);
+  const [displayedText, setDisplayedText] = useState(isStreaming ? "" : text);
+
+  useEffect(() => {
+    targetTextRef.current = text;
+    if (!isStreaming) {
+      cancelAnimationFrame(rafRef.current);
+      displayedLenRef.current = text.length;
+      setDisplayedText(text);
+    }
+  }, [text, isStreaming]);
+
+  useEffect(() => {
+    if (!isStreaming) return;
+
+    let lastTime = 0;
+    const tick = (now: number) => {
+      const dt = lastTime ? now - lastTime : 16;
+      lastTime = now;
+
+      const target = targetTextRef.current;
+      const currentLen = displayedLenRef.current;
+
+      if (currentLen < target.length) {
+        const remaining = target.length - currentLen;
+        // Smooth easing: advance proportionally to dt (~60fps baseline)
+        // Use a gentler fraction (0.12) so text doesn't lurch forward
+        const speed = Math.max(2, Math.ceil(remaining * 0.12 * (dt / 16)));
+        const nextLen = Math.min(currentLen + speed, target.length);
+        displayedLenRef.current = nextLen;
+        setDisplayedText(target.slice(0, nextLen));
+      }
+
+      rafRef.current = requestAnimationFrame(tick);
+    };
+
+    rafRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [isStreaming]);
+
+  return (
+    <div className={`chat-markdown text-[12px] text-[var(--color-text)] leading-relaxed${isStreaming ? " is-streaming" : ""}`}>
+      <Markdown remarkPlugins={[remarkGfm]}>{displayedText}</Markdown>
+    </div>
+  );
+}
+
 function ReasoningBlock({ text, isStreaming }: { text: string; isStreaming: boolean }) {
   const [isOpen, setIsOpen] = useState(isStreaming);
 
   return (
     <div
       className="reasoning-block mx-1 my-2 border border-[var(--color-border-light)] bg-[var(--color-surface)] overflow-hidden group"
-      style={{ animation: "fadeIn 0.2s ease-out" }}
+      style={{ animation: "toolCardSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1)" }}
     >
       <button
         type="button"
@@ -737,7 +759,13 @@ export function ChatPanel({
   setControls,
   chatMessages,
   chatSessionId,
+  chatTabs,
+  activeChatTabId,
   setChatMessages,
+  createChatTab,
+  deleteChatTab,
+  switchChatTab,
+  renameChatTab,
   focusCodeFile,
   focusConsolePanel,
   focusImagesPanel,
@@ -745,6 +773,8 @@ export function ChatPanel({
   setPendingFileWrites,
   clearPendingFileWrites,
   updateRuntimeEnv,
+  setStreamingCode,
+  setIsGenerating,
 }: ChatPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef(true);
@@ -762,6 +792,7 @@ export function ChatPanel({
   const audioPollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const meshPollInFlightRef = useRef(false);
   const meshPollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const streamingDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hydratedMessageIdsRef = useRef<Set<string>>(new Set());
   const initialChatMessagesRef = useRef(chatMessages);
   const [input, setInput] = useState("");
@@ -775,8 +806,26 @@ export function ChatPanel({
   const [isPlanCollapsed, setIsPlanCollapsed] = useState(false);
   const [dragTodoId, setDragTodoId] = useState<string | null>(null);
   const [planDropTarget, setPlanDropTarget] = useState<{ id: string; position: "before" | "after" } | null>(null);
+  const [typingTemplate, setTypingTemplate] = useState<GameTemplate | null>(null);
+  const typingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const typingIndexRef = useRef<number>(0);
+  const prevPhaseRef = useRef<GenerationPhase>("done");
   const planningMode = composerMode === "plan";
   const canPortal = typeof document !== "undefined";
+
+  const { isSupported: voiceSupported, isListening, toggleListening } = useVoiceInput({
+    onTranscript: useCallback((text: string) => {
+      setInput((prev) => (prev ? prev + " " + text : text));
+    }, []),
+  });
+
+  useEffect(() => {
+    return () => {
+      if (streamingDebounceRef.current) {
+        clearTimeout(streamingDebounceRef.current);
+      }
+    };
+  }, []);
 
   const mentionItems = useMemo(
     () => {
@@ -996,7 +1045,7 @@ export function ChatPanel({
           addAudioTrack({
             id: result.id,
             name: result.name ?? existing?.name ?? result.id,
-            type: result.kind ?? existing?.type ?? "sfx",
+            type: (result.kind === "music" || result.kind === "sfx" ? result.kind : null) ?? existing?.type ?? "sfx",
             description: existing?.description ?? "",
             dataUrl: nextDataUrl,
             status: nextStatus,
@@ -1288,6 +1337,7 @@ export function ChatPanel({
 
   const { messages, sendMessage, status, error } = useChat({
     id: chatSessionId,
+    // @ts-expect-error -- initialMessages exists at runtime but is missing from the SDK type definitions
     initialMessages: chatMessages as UIMessage[],
     experimental_throttle: 50,
     transport,
@@ -1322,7 +1372,23 @@ export function ChatPanel({
 
         if (partType === "tool-update_sandbox") {
           const toolPart = part as { state: string; input?: { code?: string } };
-          if (toolPart.state === "output-available") {
+          if (toolPart.state === "input-streaming") {
+            if (toolPart.input?.code) {
+              if (streamingDebounceRef.current) {
+                clearTimeout(streamingDebounceRef.current);
+              }
+              const partialCode = toolPart.input.code;
+              streamingDebounceRef.current = setTimeout(() => {
+                setStreamingCode(partialCode);
+                streamingDebounceRef.current = null;
+              }, 500);
+            }
+          } else if (toolPart.state === "output-available") {
+            if (streamingDebounceRef.current) {
+              clearTimeout(streamingDebounceRef.current);
+              streamingDebounceRef.current = null;
+            }
+            setStreamingCode(null);
             if (toolPart.input?.code) {
               const key = `${message.id}:${partType}:${toolPart.state}`;
               if (processedToolPayloadRef.current.get(key) === toolPart.input.code) continue;
@@ -1512,7 +1578,7 @@ export function ChatPanel({
             .filter((file) => !existingPaths.has(file.path))
             .map((file) => ({
               path: file.path,
-              content: file.content,
+              content: file.content as string,
               kind:
                 file.kind === "script"
                   ? "script"
@@ -1683,6 +1749,7 @@ export function ChatPanel({
     setPendingFileWrites,
     clearPendingFileWrites,
     updateRuntimeEnv,
+    setStreamingCode,
     selectedEngine,
     projectFiles,
   ]);
@@ -1699,15 +1766,37 @@ export function ChatPanel({
     return () => el.removeEventListener("scroll", handleScroll);
   }, []);
 
+  // Continuous lerp-based auto-scroll: smoothly follows the bottom without
+  // the native smooth-scroll "restart" jank on rapid re-renders.
   useEffect(() => {
     if (!isNearBottomRef.current) return;
+
+    const el = scrollRef.current;
+    if (!el) return;
+
     cancelAnimationFrame(scrollRafRef.current);
-    scrollRafRef.current = requestAnimationFrame(() => {
-      scrollRef.current?.scrollTo({
-        top: scrollRef.current.scrollHeight,
-        behavior: "smooth",
-      });
-    });
+
+    let lastTime = 0;
+    const lerpScroll = (now: number) => {
+      const dt = lastTime ? Math.min(now - lastTime, 50) : 16;
+      lastTime = now;
+
+      const target = el.scrollHeight - el.clientHeight;
+      const current = el.scrollTop;
+      const diff = target - current;
+
+      if (Math.abs(diff) < 1) {
+        el.scrollTop = target;
+        return;
+      }
+
+      // Exponential ease-out: converge at ~12% per frame (~60fps baseline)
+      const step = diff * Math.min(1, 1 - Math.pow(0.0001, dt / 16));
+      el.scrollTop = current + step;
+      scrollRafRef.current = requestAnimationFrame(lerpScroll);
+    };
+
+    scrollRafRef.current = requestAnimationFrame(lerpScroll);
   }, [messages, status]);
 
   useEffect(() => {
@@ -1725,7 +1814,47 @@ export function ChatPanel({
   const quirkyMessage = useRotatingMessage(phase, isLoading);
   useComposerAutoHeight(textareaRef, input);
 
+  useEffect(() => {
+    if (phase === "done" && prevPhaseRef.current !== "done") playCompletionChime();
+    prevPhaseRef.current = phase;
+  }, [phase]);
+
+  useEffect(() => { setIsGenerating(isLoading); }, [isLoading, setIsGenerating]);
+
+  useEffect(() => {
+    if (!typingTemplate) return;
+    const prompt = typingTemplate.starterPrompt;
+    typingIndexRef.current = 0;
+    typingIntervalRef.current = setInterval(() => {
+      typingIndexRef.current += 1;
+      const idx = typingIndexRef.current;
+      if (idx >= prompt.length) {
+        if (typingIntervalRef.current) { clearInterval(typingIntervalRef.current); typingIntervalRef.current = null; }
+        const tmpl = typingTemplate;
+        setTypingTemplate(null);
+        setInput("");
+        clearPendingFileWrites();
+        sendMessage({ text: tmpl.starterPrompt }, { body: { currentCode, currentProjectFiles: projectFiles, planningTodos, mentionedFiles: [], audioTracks: audioTracks.map((t) => ({ id: t.id, name: t.name, type: t.type, description: t.description, status: t.status, duration: t.duration, error: t.error ?? null })), consoleLogs: [], generatedImages, generatedMeshes: generatedMeshes.map((m) => ({ id: m.id, name: m.name, prompt: m.prompt, status: m.status, glbUrl: m.glbUrl })), runtimeEnv, composerMode, planningMode, gameEngine: tmpl.engine, templateSkills: tmpl.skills } });
+      } else {
+        setInput(prompt.slice(0, idx));
+      }
+    }, 35);
+    return () => { if (typingIntervalRef.current) { clearInterval(typingIntervalRef.current); typingIntervalRef.current = null; } };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [typingTemplate]);
+
   const doSubmit = () => {
+    if (typingTemplate) {
+      const tmpl = typingTemplate;
+      if (typingIntervalRef.current) { clearInterval(typingIntervalRef.current); typingIntervalRef.current = null; }
+      setTypingTemplate(null);
+      setInput("");
+      setSelectedEngine(tmpl.engine);
+      onEngineUpdate(tmpl.engine);
+      clearPendingFileWrites();
+      sendMessage({ text: tmpl.starterPrompt }, { body: { currentCode, currentProjectFiles: projectFiles, planningTodos, mentionedFiles: [], audioTracks: audioTracks.map((t) => ({ id: t.id, name: t.name, type: t.type, description: t.description, status: t.status, duration: t.duration, error: t.error ?? null })), consoleLogs: [], generatedImages, generatedMeshes: generatedMeshes.map((m) => ({ id: m.id, name: m.name, prompt: m.prompt, status: m.status, glbUrl: m.glbUrl })), runtimeEnv, composerMode, planningMode, gameEngine: tmpl.engine, templateSkills: tmpl.skills } });
+      return;
+    }
     const visibleText = textareaRef.current?.value ?? input;
     const text = visibleText.trim();
     if (!text || isLoading) return;
@@ -1774,6 +1903,11 @@ export function ChatPanel({
         }))
       : [];
     clearPendingFileWrites();
+    setStreamingCode(null);
+    if (streamingDebounceRef.current) {
+      clearTimeout(streamingDebounceRef.current);
+      streamingDebounceRef.current = null;
+    }
     setInput("");
     sendMessage({
       text,
@@ -1817,7 +1951,7 @@ export function ChatPanel({
     doSubmit();
   };
 
-  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement> | KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       const cursor = textareaRef.current?.selectionStart ?? input.length;
       if (isMentionQueryActive(input, cursor)) return;
@@ -1885,58 +2019,10 @@ export function ChatPanel({
       if (isLoading) return;
       setSelectedEngine(template.engine);
       onEngineUpdate(template.engine);
-      clearPendingFileWrites();
-      sendMessage(
-        { text: template.starterPrompt },
-        {
-          body: {
-            currentCode,
-            currentProjectFiles: projectFiles,
-            planningTodos,
-            mentionedFiles: [],
-            audioTracks: audioTracks.map((track) => ({
-              id: track.id,
-              name: track.name,
-              type: track.type,
-              description: track.description,
-              status: track.status,
-              duration: track.duration,
-              error: track.error ?? null,
-            })),
-            consoleLogs: [],
-            generatedImages,
-            generatedMeshes: generatedMeshes.map((mesh) => ({
-              id: mesh.id,
-              name: mesh.name,
-              prompt: mesh.prompt,
-              status: mesh.status,
-              glbUrl: mesh.glbUrl,
-            })),
-            runtimeEnv,
-            composerMode,
-            planningMode,
-            gameEngine: template.engine,
-            templateSkills: template.skills,
-          },
-        }
-      );
+      setInput("");
+      setTypingTemplate(template);
     },
-    [
-      isLoading,
-      sendMessage,
-      currentCode,
-      projectFiles,
-      planningTodos,
-      audioTracks,
-      generatedImages,
-      generatedMeshes,
-      runtimeEnv,
-      composerMode,
-      planningMode,
-      setSelectedEngine,
-      onEngineUpdate,
-      clearPendingFileWrites,
-    ]
+    [isLoading, setSelectedEngine, onEngineUpdate]
   );
 
   const handleUpdateTodo = (todoId: string, updates: Partial<PlanningTodo>) => {
@@ -2004,13 +2090,92 @@ export function ChatPanel({
   };
 
   const isEmpty = messages.length === 0;
-  const canSend = input.trim().length > 0 && !isLoading;
+  const canSend = (input.trim().length > 0 || !!typingTemplate) && !isLoading;
+
+  const [editingTabId, setEditingTabId] = useState<string | null>(null);
+  const [editingTabName, setEditingTabName] = useState("");
 
   return (
     <div className="flex h-full flex-col bg-[var(--color-bg)]">
+      <div className="shrink-0 flex items-center border-t border-b border-[var(--color-border)] bg-[var(--color-surface)] overflow-x-auto">
+        {chatTabs.map((tab) => (
+          <div
+            key={tab.id}
+            className={`group flex items-center gap-1 px-2.5 py-1.5 border-r border-[var(--color-border)] cursor-pointer min-w-0 ${
+              tab.id === activeChatTabId
+                ? "bg-[var(--color-bg)] text-[var(--color-text)]"
+                : "text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-light)]"
+            }`}
+            onClick={() => {
+              if (tab.id !== activeChatTabId) switchChatTab(tab.id);
+            }}
+            onDoubleClick={() => {
+              setEditingTabId(tab.id);
+              setEditingTabName(tab.name);
+            }}
+          >
+            {editingTabId === tab.id ? (
+              <input
+                autoFocus
+                value={editingTabName}
+                onChange={(e) => setEditingTabName(e.target.value)}
+                onBlur={() => {
+                  renameChatTab(tab.id, editingTabName);
+                  setEditingTabId(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    renameChatTab(tab.id, editingTabName);
+                    setEditingTabId(null);
+                  }
+                  if (e.key === "Escape") setEditingTabId(null);
+                }}
+                onClick={(e) => e.stopPropagation()}
+                className="bg-[var(--color-surface)] border border-[var(--color-accent)] text-[10px] text-[var(--color-text)] px-1 py-0 w-[70px] outline-none"
+              />
+            ) : (
+              <span className="flex items-center gap-1.5 min-w-0">
+                {isLoading && tab.id === activeChatTabId && (
+                  <span
+                    className="shrink-0 w-[6px] h-[6px] rounded-full bg-[var(--color-accent)]"
+                    style={{ animation: "pulseGlow 1.5s ease-in-out infinite" }}
+                  />
+                )}
+                <span className="text-[10px] uppercase tracking-[0.08em] font-semibold truncate max-w-[80px]">
+                  {tab.name}
+                </span>
+              </span>
+            )}
+            {chatTabs.length > 1 && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  deleteChatTab(tab.id);
+                }}
+                className="opacity-0 group-hover:opacity-100 text-[9px] text-[var(--color-text-muted)] hover:text-[var(--color-danger)] ml-0.5 shrink-0"
+                aria-label={`Close ${tab.name}`}
+              >
+                x
+              </button>
+            )}
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={() => createChatTab()}
+          className="shrink-0 px-2 py-1.5 text-[11px] text-[var(--color-text-muted)] hover:text-[var(--color-accent)] hover:bg-[var(--color-surface-light)]"
+          aria-label="New chat"
+          title="New chat"
+        >
+          +
+        </button>
+      </div>
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
         {isEmpty ? (
-          <TemplateGallery onSelect={handleTemplateSelect} />
+          <div style={{ opacity: typingTemplate ? 0 : 1, transition: "opacity 0.3s", pointerEvents: typingTemplate ? "none" : "auto" }}>
+            <TemplateGallery onSelect={handleTemplateSelect} />
+          </div>
         ) : (
           <>
             {messages.map((message, messageIndex) => {
@@ -2034,7 +2199,7 @@ export function ChatPanel({
               const isUser = message.role === "user";
 
               return (
-                <div key={message.id} style={{ animation: "fadeIn 0.2s ease-out" }}>
+                <div key={message.id} style={{ animation: "messageSlideIn 0.35s cubic-bezier(0.16, 1, 0.3, 1)" }}>
                   {isUser ? (
                     <div className="flex items-start gap-2">
                       <div className="shrink-0 w-5 h-5 rounded-full bg-[var(--color-accent)] flex items-center justify-center mt-0.5">
@@ -2060,9 +2225,13 @@ export function ChatPanel({
                         {(() => {
                           const isStreamingMessage = isLoading && messageIndex === messages.length - 1;
                           const textBlock = textContent ? (
-                            <div key="text-block" className="chat-markdown text-[12px] text-[var(--color-text)] leading-relaxed">
-                              <Markdown remarkPlugins={[remarkGfm]}>{textContent}</Markdown>
-                            </div>
+                            isStreamingMessage ? (
+                              <StreamingMarkdown key="text-block" text={textContent} isStreaming />
+                            ) : (
+                              <div key="text-block" className="chat-markdown text-[12px] text-[var(--color-text)] leading-relaxed">
+                                <Markdown remarkPlugins={[remarkGfm]}>{textContent}</Markdown>
+                              </div>
+                            )
                           ) : null;
                           const toolBlocks = toolParts.map((part, i) => {
                             const typedPart = part as {
@@ -2387,13 +2556,37 @@ export function ChatPanel({
                       @{highlightedDisplay}
                     </span>
                     <span className="composer-mentions-row-meta">
-                      {typeof (entry as { meta?: unknown }).meta === "string" ? (entry as { meta: string }).meta : "resource"}
+                      {typeof (entry as unknown as { meta?: unknown }).meta === "string" ? (entry as unknown as { meta: string }).meta : "resource"}
                     </span>
                   </span>
                 )}
               />
             </MentionsInput>
           </div>
+          {voiceSupported && (
+            <button
+              type="button"
+              onClick={toggleListening}
+              disabled={isLoading}
+              className="gf-btn-chip shrink-0 w-[34px] self-stretch flex items-center justify-center border border-[var(--color-border-light)] bg-[var(--color-surface)] disabled:opacity-20 disabled:cursor-default"
+              style={{ color: isListening ? "var(--color-danger)" : "var(--color-text-muted)" }}
+              aria-label={isListening ? "Stop listening" : "Voice input"}
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                style={isListening ? { animation: "pulseGlow 1.5s ease-in-out infinite" } : undefined}
+              >
+                <rect x="5" y="1" width="6" height="9" rx="3" />
+                <path d="M3 7a5 5 0 0 0 10 0" />
+                <path d="M8 12v3" />
+              </svg>
+            </button>
+          )}
           <button
             type="submit"
             disabled={!canSend}

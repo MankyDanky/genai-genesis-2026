@@ -128,7 +128,7 @@ function buildDefaultLayout(api: DockviewApi) {
   sandboxPanel?.api?.setActive?.();
 }
 
-export function DockLayout() {
+export function DockLayout({ onShowSplash }: { onShowSplash?: () => void }) {
   const apiRef = useRef<DockviewApi | null>(null);
   const lastFocusRequestIdRef = useRef<number>(0);
   const {
@@ -354,6 +354,7 @@ export function DockLayout() {
         onResetProject={handleResetProject}
         onShareClick={() => setShowShareModal(true)}
         onPlayPathClick={() => setShowShareModal(true)}
+        onShowSplash={onShowSplash}
         engineLabel={getEngineLabel(currentEngine)}
         projectId={projectId}
         revisionNumber={currentRevisionNumber}
