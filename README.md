@@ -18,7 +18,7 @@ Built for [GenAI Genesis 2026](https://genai-genesis-2026.devpost.com).
 - **20+ AI tools** -- Claude Sonnet orchestrates file management, sprite generation, music composition, sound design, 3D modeling, and game logic through a unified MCP tool server
 - **Everything is real-time** -- watch your game build itself in a live sandbox as you chat
 - **Multiplayer out of the box** -- tell the AI to "add multiplayer" and it scaffolds PartyKit networking automatically
-- **AI-generated assets** -- sprites and textures via fal.ai, sound effects and music via ElevenLabs, 3D meshes via fal.ai + Three.js
+- **AI-generated assets** -- sprites and textures via Gemini Nano Banana, sound effects and music via ElevenLabs, 3D meshes via fal.ai + Three.js
 - **Web search built in** -- the AI can look up docs, tutorials, and references mid-conversation via SerpAPI
 - **Explore and remix** -- browse community games, fork them, and publish your own with one click
 
@@ -28,7 +28,7 @@ Built for [GenAI Genesis 2026](https://genai-genesis-2026.devpost.com).
 |-------|------------|
 | Framework | Next.js 16, React 19, TypeScript |
 | AI | Claude Sonnet (Anthropic), Vercel AI SDK v6, MCP tool server (20+ tools) |
-| Image generation | fal.ai |
+| Image generation | Gemini (Nano Banana) |
 | Audio generation | ElevenLabs |
 | 3D | Three.js, fal.ai mesh generation |
 | Multiplayer | PartyKit |
