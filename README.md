@@ -1,29 +1,74 @@
-# GameForge AI
+# Game Forge
 
-An AI-powered game creation tool. Chat with an AI agent to create browser-based games in real-time.
+AI-powered browser game generator with a live sandbox preview.
 
-## Setup
+## Commands
 
-1. Install dependencies:
-   ```bash
-   npm install
-   ```
+```bash
+npm run dev
+npm run build
+npm run lint
+```
 
-2. Create a `.env` file with your Anthropic API key:
-   ```
-   ANTHROPIC_API_KEY=your-key-here
-   ```
+## Environment
 
-3. Start the dev server:
-   ```bash
-   npm run dev
-   ```
+Create `.env.local` (or copy from `.env.example`) with:
 
-4. Open the app and start chatting — ask the AI to create any game!
+```bash
+ANTHROPIC_API_KEY=your-api-key
+XAI_API_KEY=your-api-key
+XAI_MODEL=grok-2-1212
+ELEVENLABS_API_KEY=your-api-key
+FAL_KEY=your-api-key
+GEMINI_API_KEY=your-api-key
+NEXT_PUBLIC_PARTYKIT_HOST=localhost:1999
+NEXT_PUBLIC_PARTYKIT_PROTOCOL=ws
+```
 
-## Features
+- `ANTHROPIC_API_KEY` powers chat/tool orchestration.
+- `XAI_API_KEY` enables Grok AI model selection in Composer.
+- `XAI_MODEL` sets the Grok model id (default `grok-2-1212`).
+- `ELEVENLABS_API_KEY` powers sound effect + music generation.
+- `FAL_KEY` powers image generation via fal.ai.
+- `GEMINI_API_KEY` powers image editing/background workflows.
+- `NEXT_PUBLIC_PARTYKIT_HOST` configures realtime multiplayer room host for generated games.
+- `NEXT_PUBLIC_PARTYKIT_PROTOCOL` sets websocket protocol (`ws` for local, `wss` for production).
 
-- AI agent with MCP-style tool calling (create, update, clear games)
-- Sandboxed game rendering in an iframe
-- Dockable, resizable panels (react-mosaic)
-- Neo-brutalist UI design
+## What It Does
+
+- Chat-driven game generation via `/api/chat`
+- Streams model responses + tool calls
+- Updates sandbox iframe with live multi-file project output
+- Supports engine mode selection in Composer:
+  - `HTML5 Canvas`
+  - `Three.js`
+- Supports generated image and audio assets integrated into sandbox runtime
+
+## Flow
+
+```text
+Prompt -> ChatPanel -> /api/chat
+  -> model chooses tools (read/edit/update/todo/image/audio)
+  -> ChatPanel reads tool parts from stream
+  -> project files + state update in GameForgeContext
+  -> sandbox iframe re-renders with new srcDoc
+```
+
+## Multiplayer (PartyKit) Quick Start
+
+1. Start Next.js app:
+
+```bash
+npm run dev
+```
+
+2. Start PartyKit room server (separate terminal):
+
+```bash
+pnpm dlx partykit dev
+```
+
+3. Ask the composer for a multiplayer game. The agent now has a `multiplayer_partykit_scaffold` tool and can scaffold:
+- `src/net/party-session.js` client helper
+- `partykit/room.js` room server
+- `partykit.json` config
