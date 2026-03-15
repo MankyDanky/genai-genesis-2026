@@ -51,18 +51,14 @@ function normalizeMongoError(error: unknown): Error {
 }
 
 function getClient(uri: string): MongoClient {
-  if (process.env.NODE_ENV === "development") {
-    if (!globalThis._mongoClient || globalThis._mongoActiveUri !== uri) {
-      if (globalThis._mongoClient && globalThis._mongoActiveUri !== uri) {
-        void globalThis._mongoClient.close().catch(() => {});
-      }
-      globalThis._mongoClient = new MongoClient(uri, options);
-      globalThis._mongoActiveUri = uri;
+  if (!globalThis._mongoClient || globalThis._mongoActiveUri !== uri) {
+    if (globalThis._mongoClient && globalThis._mongoActiveUri !== uri) {
+      void globalThis._mongoClient.close().catch(() => {});
     }
-    return globalThis._mongoClient;
+    globalThis._mongoClient = new MongoClient(uri, options);
+    globalThis._mongoActiveUri = uri;
   }
-
-  return new MongoClient(uri, options);
+  return globalThis._mongoClient;
 }
 
 export function getDb() {
