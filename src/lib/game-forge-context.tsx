@@ -265,6 +265,16 @@ function areChatMessagesEqual(a: PersistedChatMessage[], b: PersistedChatMessage
   return true;
 }
 
+function areRuntimeEnvMapsEqual(a: RuntimeEnvMap, b: RuntimeEnvMap): boolean {
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  for (const key of aKeys) {
+    if (a[key] !== b[key]) return false;
+  }
+  return true;
+}
+
 async function parseJsonResponse<T>(response: Response): Promise<T> {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -602,14 +612,17 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
     setRuntimeEnv((prev) => {
       const next = { ...prev, ...normalizedSet };
       for (const key of normalizedUnset) delete next[key];
-      return next;
+      return areRuntimeEnvMapsEqual(prev, next) ? prev : next;
     });
   }, []);
 
   const setRuntimeEnvVar = useCallback((key: string, value: string) => {
     const normalizedKey = key.trim();
     if (!normalizedKey) return;
-    setRuntimeEnv((prev) => ({ ...prev, [normalizedKey]: value }));
+    setRuntimeEnv((prev) => {
+      if (prev[normalizedKey] === value) return prev;
+      return { ...prev, [normalizedKey]: value };
+    });
   }, []);
 
   const removeRuntimeEnvVar = useCallback((key: string) => {
@@ -619,7 +632,7 @@ export function GameForgeProvider({ children }: { children: ReactNode }) {
       if (!(normalizedKey in prev)) return prev;
       const next = { ...prev };
       delete next[normalizedKey];
-      return next;
+      return areRuntimeEnvMapsEqual(prev, next) ? prev : next;
     });
   }, []);
 
