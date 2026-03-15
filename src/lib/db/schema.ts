@@ -121,7 +121,16 @@ const GameControlSchema = z.object({
 });
 
 const GeneratedImageSchema = z.object({
-  url: z.string().url(),
+  url: z
+    .string()
+    .min(1)
+    .refine(
+      (value) =>
+        value.startsWith("/api/images/") ||
+        /^https?:\/\//i.test(value) ||
+        /^data:image\//i.test(value),
+      "Invalid image URL"
+    ),
   prompt: z.string().min(1).max(5000),
 });
 
