@@ -522,7 +522,7 @@ async function removeBg(imageBuffer: Buffer, mimeType: string): Promise<{ data: 
   return { data: b64, mimeType: "image/png" };
 }
 
-async function generateImage(prompt: string, origin: string, shouldRemoveBg: boolean): Promise<{ url: string }> {
+async function generateImage(prompt: string, shouldRemoveBg: boolean): Promise<{ url: string }> {
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new Error("GEMINI_API_KEY is not set");
 
@@ -556,7 +556,7 @@ async function generateImage(prompt: string, origin: string, shouldRemoveBg: boo
       }
 
       const id = await storeImage(mimeType, b64);
-      return { url: `${origin}/api/images/${id}` };
+      return { url: `/api/images/${id}` };
     }
   }
 
@@ -852,8 +852,7 @@ export async function POST(req: Request) {
           }),
           execute: async ({ prompt, removeBackground: shouldRemoveBg }) => {
             try {
-              const origin = new URL(req.url).origin;
-              const { url } = await generateImage(prompt, origin, shouldRemoveBg);
+              const { url } = await generateImage(prompt, shouldRemoveBg);
               return { success: true, url, prompt };
             } catch (error) {
               return {

@@ -1328,16 +1328,26 @@ export function ChatPanel({
         if (partType === "tool-generate_image") {
           const toolPart = part as {
             state: string;
-            output?: { success?: boolean; url?: string; prompt?: string };
+            input?: { prompt?: string };
+            output?: { success?: boolean; url?: string; imageUrl?: string; image_url?: string; prompt?: string };
           };
           if (toolPart.state !== "output-available") continue;
-          if (!toolPart.output?.success || !toolPart.output.url) continue;
-          const key = `${message.id}:${partType}:${toolPart.output.url}`;
+          const output = toolPart.output ?? {};
+          const imageUrl =
+            typeof output.url === "string"
+              ? output.url
+              : typeof output.imageUrl === "string"
+                ? output.imageUrl
+                : typeof output.image_url === "string"
+                  ? output.image_url
+                  : null;
+          if (!imageUrl) continue;
+          const key = `${message.id}:${partType}:${imageUrl}`;
           if (processedToolPayloadRef.current.get(key) === "1") continue;
           processedToolPayloadRef.current.set(key, "1");
           addImage({
-            url: toolPart.output.url,
-            prompt: toolPart.output.prompt ?? "Generated image",
+            url: imageUrl,
+            prompt: output.prompt ?? toolPart.input?.prompt ?? "Generated image",
           });
         }
 
