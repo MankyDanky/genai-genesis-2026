@@ -50,6 +50,16 @@ type ContextMenuState = {
   target: ContextTarget;
 };
 
+const BINARY_IMPORT_EXTENSIONS = new Set([
+  ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".avif",
+  ".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac",
+  ".mp4", ".webm", ".mov",
+  ".zip", ".gz", ".rar", ".7z",
+  ".woff", ".woff2", ".ttf", ".otf",
+  ".glb", ".gltf", ".bin", ".fbx", ".obj", ".stl",
+  ".pdf", ".exe", ".dmg", ".wasm",
+]);
+
 function dirname(path: string): string {
   const idx = path.lastIndexOf("/");
   return idx >= 0 ? path.slice(0, idx) : "";
@@ -62,6 +72,28 @@ function basename(path: string): string {
 
 function normalizeUserPath(name: string): string {
   return name.trim().replace(/^\.\//, "").replace(/\\/g, "/").replace(/^\/+/, "");
+}
+
+function inferImportedKind(path: string): ProjectFile["kind"] {
+  const lower = path.toLowerCase();
+  if (lower.endsWith(".html") || lower.endsWith(".htm")) return "html";
+  if (lower.endsWith(".css")) return "style";
+  if (lower.endsWith(".js") || lower.endsWith(".mjs") || lower.endsWith(".cjs") || lower.endsWith(".ts") || lower.endsWith(".tsx") || lower.endsWith(".jsx")) {
+    return "script";
+  }
+  if (lower.endsWith(".json") || lower.endsWith(".toml") || lower.endsWith(".yaml") || lower.endsWith(".yml")) {
+    return "config";
+  }
+  if (lower.startsWith("assets/")) return "asset";
+  return "other";
+}
+
+function isLikelyBinaryPath(path: string): boolean {
+  const lower = path.toLowerCase();
+  for (const ext of BINARY_IMPORT_EXTENSIONS) {
+    if (lower.endsWith(ext)) return true;
+  }
+  return false;
 }
 
 function getPrismLanguage(path: string): string {
@@ -459,6 +491,7 @@ export function CodePanel() {
     activeCodePath,
     setActiveCodePath,
     updateProjectFile,
+    patchProjectFiles,
     deleteProjectFile,
     streamingCode,
     currentCode,
@@ -501,6 +534,8 @@ export function CodePanel() {
 
   const explorerRef = useRef<HTMLDivElement>(null);
   const createInputRef = useRef<HTMLInputElement>(null);
+  const folderUploadInputRef = useRef<HTMLInputElement>(null);
+  const dragDepthRef = useRef(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const lastCreateSignatureRef = useRef<string>("");
@@ -514,6 +549,7 @@ export function CodePanel() {
   const [createState, setCreateState] = useState<CreateState | null>(null);
   const [draggedFilePath, setDraggedFilePath] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [isFolderDropActive, setIsFolderDropActive] = useState(false);
   const canPortal = typeof document !== "undefined";
 
   const tree = useMemo(
@@ -822,6 +858,117 @@ export function CodePanel() {
     [codeFiles, deleteProjectFile, expandParents, setActiveCodePath, updateProjectFile]
   );
 
+  const importFolderEntries = useCallback(async (entries: Array<{ path: string; file: File }>) => {
+    if (entries.length === 0) return;
+
+    const importedFiles: ProjectFile[] = [];
+    for (const entry of entries) {
+      const normalizedPath = normalizeUserPath(entry.path);
+      if (!normalizedPath || normalizedPath.endsWith("/")) continue;
+      if (isLikelyBinaryPath(normalizedPath)) continue;
+
+      try {
+        const content = await entry.file.text();
+        importedFiles.push({
+          path: normalizedPath,
+          content,
+          kind: inferImportedKind(normalizedPath),
+        });
+      } catch {
+        // Skip unreadable entries.
+      }
+    }
+
+    if (importedFiles.length === 0) return;
+    patchProjectFiles(importedFiles);
+
+    const folderPaths = new Set<string>();
+    for (const file of importedFiles) {
+      const parts = file.path.split("/").filter(Boolean);
+      let current = "";
+      for (let i = 0; i < parts.length - 1; i += 1) {
+        current = current ? `${current}/${parts[i]}` : (parts[i] ?? "");
+        if (current) folderPaths.add(current);
+      }
+    }
+
+    if (folderPaths.size > 0) {
+      setVirtualFolders((prev) => Array.from(new Set([...prev, ...folderPaths])));
+    }
+
+    const firstPath = importedFiles[0]?.path ?? null;
+    if (firstPath) {
+      setActiveCodePath(firstPath);
+      setSelectedFolderPath(dirname(firstPath) || null);
+      expandParents(firstPath);
+    }
+  }, [expandParents, patchProjectFiles, setActiveCodePath]);
+
+  const handleFolderInputChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    if (files.length === 0) return;
+    const entries = files.map((file) => {
+      const withRelative = file as File & { webkitRelativePath?: string };
+      return {
+        path: withRelative.webkitRelativePath && withRelative.webkitRelativePath.length > 0
+          ? withRelative.webkitRelativePath
+          : file.name,
+        file,
+      };
+    });
+    await importFolderEntries(entries);
+    e.target.value = "";
+  }, [importFolderEntries]);
+
+  const handleDragEnter = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    if (!e.dataTransfer?.types?.includes("Files")) return;
+    e.preventDefault();
+    dragDepthRef.current += 1;
+    setIsFolderDropActive(true);
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    if (!e.dataTransfer?.types?.includes("Files")) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    if (!isFolderDropActive) setIsFolderDropActive(true);
+  }, [isFolderDropActive]);
+
+  const handleDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    if (!e.dataTransfer?.types?.includes("Files")) return;
+    e.preventDefault();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) {
+      setIsFolderDropActive(false);
+    }
+  }, []);
+
+  const handleDrop = useCallback(async (e: React.DragEvent<HTMLDivElement>) => {
+    if (!e.dataTransfer?.files?.length) return;
+    e.preventDefault();
+    dragDepthRef.current = 0;
+    setIsFolderDropActive(false);
+
+    const files = Array.from(e.dataTransfer.files);
+    const entries = files.map((file) => {
+      const withRelative = file as File & { webkitRelativePath?: string };
+      return {
+        path: withRelative.webkitRelativePath && withRelative.webkitRelativePath.length > 0
+          ? withRelative.webkitRelativePath
+          : file.name,
+        file,
+      };
+    });
+    await importFolderEntries(entries);
+  }, [importFolderEntries]);
+
+  useEffect(() => {
+    const input = folderUploadInputRef.current as (HTMLInputElement & { webkitdirectory?: boolean; directory?: boolean }) | null;
+    if (!input) return;
+    input.webkitdirectory = true;
+    input.directory = true;
+  }, []);
+
   const openContextMenu = (e: React.MouseEvent, target: ContextTarget) => {
     e.preventDefault();
     if (target.kind === "file") {
@@ -845,7 +992,11 @@ export function CodePanel() {
       <div
         ref={explorerRef}
         style={{ width: sidebarWidth }}
-        className="border-r border-[var(--color-border)] overflow-y-auto py-1"
+        className="relative border-r border-[var(--color-border)] overflow-y-auto py-1"
+        onDragEnter={handleDragEnter}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
         onContextMenu={(e) => {
           if (e.target === explorerRef.current) {
             openContextMenu(e, { kind: "root" });
@@ -856,6 +1007,20 @@ export function CodePanel() {
           <div className="flex items-center justify-between gap-2">
             <span className="text-[9px] uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Explorer</span>
             <div className="flex gap-1">
+              <input
+                ref={folderUploadInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={handleFolderInputChange}
+              />
+              <button
+                type="button"
+                onClick={() => folderUploadInputRef.current?.click()}
+                className="px-1.5 py-0.5 text-[9px] uppercase tracking-wider border border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+              >
+                Upload
+              </button>
               <button
                 type="button"
                 onClick={() => startCreate("file")}
@@ -873,6 +1038,14 @@ export function CodePanel() {
             </div>
           </div>
         </div>
+
+        {isFolderDropActive ? (
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center border-2 border-dashed border-[var(--color-accent)] bg-[var(--color-accent-glow)]/20">
+            <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--color-accent)]">
+              Drop folder to import files
+            </div>
+          </div>
+        ) : null}
 
         {tree.length === 0 && !createState ? (
           <div className="relative flex h-[80%] w-full items-center justify-center overflow-hidden px-3">
