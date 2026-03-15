@@ -196,7 +196,7 @@ function ExploreCard({ game }: { game: ExploreGameItem }) {
       <iframe
         title={`${game.title} preview`}
         srcDoc={buildFittedPreviewSrcDoc(code)}
-        sandbox="allow-scripts"
+        sandbox="allow-scripts allow-pointer-lock"
         className="h-full w-full border-none pointer-events-none"
       />
     );

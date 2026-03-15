@@ -56,8 +56,7 @@ export async function POST(req: Request) {
       if (part.inlineData) {
         const { mimeType, data: b64 } = part.inlineData;
         const newId = await storeImage(mimeType, b64);
-        const origin = new URL(req.url).origin;
-        const url = `${origin}/api/images/${newId}`;
+        const url = `/api/images/${newId}`;
         console.log("[GEMINI] Edited image stored, id:", newId);
         return Response.json({ success: true, url, prompt });
       }

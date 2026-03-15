@@ -166,7 +166,20 @@ function ShareBar({
   );
 }
 
-function buildInstrumentedSrcDoc(code: string): string {
+function normalizeApiUrls(html: string): string {
+  return html.replace(
+    /https?:\/\/[^/"'\s]+\/(api\/(?:images|sound-files|meshes)\/)/g,
+    "/$1",
+  );
+}
+
+function buildInstrumentedSrcDoc(code: string, baseOrigin?: string): string {
+  const normalizedCode = normalizeApiUrls(code);
+
+  const baseTag = baseOrigin && !/<base\b/i.test(normalizedCode)
+    ? `<base href="${baseOrigin}/">`
+    : "";
+
   const bridge = `<script>(function(){\n  var SESSION = "${Date.now()}-${Math.random().toString(36).slice(2)}";\n  function safe(v){\n    if (typeof v === "string") return v;\n    try { return JSON.stringify(v); } catch (_e) { return String(v); }\n  }\n  function send(level,args,source){\n    try{\n      parent.postMessage({\n        __gameForgeConsole: true,\n        session: SESSION,\n        level: level,\n        source: source || "console",\n        args: Array.isArray(args) ? args.map(safe) : [safe(args)]\n      }, "*");\n    }catch(_err){}\n  }\n  ["log","info","warn","error"].forEach(function(level){\n    var orig = console[level];\n    console[level] = function(){\n      var args = Array.prototype.slice.call(arguments);\n      send(level,args,"console");\n      return orig.apply(console,args);\n    };\n  });\n  window.addEventListener("error", function(e){\n    send("error", [e.message || "Unknown error", e.filename || "", String(e.lineno || 0) + ":" + String(e.colno || 0)], "error");\n  });\n  window.addEventListener("unhandledrejection", function(e){\n    var reason = e.reason && e.reason.message ? e.reason.message : e.reason;\n    send("error", ["Unhandled promise rejection", safe(reason)], "unhandledrejection");\n  });\n})();<\/script>`;
 
   const fpsBridge = `<script>(function(){
@@ -251,15 +264,15 @@ function buildInstrumentedSrcDoc(code: string): string {
   });
 })();<\/script>`;
 
-  const allBridges = `${bridge}${fpsBridge}${screenshotBridge}${pauseBridge}`;
+  const allBridges = `${baseTag}${bridge}${fpsBridge}${screenshotBridge}${pauseBridge}`;
 
-  if (/<head[^>]*>/i.test(code)) {
-    return code.replace(/<head([^>]*)>/i, `<head$1>${allBridges}`);
+  if (/<head[^>]*>/i.test(normalizedCode)) {
+    return normalizedCode.replace(/<head([^>]*)>/i, `<head$1>${allBridges}`);
   }
-  if (/<body[^>]*>/i.test(code)) {
-    return code.replace(/<body([^>]*)>/i, `<body$1>${allBridges}`);
+  if (/<body[^>]*>/i.test(normalizedCode)) {
+    return normalizedCode.replace(/<body([^>]*)>/i, `<body$1>${allBridges}`);
   }
-  return `${allBridges}${code}`;
+  return `${allBridges}${normalizedCode}`;
 }
 
 const SOUND_BRIDGE_SCRIPT = `<script>
@@ -342,7 +355,8 @@ export function Sandbox({
   const [reloadKey, setReloadKey] = useState(0);
   const srcDoc = useMemo(() => {
     if (!code) return null;
-    const withConsole = buildInstrumentedSrcDoc(code);
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    const withConsole = buildInstrumentedSrcDoc(code, origin);
     return injectSoundBridge(withConsole, audioTracks, generatedMeshes);
   }, [audioTracks, code, generatedMeshes]);
 
@@ -459,7 +473,7 @@ export function Sandbox({
             No Game Loaded
           </p>
           <p className="text-[10px] text-[var(--color-text-muted)] opacity-60">
-            Use the Composer to generate a game
+            Use the Agent to generate a game
           </p>
         </div>
       </div>
@@ -473,7 +487,7 @@ export function Sandbox({
         ref={iframeRef}
         key={`${code}:${combinedReloadKey}`}
         srcDoc={srcDoc}
-        sandbox="allow-scripts"
+        sandbox="allow-scripts allow-pointer-lock"
         title="Game Preview"
         className="h-full w-full border-none"
       />

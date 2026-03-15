@@ -11,9 +11,7 @@ export async function POST(req: Request) {
     const buffer = Buffer.from(await file.arrayBuffer());
     const base64 = buffer.toString("base64");
     const id = await storeImage(file.type, base64);
-
-    const origin = new URL(req.url).origin;
-    const url = `${origin}/api/images/${id}`;
+    const url = `/api/images/${id}`;
 
     return Response.json({ success: true, url });
   } catch (err) {

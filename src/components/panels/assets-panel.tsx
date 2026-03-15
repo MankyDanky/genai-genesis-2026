@@ -81,7 +81,7 @@ export function AssetsPanel() {
               />
             ) : (
               <div className="flex-1 flex items-center justify-center text-[10px] text-[var(--color-text-muted)] uppercase p-4 text-center">
-                Binary asset selected. Replace by asking Composer to update this file.
+                Binary asset selected. Replace by asking the Agent to update this file.
               </div>
             )}
           </>

@@ -213,6 +213,17 @@ async function buildRevisionArtifacts(
   return { compiledHtml, chatMessages };
 }
 
+function stripOriginFromApiUrl(url: string): string {
+  return url.replace(/^https?:\/\/[^/]+(?=\/api\/(?:images|sound-files|meshes)\/)/, "");
+}
+
+function normalizeApiUrlsInContent(content: string): string {
+  return content.replace(
+    /https?:\/\/[^/"'\s]+\/(api\/(?:images|sound-files|meshes)\/)/g,
+    "/$1",
+  );
+}
+
 async function hydrateRevision(revision: ProjectRevisionDocument) {
   const [compiledHtml, rawChatMessages] = await Promise.all([
     resolveTextArtifact(revision.compiledHtml),
@@ -225,13 +236,19 @@ async function hydrateRevision(revision: ProjectRevisionDocument) {
     revisionNumber: revision.revisionNumber,
     title: revision.title,
     engine: revision.engine,
-    projectFiles: revision.projectFiles,
+    projectFiles: revision.projectFiles.map((file) => ({
+      ...file,
+      content: normalizeApiUrlsInContent(file.content),
+    })),
     controls: revision.controls,
     planningTodos: revision.planningTodos,
-    generatedImages: revision.generatedImages,
+    generatedImages: revision.generatedImages.map((img) => ({
+      ...img,
+      url: stripOriginFromApiUrl(img.url),
+    })),
     generatedMeshes: revision.generatedMeshes ?? [],
     audioTracks: revision.audioTracks,
-    currentCode: compiledHtml,
+    currentCode: normalizeApiUrlsInContent(compiledHtml),
     chatMessages: (JSON.parse(rawChatMessages || "[]") as PersistedChatMessage[]),
     createdAt: revision.createdAt,
   };
@@ -505,16 +522,24 @@ export async function forkPublishedGame(gameId: string | ObjectId) {
       .findOne({ _id: publishedDoc.revisionId });
 
     if (revision) {
-      const compiledHtml = await resolveTextArtifact(revision.compiledHtml);
+      const compiledHtml = normalizeApiUrlsInContent(
+        await resolveTextArtifact(revision.compiledHtml),
+      );
 
       const snapshot: SaveProjectSnapshotRequest = {
         title,
         engine: revision.engine,
         currentCode: compiledHtml,
-        projectFiles: revision.projectFiles,
+        projectFiles: revision.projectFiles.map((file) => ({
+          ...file,
+          content: normalizeApiUrlsInContent(file.content),
+        })),
         controls: revision.controls,
         planningTodos: [],
-        generatedImages: revision.generatedImages,
+        generatedImages: revision.generatedImages.map((img) => ({
+          ...img,
+          url: stripOriginFromApiUrl(img.url),
+        })),
         generatedMeshes: revision.generatedMeshes ?? [],
         audioTracks: revision.audioTracks,
         chatMessages: [],

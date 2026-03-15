@@ -45,7 +45,7 @@ interface PanelDef {
 const ALL_PANELS: PanelDef[] = [
   { id: "sandbox", component: "sandbox", title: "Game View" },
   { id: "audio", component: "audio", title: "Audio" },
-  { id: "composer", component: "composer", title: "Composer" },
+  { id: "composer", component: "composer", title: "Agent" },
   { id: "inspector", component: "inspector", title: "Inspector" },
   { id: "code", component: "code", title: "Code" },
   { id: "console", component: "console", title: "Console" },
@@ -66,7 +66,7 @@ function buildDefaultLayout(api: DockviewApi) {
   api.addPanel({
     id: "composer",
     component: "composer",
-    title: "Composer",
+    title: "Agent",
     position: { referencePanel: "sandbox", direction: "left" },
     initialWidth: w * 0.22,
   });

@@ -94,7 +94,7 @@ export function GamePlayer({ code, title, gameId }: GamePlayerProps) {
       {/* Game iframe */}
       <iframe
         srcDoc={code}
-        sandbox="allow-scripts"
+        sandbox="allow-scripts allow-pointer-lock"
         title={title}
         className="flex-1 w-full border-none"
       />

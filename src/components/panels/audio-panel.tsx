@@ -252,7 +252,7 @@ function AudioEditPopup({
 
     const message = `Regenerate the ${track.type} "${track.name}". Current sound: "${track.description}". Changes: ${text}. Use the same name to replace it.`;
     onReprompt(message);
-    showToast(`Regenerating "${track.name}" — check the Composer`, "success");
+    showToast(`Regenerating "${track.name}" — check the Agent`, "success");
     onClose();
   };
 

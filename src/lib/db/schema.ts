@@ -115,7 +115,7 @@ const GameControlSchema = z.object({
 });
 
 const GeneratedImageSchema = z.object({
-  url: z.string().url(),
+  url: z.string().min(1),
   prompt: z.string().min(1).max(5000),
 });
 
