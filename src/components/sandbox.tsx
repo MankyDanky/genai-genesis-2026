@@ -740,7 +740,7 @@ export function Sandbox({ code, isGenerating = false, audioTracks = EMPTY_AUDIO_
       <iframe
         ref={iframe0Ref}
         srcDoc={iframe0SrcDoc ?? undefined}
-        sandbox="allow-scripts allow-pointer-lock"
+        sandbox="allow-scripts allow-pointer-lock allow-same-origin"
         title="Game Preview"
         className="border-none"
         style={activeIndex === 0 ? visibleStyle : hiddenStyle}
@@ -749,7 +749,7 @@ export function Sandbox({ code, isGenerating = false, audioTracks = EMPTY_AUDIO_
       <iframe
         ref={iframe1Ref}
         srcDoc={iframe1SrcDoc ?? undefined}
-        sandbox="allow-scripts allow-pointer-lock"
+        sandbox="allow-scripts allow-pointer-lock allow-same-origin"
         title="Game Preview (staging)"
         className="border-none"
         style={activeIndex === 1 ? visibleStyle : hiddenStyle}
